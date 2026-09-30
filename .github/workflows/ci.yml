@@ -56,13 +56,13 @@ jobs:
         run: |
           xcodebuild -project ios/FleetLink.xcodeproj \
                      -scheme FleetLinkClip \
-                     -destination "generic/platform=iOS Simulator" \
+                     -destination "generic/platform=iOS" \
                      CODE_SIGNING_ALLOWED=NO \
                      build
       - name: Build Main App
         run: |
           xcodebuild -project ios/FleetLink.xcodeproj \
                      -scheme FleetLink \
-                     -destination "generic/platform=iOS Simulator" \
+                     -destination "generic/platform=iOS" \
                      CODE_SIGNING_ALLOWED=NO \
                      build
