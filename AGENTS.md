@@ -26,6 +26,7 @@ FleetLink provides temporary, high-performance artifact, file, and directory hos
   fleet-share file.md                                      # Default .online
   fleet-share --domain https://fleetlink.app file.md        # Secondary .app
   fleet-share --password "SecretPass" file.md               # Password-protected
+  fleet-share --preview cover.png ./dist                    # Social sharing preview card
   fleet-share ./dist                                       # Directory / batch
   fleet-share --slug my-batch updated-file.md              # Update existing share
   ```
@@ -34,7 +35,7 @@ FleetLink provides temporary, high-performance artifact, file, and directory hos
   # Upload to default domain (fleetlink.online)
   curl -X PUT "https://fleetlink.online/<batch-or-slug>/<filename>" \
        -T path/to/file \
-       -H "X-Fleet-Auth: $FLEET_AUTH_SECRET" \
+       -H "X-Fleet-Auth: $FLEET_ADMIN_SECRET" \
        -H "Content-Type: text/markdown; charset=utf-8" \
        -H "X-Expire-Days: 3"
 

@@ -9,6 +9,7 @@ Temporary, high-performance artifact and build hosting for AI fleet agents and h
 ## Features
 
 - **Instantaneous In-Browser Previews:** Direct rendering for Markdown (`.md`) with responsive GitHub Flavored Markdown styling, images (PNG, JPG, SVG, WebP, GIF), interactive HTML widgets and dashboards, and monospace source code/logs.
+- **Social Sharing Previews (iMessage / Open Graph):** Designate a preview media image or auto-detect `preview.png` / `cover.png` so links render rich cards when shared in iMessage, Slack, Twitter, WhatsApp, and Discord.
 - **Web Directory Browsing:** Multi-file shares automatically generate a clean, browsable directory index linking to each file with file type icons.
 - **Zero-Config Static Website Hosting:** Any directory containing an `index.html` is automatically served as a live interactive website with relative asset resolution (CSS, JS, images).
 - **In-Place Updates:** Re-uploading to an existing slug and path updates the file in place immediately and allows updating the expiration TTL.
@@ -45,13 +46,19 @@ curl -X PUT "https://fleetlink.app/<batch-or-slug>/<filename>" \
      -H "Content-Type: text/markdown; charset=utf-8" \
      -H "X-Expire-Days: 3"
 
-# 3. Password-protected upload
+# 3. Upload with social sharing preview image
+curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
+     -T ./report.html \
+     -H "X-Fleet-Auth: $FLEET_ADMIN_SECRET" \
+     -H "X-Fleet-Preview: cover.png"
+
+# 4. Password-protected upload
 curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
      -T ./secret.pdf \
-     -H "X-Fleet-Auth: $FLEET_AUTH_SECRET" \
+     -H "X-Fleet-Auth: $FLEET_ADMIN_SECRET" \
      -H "X-Fleet-Password: MySecretPassword"
 
-# 4. Permanent hosting (Admin token only)
+# 5. Permanent hosting (Admin token only)
 curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
      -T ./report.html \
      -H "X-Fleet-Auth: $FLEET_ADMIN_SECRET" \
@@ -72,6 +79,9 @@ fleet-share --domain https://fleetlink.app test-report.md
 
 # Share an entire directory tree (served as a browsable web directory)
 fleet-share ./dist
+
+# Share with designated social media preview image (for iMessage/Slack cards)
+fleet-share --preview cover.png ./dist
 
 # Share multiple files into a named batch
 fleet-share --slug my-batch doc.md screenshot.png style.css
