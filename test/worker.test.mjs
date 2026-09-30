@@ -64,3 +64,13 @@ test('reject bad TTL, host, and unsupported method', async () => {
   assert.equal((await worker.fetch(new Request('https://share.test/s/safe/', { method: 'DELETE' }), env)).status, 405);
   assert.equal((await worker.fetch(new Request('https://attacker.test/s/safe/'), env)).status, 404);
 });
+test('serves apple-app-site-association for app clips', async () => {
+  const { env } = environment();
+  const res = await worker.fetch(new Request('https://fleetlink.online/.well-known/apple-app-site-association'), env);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+  const data = await res.json();
+  assert.ok(data.appclips.apps.includes('CC8UTF7ATG.online.fleetlink.Clip'));
+  assert.ok(data.applinks.details[0].appIDs.includes('CC8UTF7ATG.online.fleetlink'));
+});
+

@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-worker:
+    name: Worker Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+  build-ios:
+    name: iOS App & App Clip Build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode Project
+        run: |
+          cd ios
+          xcodegen generate
+      - name: Set up code signing keychain
+        if: ${{ env.BUILD_CERTIFICATE_BASE64 != '' }}
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD || 'temporary-ci-password' }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+      - name: Build App Clip
+        run: |
+          xcodebuild -project ios/FleetLink.xcodeproj \
+                     -scheme FleetLinkClip \
+                     -destination "generic/platform=iOS Simulator" \
+                     CODE_SIGNING_ALLOWED=NO \
+                     build
+      - name: Build Main App
+        run: |
+          xcodebuild -project ios/FleetLink.xcodeproj \
+                     -scheme FleetLink \
+                     -destination "generic/platform=iOS Simulator" \
+                     CODE_SIGNING_ALLOWED=NO \
+                     build
