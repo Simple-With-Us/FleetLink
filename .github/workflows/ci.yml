@@ -43,6 +43,8 @@ jobs:
         run: |
           cd ios
           xcodegen generate
+          sed -i '' 's/objectVersion = 77;/objectVersion = 56;/g' FleetLink.xcodeproj/project.pbxproj
+          sed -i '' 's/preferredProjectObjectVersion = 77;/preferredProjectObjectVersion = 56;/g' FleetLink.xcodeproj/project.pbxproj
       - name: Set up code signing keychain
         if: ${{ env.BUILD_CERTIFICATE_BASE64 != '' }}
         env:
