@@ -11,7 +11,7 @@ interface Env {
 }
 type Entry = { path: string; key: string; size: number };
 type Share = { slug: string; mode: 'directory' | 'site'; expires_at: number; password_salt: string | null; password_hash: string | null; objects_json: string; created_at: number };
-const MAX_FILES = 50, MAX_FILE_BYTES = 10 * 1024 * 1024, MAX_TOTAL_BYTES = 25 * 1024 * 1024;
+const MAX_FILES = 50, MAX_FILE_BYTES = 100 * 1024 * 1024, MAX_TOTAL_BYTES = 500 * 1024 * 1024;
 const MAX_TTL = 30 * 24 * 3600, DEFAULT_TTL = 24 * 3600;
 const enc = new TextEncoder();
 const hex = (a: Uint8Array) => Array.from(a, v => v.toString(16).padStart(2, '0')).join('');
@@ -34,52 +34,64 @@ function decodePath(s: string): string | null {
   try { return cleanPath(s.split('/').map(decodeURIComponent).join('/')); } catch { return null; }
 }
 const urlPath = (s: string) => s.split('/').map(encodeURIComponent).join('/');
-const page = (body: string, status = 200, headers: Record<string,string> = {}) => new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FleetLink</title><style>body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}input,button,select{font:inherit;margin:.3rem 0;padding:.5rem}li{margin:.6rem 0}pre{white-space:pre-wrap}</style>${body}</html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
+const page = (body: string, status = 200, headers: Record<string,string> = {}) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.Clip, app-clip-display=card"><title>FleetLink</title><style>body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}input,button,select{font:inherit;margin:.3rem 0;padding:.5rem}li{margin:.6rem 0}pre{white-space:pre-wrap}</style></head><body>${body}</body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
 function getFiles(form: FormData): { files: { path: string, file: File }[], error?: string } {
   const out: { path: string, file: File }[] = [];
   const paths = form.getAll('path');
   const files = form.getAll('file');
-  if (!files.length || files.length > MAX_FILES || paths.length !== files.length) return { files: [], error: `Upload 1-${MAX_FILES} files with a path for each.` };
+  if (!files.length) return { files: [], error: 'Upload rejected: No files provided in request.' };
+  if (files.length > MAX_FILES) return { files: [], error: `Upload rejected: Batch contains ${files.length} files, exceeding limit of ${MAX_FILES} files.` };
+  if (paths.length !== files.length) return { files: [], error: `Upload rejected: Mismatched count between paths (${paths.length}) and files (${files.length}).` };
   let total = 0;
   const seen = new Set<string>();
   for (let i = 0; i < files.length; i++) {
-    if (!(files[i] instanceof File) || typeof paths[i] !== 'string') return { files: [], error: 'Invalid file or path.' };
+    if (!(files[i] instanceof File) || typeof paths[i] !== 'string') return { files: [], error: 'Upload rejected: Invalid file entry or relative path format.' };
     const file = files[i] as File;
     const path = cleanPath(paths[i] as string);
-    if (!path || seen.has(path) || file.size > MAX_FILE_BYTES) return { files: [], error: 'Invalid/duplicate path or file too large.' };
+    if (!path) return { files: [], error: `Upload rejected: Invalid or unsafe path "${paths[i]}".` };
+    if (seen.has(path)) return { files: [], error: `Upload rejected: Duplicate relative path "${path}" in batch.` };
+    if (file.size > MAX_FILE_BYTES) {
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      return { files: [], error: `Upload rejected: File "${path}" (${mb}MB) exceeds the maximum limit of 100MB per file.` };
+    }
     total += file.size;
     seen.add(path);
     out.push({ path, file });
   }
-  if (total > MAX_TOTAL_BYTES) return { files: [], error: 'Total upload exceeds 25 MiB.' };
+  if (total > MAX_TOTAL_BYTES) {
+    const totalMb = (total / (1024 * 1024)).toFixed(1);
+    return { files: [], error: `Upload rejected: Total batch size (${totalMb}MB) exceeds the maximum limit of 500MB.` };
+  }
   return { files: out };
 }
 async function createShare(request: Request, env: Env): Promise<Response> {
-  if (!env.ADMIN_TOKEN || !env.SESSION_SECRET || !safeEq(request.headers.get('authorization') || '', `Bearer ${env.ADMIN_TOKEN}`)) return err('Unauthorized.', 401);
+  if (!env.ADMIN_TOKEN || !env.SESSION_SECRET || !safeEq(request.headers.get('authorization') || '', `Bearer ${env.ADMIN_TOKEN}`)) {
+    return err('Upload rejected: Unauthorized. Provide a valid Bearer token.', 401);
+  }
   const length = Number(request.headers.get('content-length'));
-  if (Number.isFinite(length) && length > 27 * 1024 * 1024) return err('Request exceeds upload limit.', 413);
-  if (!request.headers.get('content-type')?.startsWith('multipart/form-data')) return err('Expected multipart/form-data.');
+  if (Number.isFinite(length) && length > 520 * 1024 * 1024) return err('Upload rejected: Request body exceeds 500MB total limit.', 413);
+  if (!request.headers.get('content-type')?.startsWith('multipart/form-data')) return err('Upload rejected: Expected multipart/form-data content type.');
   let form: FormData;
-  try { form = await request.formData(); } catch { return err('Invalid form data.'); }
+  try { form = await request.formData(); } catch { return err('Upload rejected: Failed to parse multipart form data.'); }
   const { files, error } = getFiles(form);
   if (error) return err(error);
   const mode = form.get('mode');
-  if (mode !== 'directory' && mode !== 'site') return err('Mode must be directory or site.');
+  if (mode !== 'directory' && mode !== 'site') return err('Upload rejected: Mode must be "directory" or "site".');
   const ttl = Number(form.get('ttl_seconds') ?? DEFAULT_TTL);
-  if (!Number.isInteger(ttl) || ttl < 60 || ttl > MAX_TTL) return err('TTL must be 60 seconds to 30 days.');
+  if (!Number.isInteger(ttl) || ttl < 60 || ttl > MAX_TTL) return err(`Upload rejected: TTL must be between 60 seconds and 30 days (received: ${ttl}).`);
   const rawSlug = form.get('slug');
-  if (rawSlug !== null && typeof rawSlug !== 'string') return err('Invalid slug.');
+  if (rawSlug !== null && typeof rawSlug !== 'string') return err('Upload rejected: Invalid slug format.');
   const slug = (rawSlug || '').trim() || randomHex();
-  if (!slugPattern.test(slug) || slug === 'api' || slug === 's') return err('Slug must be 1-64 lowercase letters, digits or interior hyphens.');
+  if (!slugPattern.test(slug) || slug === 'api' || slug === 's') return err('Upload rejected: Slug must be 1-64 lowercase letters, digits, or interior hyphens (reserved: "api", "s").');
   const rawHost = form.get('domain');
-  if (rawHost !== null && typeof rawHost !== 'string') return err('Invalid domain.');
+  if (rawHost !== null && typeof rawHost !== 'string') return err('Upload rejected: Invalid domain format.');
   const domain = (rawHost || env.DEFAULT_SHARE_HOST).trim().toLowerCase();
-  if (!canonicalHosts(env).includes(domain)) return err('Domain is not configured.');
+  if (!canonicalHosts(env).includes(domain)) return err(`Upload rejected: Domain "${domain}" is not configured in allowed SHARE_HOSTS.`);
   const password = form.get('password');
-  if (password !== null && typeof password !== 'string') return err('Invalid password.');
-  if (typeof password === 'string' && password.length > 256) return err('Password too long.');
+  if (password !== null && typeof password !== 'string') return err('Upload rejected: Invalid password format.');
+  if (typeof password === 'string' && password.length > 256) return err('Upload rejected: Password exceeds maximum length of 256 characters.');
   const existing = await env.DB.prepare('SELECT slug FROM shares WHERE slug = ?').bind(slug).first();
-  if (existing) return err('Slug already taken.', 409);
+  if (existing) return err(`Upload rejected: Slug "${slug}" is already active and reserved.`, 409);
   const id = randomHex(), entries: Entry[] = [], keys: string[] = [];
   try {
     for (const { file, path } of files) {
@@ -95,9 +107,9 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     return Response.json({ url: `https://${domain}/s/${slug}/`, slug, domain, expires_at: new Date(expires * 1000).toISOString(), mode, files: entries.map(({ path, size }) => ({ path, size })) }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch (e) {
     await Promise.allSettled(keys.map(key => env.FILES.delete(key)));
-    if (String(e).includes('UNIQUE constraint')) return err('Slug already taken.', 409);
+    if (String(e).includes('UNIQUE constraint')) return err(`Upload rejected: Slug "${slug}" is already taken.`, 409);
     console.error('Upload failed', e);
-    return err('Upload failed.', 500);
+    return err(`Upload rejected: Server error - ${String(e)}`, 500);
   }
 }
 async function authorized(request: Request, env: Env, share: Share): Promise<boolean> {
@@ -175,8 +187,33 @@ export default {
       if (url.pathname === '/api/shares' && request.method === 'POST') return createShare(request, env);
       return err('Not found.', 404);
     }
-    if (canonicalHosts(env).includes(host)) return shareRequest(request, env, url);
+    if (canonicalHosts(env).includes(host)) {
+      if (url.pathname === '/.well-known/apple-app-site-association' || url.pathname === '/apple-app-site-association') {
+        const aasa = {
+          applinks: {
+            apps: [],
+            details: [
+              {
+                appIDs: ['CC8UTF7ATG.online.fleetlink'],
+                components: [{ '/': '/*', comment: 'All artifact shares' }]
+              }
+            ]
+          },
+          appclips: {
+            apps: ['CC8UTF7ATG.online.fleetlink.Clip']
+          }
+        };
+        return new Response(JSON.stringify(aasa, null, 2), {
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'public, max-age=3600'
+          }
+        });
+      }
+      return shareRequest(request, env, url);
+    }
     return err('Unknown host.', 404);
   },
   async scheduled(_event: ScheduledController, env: Env): Promise<void> { await cleanup(env); }
 } satisfies ExportedHandler<Env>;
+

@@ -1,29 +1,140 @@
 # FleetLink
 
-Cloudflare Worker for temporary file shares. Private source repository; no Worker, DNS, or custom domain is deployed by this PR. Tracks [AFC #307](https://github.com/jaywedgeworth22/AI-Fleet-Coordinator/issues/307).
+Temporary, high-performance artifact and build hosting for AI fleet agents and human operators.  Deployed on Cloudflare Workers and backed by Cloudflare R2 storage, FleetLink provides instantaneous web and native iOS App Clip previews for shared files, batch directories, and hosted static sites.
 
-A share has an opaque random slug or chosen slug, one or more files (nested paths preserve folders), a directory listing or a hosted-site mode, an expiry, and optional password. An upload page supports multi-select and folder selection in browsers that expose `webkitdirectory`. A single file is the same workflow with one selection. The creation endpoint is intentionally admin-only; recipients need no account.
+- **Primary Domain:** `https://fleetlink.online` (default for all sharing)
+- **Secondary Domain:** `https://fleetlink.app` (fallback mirror and legacy routing)
+- **License:** Apache License 2.0
 
-## Setup (operator action, not performed)
+## Features
 
-1. Create a Cloudflare R2 bucket named `fleetlink-files` and D1 database named `fleetlink`. Set its database ID in `wrangler.jsonc`; apply `migrations/0001_shares.sql` with `wrangler d1 migrations apply fleetlink --remote`.
-2. Set secrets: `wrangler secret put ADMIN_TOKEN` (random, at least 32 bytes, never exposed to recipients) and `wrangler secret put SESSION_SECRET` (independent random secret). Do not commit `.dev.vars` or token values. A rotated session secret invalidates existing password-unlock cookies.
-3. Configure `ADMIN_HOST` to an admin-only hostname and `SHARE_HOSTS` to comma-separated recipient hostnames. `DEFAULT_SHARE_HOST` must be one of those hosts. The sample lists `fleetlink.online` as an option and `fleetlink.app` as another; they are **not** configured in DNS or routed by this PR. Do not claim a link works until Cloudflare routes and TLS for that hostname point to this Worker and the upload page is on the admin hostname. No DNS changes are in scope.
-4. Review account, bucket policy, quotas and routes, then deploy with `npm run deploy`. Never route the admin hostname as an allowed share host. If a pre-existing Worker already serves `fleetlink.app`, do not replace its route without an explicit migration plan.
+- **Instantaneous In-Browser Previews:** Direct rendering for Markdown (`.md`) with responsive GitHub Flavored Markdown styling, images (PNG, JPG, SVG, WebP, GIF), interactive HTML widgets and dashboards, and monospace source code/logs.
+- **Web Directory Browsing:** Multi-file shares automatically generate a clean, browsable directory index linking to each file with file type icons.
+- **Zero-Config Static Website Hosting:** Any directory containing an `index.html` is automatically served as a live interactive website with relative asset resolution (CSS, JS, images).
+- **In-Place Updates:** Re-uploading to an existing slug and path updates the file in place immediately and allows updating the expiration TTL.
+- **Password Protection:** Optional password authentication protects sensitive artifacts or static sites behind an unlock screen.
+- **Native iOS App Clip:** Native SwiftUI App Clip (`online.fleetlink.Clip`) opens automatically on iOS devices via Safari Smart App Banners, Universal Links, Messages, NFC, or QR codes without requiring full app installation.
+- **Automatic Expiration:** Links expire automatically based on requested TTL, keeping storage tidy and preventing orphan artifacts.
+- **Descriptive Rejection Feedback:** Failed or out-of-bounds requests return descriptive HTTP error messages detailing the exact cause (limits, TTL, auth, or storage errors).
 
-`npm install && npm run check && npm test` validates the source. `npm run dev` can run local bindings; use `.dev.vars` for local-only secrets. Example multipart API request (set the shell variable securely, not literally):
+## Domains & Usage Instructions
 
-```sh
-curl -X POST "https://YOUR-ADMIN-HOST/api/shares" \
-  -H "Authorization: Bearer $FLEETLINK_ADMIN_TOKEN" \
-  -F 'mode=directory' -F 'ttl_seconds=86400' -F 'domain=fleetlink.online' \
-  -F 'slug=my-files' -F 'password=optional-password' \
-  -F 'path=notes.txt' -F 'file=@notes.txt' \
-  -F 'path=docs/guide.pdf' -F 'file=@guide.pdf'
+Whichever domain you send your request to directly is the domain used in your share link — no separate server URL configuration or domain flags needed:
+
+| Domain | Role | Instructions / When to Use |
+|---|---|---|
+| **`fleetlink.online`** | **Default & Primary** | **Use for all standard artifact uploads, test reports, and shared links.** It is the default endpoint in `fleet-share` and all agent workflows. |
+| **`fleetlink.app`** | **Secondary Mirror** | Available as a secondary domain mirror and fallback for application redirects or legacy integrations. Specify via `--domain https://fleetlink.app`. |
+
+## Direct `curl` Usage
+
+Target whichever domain you want for the link:
+
+```bash
+# 1. Default domain upload (Agent or Admin token)
+curl -X PUT "https://fleetlink.online/<batch-or-slug>/<filename>" \
+     -T ./artifact.md \
+     -H "X-Fleet-Auth: $FLEET_AUTH_SECRET" \
+     -H "Content-Type: text/markdown; charset=utf-8" \
+     -H "X-Expire-Days: 3"
+
+# 2. Secondary domain upload
+curl -X PUT "https://fleetlink.app/<batch-or-slug>/<filename>" \
+     -T ./artifact.md \
+     -H "X-Fleet-Auth: $FLEET_AUTH_SECRET" \
+     -H "Content-Type: text/markdown; charset=utf-8" \
+     -H "X-Expire-Days: 3"
+
+# 3. Password-protected upload
+curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
+     -T ./secret.pdf \
+     -H "X-Fleet-Auth: $FLEET_AUTH_SECRET" \
+     -H "X-Fleet-Password: MySecretPassword"
+
+# 4. Permanent hosting (Admin token only)
+curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
+     -T ./report.html \
+     -H "X-Fleet-Auth: $FLEET_ADMIN_SECRET" \
+     -H "Content-Type: text/html; charset=utf-8" \
+     -H "X-Expire-Days: forever"
 ```
 
-For hosted-site mode supply `index.html` and its assets as relative paths; nested folders can have their own `index.html`. The response gives the link and expiry. For custom slugs, select names that do not reveal private data. Existing and expired slugs remain reserved until hourly cleanup removes their metadata. A mistyped password gets a retry page; a correct password sets an HttpOnly, Secure, path-scoped cookie for at most one hour and no longer than the share expiry. The password is salted and hashed with PBKDF2-SHA256, never stored in cleartext. All share requests, including individual assets, check expiry and password. Directory files download as attachments; hosted-site content may run scripts and should be treated as **untrusted user content**. Do not use FleetLink hostnames for sensitive application sessions. Strong origin isolation between different hosted shares is a separate production hardening item; review before exposing arbitrary third-party HTML to untrusted users.
+## CLI Usage (`fleet-share`)
 
-Limits: 50 files, 10 MiB per file, 25 MiB total, 512-character relative paths, TTL 60 seconds to 30 days (default 24 hours). In addition to those checks, Cloudflare plan request-body and CPU limits apply. R2 stores file bytes; D1 holds slug, manifest, expiry and password hash. The hourly cron deletes expired R2 keys then metadata, up to 50 shares per tick; access is denied immediately at expiry even when cleanup is delayed. Failed uploads attempt to remove staged objects. Storage and traffic incur account charges; deployment and ongoing operating costs need separate approval.
+The fleet CLI helper `/Users/jay/apps/fleet-share` simplifies sharing from any machine or agent session:
 
-The upload page accepts an admin bearer token in the current tab and never persists it. It is not a consumer signup or unauthenticated upload service. Before production, add rate limits/abuse controls, file scanning or an acceptable-use policy, observability, real end-to-end Cloudflare tests, and a dedicated origin strategy for active hosted content.
+```bash
+# Share a single file (defaults to https://fleetlink.online, 3-day TTL)
+fleet-share test-report.md
+
+# Share to secondary fleetlink.app domain
+fleet-share --domain https://fleetlink.app test-report.md
+
+# Share an entire directory tree (served as a browsable web directory)
+fleet-share ./dist
+
+# Share multiple files into a named batch
+fleet-share --slug my-batch doc.md screenshot.png style.css
+
+# Password-protect a share
+fleet-share --password "SecretPass123" ./dist
+
+# Update an existing share (overwrites in place)
+fleet-share --slug my-batch updated-doc.md
+
+# Share with a custom duration (Admin token)
+fleet-share --slug release-v1 --days 14 ./build.zip
+
+# Permanently host an artifact (Admin token only)
+fleet-share --forever release-notes.html
+```
+
+## Multi-File Batches, Web Directories & Static Websites
+
+- **Web Directory Index:** When multiple files or directories are uploaded under a slug (e.g. `https://fleetlink.online/build-123/`), navigating to the root path automatically displays a clean, responsive Web Directory Index linking to each file.
+- **Static Website Hosting:** If an uploaded directory contains an `index.html` at its root or inside a subfolder, FleetLink automatically renders the live interactive HTML page instead of the directory index. Relative asset paths (CSS stylesheets, JavaScript bundles, images) resolve naturally.
+- **Updating Existing Shares:** Re-uploading to the same slug and path updates the target file immediately in place and refreshes its TTL.
+
+## Authentication: Two Token Tiers
+
+Every upload requires authentication passed via the `X-Fleet-Auth` header:
+
+1. **Admin Token (`AUTH_SECRET` / `ADMIN_TOKEN`):**
+   - Full administrative access for operators.
+   - Allows permanent hosting (`X-Expire-Days: forever`) or custom TTL up to 30 days.
+   - Allows reserving custom slugs, directory paths, and password protection.
+
+2. **Agent Token (`AGENT_SECRET`):**
+   - Scoped token dedicated to autonomous AI fleet seats (Antigravity, Claude, Codex, Grok, MiniMax).
+   - Hard TTL cap enforced: maximum 7 days (defaults to 3 days).  Requests for permanent hosting or excessive TTL are automatically rejected with a clear explanation.
+   - Designed for fast drops of test summaries, build artifacts, simulator screenshots, and inter-agent coordination handoffs.
+
+## Upload Limits & Explicit Rejection
+
+- **Per-file limit:** 100 MB maximum.
+- **Total batch limit:** 500 MB maximum.
+- **File count limit:** 50 files per share.
+- **Rejection transparency:** Any request exceeding limits or providing invalid parameters is immediately rejected with a clear explanation:
+  - Exceeding 100 MB per file returns HTTP 413: `Upload rejected: File "<name>" (<size>MB) exceeds the maximum limit of 100MB per file.`
+  - Exceeding 500 MB total returns HTTP 413: `Upload rejected: Total batch size (<size>MB) exceeds the maximum limit of 500MB.`
+  - Exceeding Agent TTL returns HTTP 403: `Upload rejected: Agent tokens are restricted to a maximum TTL of 7 days ('forever' is reserved for Admin tokens).`
+  - Missing or invalid authentication returns HTTP 401: `Upload rejected: Unauthorized. Provide a valid X-Fleet-Auth header with an Admin or Agent secret.`
+
+## iOS App Clip & Main App
+
+Located in `ios/`, the iOS project contains both the standalone App Clip and parent application:
+
+- **App Clip Target:** `FleetLinkClip` (`online.fleetlink.Clip`)
+- **Main App Target:** `FleetLink` (`online.fleetlink`)
+- **Associated Domains:**
+  - `appclips:fleetlink.online`
+  - `appclips:fleetlink.app`
+  - `applinks:fleetlink.online`
+  - `applinks:fleetlink.app`
+- **Project Generation:** Managed with XcodeGen (`cd ios && xcodegen generate`).  Do not hand-edit `.pbxproj`.
+
+## CI/CD & GitHub Actions
+
+GitHub Actions workflows in `.github/workflows/ci.yml` run automated tests and builds on every push and pull request:
+- **Worker Tests:** Validates routing, security boundaries, and TTL enforcement on Ubuntu runners.
+- **iOS App & App Clip Builds:** Offloaded to GitHub Actions macOS runners (`macos-14`) using XcodeGen and `xcodebuild`.  When code signing certificates and profiles are provided in GitHub repository secrets (`BUILD_CERTIFICATE_BASE64`, `P12_PASSWORD`), the macOS runner automatically sets up a temporary keychain to sign release builds.
