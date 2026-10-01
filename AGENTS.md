@@ -10,9 +10,10 @@ Coordinate with other AI agents via Slack channel #agent-sync (id `C0BEZDJDNKV`)
 
 FleetLink provides temporary, high-performance artifact, file, and directory hosting across the AI fleet.  It is deployed as a Cloudflare Worker backed by Cloudflare R2 storage.
 
-- **Primary Domain:** `https://fleetlink.online` (default for all sharing)
-- **Secondary Domain:** `https://fleetlink.app` (fallback mirror and legacy routing)
+- **Primary Domain:** `https://fleetlink.online` (**FleetLink.online**, default for all sharing)
+- **Secondary Domain:** `https://fleetlink.app` (**FleetLink.app**, fallback mirror and legacy routing)
 - **CLI Helper:** `/Users/jay/apps/fleet-share`
+- **R2 Usage Monitor:** `/Users/jay/apps/r2-usage-monitor.py`
 - **Live Worker:** `fleet-share-api` in Cloudflare account `Usage.Jays.Services` (`3a9368057468d0909cafaa85df12d1b7`)
 - **Bucket:** `fleet-shares` (R2)
 
@@ -23,26 +24,26 @@ FleetLink provides temporary, high-performance artifact, file, and directory hos
 - **Use `https://fleetlink.app` only when specifically targeting secondary fallback or legacy routes.**
 - CLI syntax:
   ```bash
-  fleet-share file.md                                      # Default .online
-  fleet-share --domain https://fleetlink.app file.md        # Secondary .app
-  fleet-share --password "SecretPass" file.md               # Password-protected
-  fleet-share --preview cover.png ./dist                    # Social sharing preview card
-  fleet-share ./dist                                       # Directory / batch
-  fleet-share --slug my-batch updated-file.md              # Update existing share
+  fleet-share file.md                                                    # Default .online
+  fleet-share --domain https://fleetlink.app file.md                      # Secondary .app
+  fleet-share --password "SecretPass" file.md                             # Password-protected
+  fleet-share --preview cover.png --title "Release Notes" ./dist         # Social sharing preview card (max 5MB)
+  fleet-share ./dist                                                     # Directory / batch
+  fleet-share --slug my-batch updated-file.md                            # Update existing share
   ```
 - Direct `curl` syntax:
   ```bash
-  # Upload to default domain (fleetlink.online)
+  # Upload to default domain (FleetLink.online)
   curl -X PUT "https://fleetlink.online/<batch-or-slug>/<filename>" \
        -T path/to/file \
-       -H "X-Fleet-Auth: $FLEET_ADMIN_SECRET" \
+       -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET" \
        -H "Content-Type: text/markdown; charset=utf-8" \
        -H "X-Expire-Days: 3"
 
-  # Upload to secondary mirror (fleetlink.app)
+  # Upload to secondary mirror (FleetLink.app)
   curl -X PUT "https://fleetlink.app/<batch-or-slug>/<filename>" \
        -T path/to/file \
-       -H "X-Fleet-Auth: $FLEET_AUTH_SECRET" \
+       -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET" \
        -H "Content-Type: text/markdown; charset=utf-8" \
        -H "X-Expire-Days: 3"
   ```
@@ -50,21 +51,24 @@ FleetLink provides temporary, high-performance artifact, file, and directory hos
 ## Multi-File Batches, Web Directories & Static Websites
 
 - **Web Directory Browsing:** When a batch or folder is uploaded under `<slug>/`, navigating to `https://fleetlink.online/<slug>/` renders a clean, interactive Web Directory Index listing all files.
-- **Static Website Hosting:** If an uploaded batch contains an `index.html` file at the root or within subdirectories, FleetLink serves the live rendered web page rather than the directory listing. All relative CSS, JS, and image links resolve properly.
+- **Static Website Hosting:** If an uploaded batch contains an `index.html` file at the root or within subdirectories, **FleetLink.online** serves the live rendered web page rather than the directory listing. All relative CSS, JS, and image links resolve properly.
 - **Updating Existing Shares:** Re-uploading to the same slug and filename path overwrites the file in place immediately and allows renewing or updating expiration TTL.
 - **Password Protection:** Adding `-H "X-Fleet-Password: <pass>"` or `--password <pass>` locks the share behind an unlock page requiring password authentication before viewing or downloading.
+- **In-Browser Upload Wizard:** Authenticated users on **FleetLink.online** can upload single files, directories, and static websites directly from the browser UI with custom TTL, preview images, and titles.
+- **Admin Password Auto-Bypass:** Visiting password-protected shares with an active Admin browser session cookie automatically bypasses password prompts!
 
 ## Authentication: Two Token Tiers
 
-Every write operation requires an authentication token passed in the `X-Fleet-Auth` header (or `Authorization: Bearer <TOKEN>` on the admin API):
+Every write operation requires an authentication token passed in the `X-Fleet-Admin` header (or legacy `X-Fleet-Auth` alias, or `Authorization: Bearer <TOKEN>`):
 
-1. **Admin Token (`AUTH_SECRET` / `ADMIN_TOKEN`):**
+1. **Admin Token (`ADMIN_SECRET` / `FLEET_ADMIN_SECRET`):**
    - Full administrative privileges.
    - Allows custom expiration durations including permanent hosting (`X-Expire-Days: forever`).
    - Allows reserving custom slugs and directory paths.
+   - Auto-bypasses password challenges on protected links in browser sessions.
    - For human operators and administrative tasks.
 
-2. **Agent Token (`AGENT_SECRET`):**
+2. **Agent Token (`AGENT_SECRET` / `FLEET_AGENT_SECRET`):**
    - Scoped token for automated AI fleet seats.
    - Hard TTL enforcement: capped at a maximum of 7 days (defaults to 3 days).  Attempts to request `forever` or > 7 days are automatically rejected with an explicit explanation.
    - For automated test reports, build drops, screenshot verification, and agent-to-agent asset sharing.

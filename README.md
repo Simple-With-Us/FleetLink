@@ -2,16 +2,20 @@
 
 Temporary, high-performance artifact and build hosting for AI fleet agents and human operators.  Deployed on Cloudflare Workers and backed by Cloudflare R2 storage, FleetLink provides instantaneous web and native iOS App Clip previews for shared files, batch directories, and hosted static sites.
 
-- **Primary Domain:** `https://fleetlink.online` (default for all sharing)
-- **Secondary Domain:** `https://fleetlink.app` (fallback mirror and legacy routing)
+- **Primary Domain:** `https://fleetlink.online` (**FleetLink.online**, default for all sharing)
+- **Secondary Domain:** `https://fleetlink.app` (**FleetLink.app**, fallback mirror and legacy routing)
+- **CLI Helper:** `/Users/jay/apps/fleet-share`
+- **R2 Monitor:** `/Users/jay/apps/r2-usage-monitor.py`
 - **License:** Apache License 2.0
 
 ## Features
 
 - **Instantaneous In-Browser Previews:** Direct rendering for Markdown (`.md`) with responsive GitHub Flavored Markdown styling, images (PNG, JPG, SVG, WebP, GIF), interactive HTML widgets and dashboards, and monospace source code/logs.
-- **Social Sharing Previews (iMessage / Open Graph):** Designate a preview media image or auto-detect `preview.png` / `cover.png` so links render rich cards when shared in iMessage, Slack, Twitter, WhatsApp, and Discord.
+- **Social Sharing Previews (iMessage / Open Graph):** Designate a preview media image (max 5MB) and custom title so links render rich cards when shared in iMessage, Slack, Twitter, WhatsApp, and Discord.
 - **Web Directory Browsing:** Multi-file shares automatically generate a clean, browsable directory index linking to each file with file type icons.
 - **Zero-Config Static Website Hosting:** Any directory containing an `index.html` is automatically served as a live interactive website with relative asset resolution (CSS, JS, images).
+- **In-Browser Upload Wizard:** Authenticated users on **FleetLink.online** can upload files directly through a sleek web form with drag-and-drop, custom TTL, title, preview image, and password protection.
+- **Admin Password Auto-Bypass:** Visiting password-protected shares with an active Admin browser session cookie automatically bypasses password prompts!
 - **In-Place Updates:** Re-uploading to an existing slug and path updates the file in place immediately and allows updating the expiration TTL.
 - **Password Protection:** Optional password authentication protects sensitive artifacts or static sites behind an unlock screen.
 - **Native iOS App Clip:** Native SwiftUI App Clip (`online.fleetlink.Clip`) opens automatically on iOS devices via Safari Smart App Banners, Universal Links, Messages, NFC, or QR codes without requiring full app installation.
@@ -24,8 +28,8 @@ Whichever domain you send your request to directly is the domain used in your sh
 
 | Domain | Role | Instructions / When to Use |
 |---|---|---|
-| **`fleetlink.online`** | **Default & Primary** | **Use for all standard artifact uploads, test reports, and shared links.** It is the default endpoint in `fleet-share` and all agent workflows. |
-| **`fleetlink.app`** | **Secondary Mirror** | Available as a secondary domain mirror and fallback for application redirects or legacy integrations. Specify via `--domain https://fleetlink.app`. |
+| **FleetLink.online** | **Default & Primary** | **Use for all standard artifact uploads, test reports, and shared links.** It is the default endpoint in `fleet-share` and all agent workflows. |
+| **FleetLink.app** | **Secondary Mirror** | Available as a secondary domain mirror and fallback for application redirects or legacy integrations. Specify via `--domain https://fleetlink.app`. |
 
 ## Direct `curl` Usage
 
@@ -35,27 +39,28 @@ Target whichever domain you want for the link:
 # 1. Default domain upload (Agent or Admin token)
 curl -X PUT "https://fleetlink.online/<batch-or-slug>/<filename>" \
      -T ./artifact.md \
-     -H "X-Fleet-Auth: $FLEET_AUTH_SECRET" \
+     -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET" \
      -H "Content-Type: text/markdown; charset=utf-8" \
      -H "X-Expire-Days: 3"
 
 # 2. Secondary domain upload
 curl -X PUT "https://fleetlink.app/<batch-or-slug>/<filename>" \
      -T ./artifact.md \
-     -H "X-Fleet-Auth: $FLEET_AUTH_SECRET" \
+     -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET" \
      -H "Content-Type: text/markdown; charset=utf-8" \
      -H "X-Expire-Days: 3"
 
-# 3. Upload with social sharing preview image
+# 3. Upload with social sharing preview image & custom title
 curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
      -T ./report.html \
-     -H "X-Fleet-Auth: $FLEET_ADMIN_SECRET" \
+     -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET" \
+     -H "X-Fleet-Title: Release Report" \
      -H "X-Fleet-Preview: cover.png"
 
 # 4. Password-protected upload
 curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
      -T ./secret.pdf \
-     -H "X-Fleet-Auth: $FLEET_ADMIN_SECRET" \
+     -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET" \
      -H "X-Fleet-Password: MySecretPassword"
 
 # 5. Permanent hosting (Admin token only)
