@@ -77,10 +77,19 @@ Every write operation requires an authentication token passed in the `X-Fleet-Ad
 
 FleetLink strictly validates upload sizes and parameters, returning explicit rejection reasons for all failed requests:
 
-- **Per-file limit:** 100 MB maximum.
-- **Batch limit:** 500 MB total.
-- **File count limit:** 50 files per share.
+- **Admin Limits:**
+  - **Per-file limit:** 300 MB maximum.
+  - **Batch limit:** 1 GB (1,024 MB) total.
+  - **File count limit:** 1,000 files per upload.
+  - **Retention:** Permanent (`forever`) hosting for uploads &le; 500 MB.
+  - **Hard 500MB Rule:** Any upload or batch exceeding 500 MB total is strictly capped at a 7-day maximum TTL for all users.
+- **Agent Limits:**
+  - **Per-file limit:** 100 MB maximum.
+  - **Batch limit:** 500 MB total.
+  - **File count limit:** 50 files per share.
+  - **Retention:** Hard 7-day maximum TTL (defaults to 3 days).
 - **Rejection feedback:** If an upload fails or is rejected, the API returns a descriptive error message explaining the exact reason (e.g., file size exceeded, invalid TTL, unauthorized token, reserved slug, or storage error).
+- **Support & Quota Inquiries:** Contact `support@fleetlink.online` for custom quotas or enterprise limits.
 
 ## iOS App Clip & Main App
 

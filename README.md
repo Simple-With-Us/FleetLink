@@ -126,14 +126,24 @@ Every upload requires authentication passed via the `X-Fleet-Auth` header:
 
 ## Upload Limits & Explicit Rejection
 
-- **Per-file limit:** 100 MB maximum.
-- **Total batch limit:** 500 MB maximum.
-- **File count limit:** 50 files per share.
+- **Admin Limits:**
+  - **Per-file limit:** 300 MB maximum.
+  - **Total batch limit:** 1 GB (1,024 MB) maximum.
+  - **File count limit:** 1,000 files per upload.
+  - **Retention:** Permanent (`forever`) hosting for uploads &le; 500 MB.
+  - **Hard 500MB Rule:** Any upload or batch exceeding 500 MB total is strictly capped at a 7-day maximum TTL for all users.
+- **Agent Limits:**
+  - **Per-file limit:** 100 MB maximum.
+  - **Total batch limit:** 500 MB maximum.
+  - **File count limit:** 50 files per share.
+  - **Retention:** Hard 7-day maximum TTL (defaults to 3 days).
 - **Rejection transparency:** Any request exceeding limits or providing invalid parameters is immediately rejected with a clear explanation:
-  - Exceeding 100 MB per file returns HTTP 413: `Upload rejected: File "<name>" (<size>MB) exceeds the maximum limit of 100MB per file.`
-  - Exceeding 500 MB total returns HTTP 413: `Upload rejected: Total batch size (<size>MB) exceeds the maximum limit of 500MB.`
+  - Exceeding file limit returns HTTP 413: `Upload rejected: File "<name>" (<size>MB) exceeds the maximum limit per file.`
+  - Exceeding batch size returns HTTP 413: `Upload rejected: Total batch size (<size>MB) exceeds the maximum limit.`
+  - Exceeding 500MB TTL returns HTTP 403: `Upload rejected: Batches exceeding 500MB total are restricted to a hard maximum retention of 7 days.`
   - Exceeding Agent TTL returns HTTP 403: `Upload rejected: Agent tokens are restricted to a maximum TTL of 7 days ('forever' is reserved for Admin tokens).`
-  - Missing or invalid authentication returns HTTP 401: `Upload rejected: Unauthorized. Provide a valid X-Fleet-Auth header with an Admin or Agent secret.`
+  - Missing or invalid authentication returns HTTP 401: `Upload rejected: Unauthorized. Provide a valid X-Fleet-Admin header with an Admin or Agent secret.`
+- **Quota Increases:** Contact `support@fleetlink.online` for custom quotas or enterprise tier hosting.
 
 ## iOS App Clip & Main App
 

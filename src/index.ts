@@ -11,8 +11,11 @@ interface Env {
 }
 type Entry = { path: string; key: string; size: number };
 type Share = { slug: string; mode: 'directory' | 'site'; expires_at: number; password_salt: string | null; password_hash: string | null; objects_json: string; created_at: number };
-const MAX_FILES = 50, MAX_FILE_BYTES = 100 * 1024 * 1024, MAX_TOTAL_BYTES = 500 * 1024 * 1024;
-const MAX_TTL = 30 * 24 * 3600, DEFAULT_TTL = 24 * 3600;
+const ADMIN_MAX_FILES = 1000, ADMIN_MAX_FILE_BYTES = 300 * 1024 * 1024, ADMIN_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
+const AGENT_MAX_FILES = 50, AGENT_MAX_FILE_BYTES = 100 * 1024 * 1024, AGENT_MAX_TOTAL_BYTES = 500 * 1024 * 1024;
+const LARGE_UPLOAD_THRESHOLD = 500 * 1024 * 1024;
+const MAX_FILES = ADMIN_MAX_FILES, MAX_FILE_BYTES = ADMIN_MAX_FILE_BYTES, MAX_TOTAL_BYTES = ADMIN_MAX_TOTAL_BYTES;
+const MAX_TTL = 7 * 24 * 3600, DEFAULT_TTL = 24 * 3600;
 const enc = new TextEncoder();
 const hex = (a: Uint8Array) => Array.from(a, v => v.toString(16).padStart(2, '0')).join('');
 const randomHex = (bytes = 16) => hex(crypto.getRandomValues(new Uint8Array(bytes)));
