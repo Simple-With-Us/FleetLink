@@ -143,7 +143,61 @@ Every upload requires authentication passed via the `X-Fleet-Auth` header:
   - Exceeding 500MB TTL returns HTTP 403: `Upload rejected: Batches exceeding 500MB total are restricted to a hard maximum retention of 7 days.`
   - Exceeding Agent TTL returns HTTP 403: `Upload rejected: Agent tokens are restricted to a maximum TTL of 7 days ('forever' is reserved for Admin tokens).`
   - Missing or invalid authentication returns HTTP 401: `Upload rejected: Unauthorized. Provide a valid X-Fleet-Admin header with an Admin or Agent secret.`
+- **Terms & Fine Print:** Storage quotas, allowances, and timeframes are best effort and non-binding.  FleetLink reserves the right to prune or delete shares/files at any time without notice for excessive utilization or administrative hygiene.
 - **Quota Increases:** Contact `support@fleetlink.online` for custom quotas or enterprise tier hosting.
+
+## Back-End Admin Portal (`/portal` & `/admin`)
+
+FleetLink includes an interactive administrative portal at `https://fleetlink.online/portal` (or `/admin`):
+
+- **Live Bucket Overview:** Scans all R2 storage objects to display total storage volume, file count, and slug inventory.
+- **Slug Management:** Lists each active share with its byte size, total files, expiration countdown, permanent retention indicator, and password lock state.
+- **Interactive Filtering:** Instant search by slug name, plus quick filters: `All`, `Permanent`, `Expiring Soon`, `Expired`, `Large (> 50MB)`.
+- **1-Click Slug Pruning:** Delete unwanted batches or excessive storage hogs with a single click and immediate UI update.
+- **API Access:**
+  - `GET /api/portal/data`: Returns JSON overview of bucket metrics and all active slugs.
+  - `POST /api/portal/delete`: Accepts `{ slug: string }` with Admin authorization to purge all files under that slug.
+
+## Model Context Protocol (MCP) Server
+
+FleetLink provides a native Model Context Protocol (MCP) server for Claude Code, Cursor, Codex, Gemini/Antigravity, and other AI coding agents:
+
+- **Location:** `/Users/jay/apps/fleetlink-mcp/`
+- **Launcher:** `/Users/jay/apps/mcp-servers/fleetlink-launch.sh` (sources credentials from `~/.secrets/fleetlink-auth.env`)
+
+### Available Tools
+
+1. `fleetlink_share_file`: Uploads and shares a single file, markdown artifact, or image.  Supports custom slugs, titles, preview cards, passwords, and custom TTL.
+2. `fleetlink_share_directory`: Recursively bundles and shares an entire folder or static website (with `index.html`).
+3. `fleetlink_list_shares`: Queries the portal API for active slugs, storage utilization, and expiration timelines.
+4. `fleetlink_delete_share`: Permanently purges a slug and all underlying files to immediately reclaim storage.
+
+### Client Setup
+
+- **Claude Code:**
+  ```bash
+  claude mcp add fleetlink -- /Users/jay/apps/mcp-servers/fleetlink-launch.sh
+  ```
+- **Cursor (`~/.cursor/mcp.json`):**
+  ```json
+  {
+    "mcpServers": {
+      "fleetlink": {
+        "command": "/Users/jay/apps/mcp-servers/fleetlink-launch.sh"
+      }
+    }
+  }
+  ```
+- **Claude Desktop (`claude_desktop_config.json`):**
+  ```json
+  {
+    "mcpServers": {
+      "fleetlink": {
+        "command": "/Users/jay/apps/mcp-servers/fleetlink-launch.sh"
+      }
+    }
+  }
+  ```
 
 ## iOS App Clip & Main App
 
@@ -151,6 +205,7 @@ Located in `ios/`, the iOS project contains both the standalone App Clip and par
 
 - **App Clip Target:** `FleetLinkClip` (`online.fleetlink.Clip`)
 - **Main App Target:** `FleetLink` (`online.fleetlink`)
+- **Architecture Note:** Apple requires App Clips to be embedded inside a parent host app (`online.fleetlink`).  Both targets are defined in XcodeGen and built in `ios/build/FleetLink.xcarchive`.
 - **Associated Domains:**
   - `appclips:fleetlink.online`
   - `appclips:fleetlink.app`
