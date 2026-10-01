@@ -88,8 +88,39 @@ FleetLink strictly validates upload sizes and parameters, returning explicit rej
   - **Batch limit:** 500 MB total.
   - **File count limit:** 50 files per share.
   - **Retention:** Hard 7-day maximum TTL (defaults to 3 days).
+- **Fine Print & Terms:** Storage quotas, allowances, and timeframes are best effort and non-binding.  FleetLink reserves the right to prune, adjust, or delete shares and files at any time without prior notice for excessive storage consumption, quota enforcement, or administrative hygiene.
 - **Rejection feedback:** If an upload fails or is rejected, the API returns a descriptive error message explaining the exact reason (e.g., file size exceeded, invalid TTL, unauthorized token, reserved slug, or storage error).
 - **Support & Quota Inquiries:** Contact `support@fleetlink.online` for custom quotas or enterprise limits.
+
+## Back-End Admin Portal (/portal & /admin)
+
+FleetLink features a real-time administrative back-end portal accessible at `https://fleetlink.online/portal` (and alias `https://fleetlink.online/admin`):
+
+- **Overview Dashboard:** Aggregates live Cloudflare R2 bucket inventory (`env.FLEET_SHARES.list`), displaying total storage consumption, total object count, and all active slugs/shares.
+- **Slug Metrics:** Inspects each slug's total byte size, file count, expiration timestamp, time remaining (or `Permanent` badge), and security state (`Password Protected` vs `Public`).
+- **Interactive Filtering & Search:** Instant client-side text filtering and quick filter pills (`All`, `Permanent`, `Expiring Soon`, `Expired`, `Large (> 50MB)`).
+- **1-Click Pruning / Deletion:** Instant administrative deletion of any slug, pruning the root record and all batch objects from R2 concurrently with immediate UI update.
+- **Authentication:** Requires `FLEET_ADMIN_SECRET`.  Visiting unauthenticated displays a clean token prompt modal and stores a secure session cookie.
+- **API Endpoints:**
+  - `GET /api/portal/data`: Returns JSON metrics (`{ totalBytes, totalFiles, slugCount, slugs: [...] }`).
+  - `POST /api/portal/delete`: Accepts `{ slug: string }` with Admin bearer auth to delete a slug and all underlying R2 files.
+
+## FleetLink MCP Server (Model Context Protocol)
+
+FleetLink includes a first-class MCP server enabling AI agents across platforms (Claude Code, Cursor, Codex, Gemini/Antigravity) to publish artifacts, upload static websites, inspect storage, and delete shares seamlessly:
+
+- **Location:** `/Users/jay/apps/fleetlink-mcp/`
+- **Launcher:** `/Users/jay/apps/mcp-servers/fleetlink-launch.sh` (wraps Node executable, sources credentials from `~/.secrets/fleetlink-auth.env`)
+- **Tools Provided:**
+  - `fleetlink_share_file`: Uploads and shares a single file/markdown/image with custom slug, title, preview image, password, and TTL.
+  - `fleetlink_share_directory`: Recursively uploads a folder or static website (with `index.html`).
+  - `fleetlink_list_shares`: Lists active slugs, R2 utilization, file counts, and expiration dates.
+  - `fleetlink_delete_share`: Deletes a slug and all its files to immediately free storage.
+- **Platform Installation:**
+  - **Claude Code:** Run `claude mcp add fleetlink -- /Users/jay/apps/mcp-servers/fleetlink-launch.sh`
+  - **Cursor:** Configured in `~/.cursor/mcp.json` under `"fleetlink"`.
+  - **Claude Desktop:** Configured in `~/Library/Application Support/Claude/claude_desktop_config.json`.
+  - **Antigravity / Gemini:** Schemas loaded from `/Users/jay/.gemini/antigravity/mcp/fleetlink/`.
 
 ## iOS App Clip & Main App
 
@@ -103,6 +134,8 @@ FleetLink includes a native SwiftUI iOS App and App Clip located in `ios/`:
   - `appclips:fleetlink.app`
   - `applinks:fleetlink.online`
   - `applinks:fleetlink.app`
-- **Capabilities:** Instantaneous preview of markdown artifacts, images, interactive HTML widgets, source code, and multi-file batch listings directly from Safari, Messages, NFC, or QR codes.
+- **Architecture Note:** Apple App Clips cannot exist as standalone App Store binaries; Apple requires every App Clip to be an embedded extension target inside a parent iOS application (`online.fleetlink`).  Both the App Clip and main app are fully configured, generated with XcodeGen, and built in `ios/build/FleetLink.xcarchive`.
+- **Capabilities:** Instantaneous preview of markdown artifacts, images, interactive HTML widgets, source code, and multi-file batch listings directly from Safari, Messages, NFC, or QR codes without full app installation.
 - **Generation:** Managed with XcodeGen (`cd ios && xcodegen generate`).  Never hand-edit `.pbxproj`.
-- **CI / GitHub Actions:** iOS builds are offloaded to GitHub Actions macOS runners (`macos-14`) via `.github/workflows/ci.yml`. When code signing certificates are configured in repository secrets, the runner signs builds automatically.
+- **CI / GitHub Actions:** iOS builds are offloaded to GitHub Actions macOS runners (`macos-14`) via `.github/workflows/ci.yml`.  When code signing certificates are configured in repository secrets, the runner signs builds automatically.
+
