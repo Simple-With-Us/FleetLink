@@ -54,7 +54,7 @@ FleetLink provides temporary, high-performance artifact, file, and directory hos
 - **Static Website Hosting:** If an uploaded batch contains an `index.html` file at the root or within subdirectories, **FleetLink.online** serves the live rendered web page rather than the directory listing. All relative CSS, JS, and image links resolve properly.
 - **Updating Existing Shares:** Re-uploading to the same slug and filename path overwrites the file in place immediately and allows renewing or updating expiration TTL.
 - **Password Protection:** Adding `-H "X-Fleet-Password: <pass>"` or `--password <pass>` locks the share behind an unlock page requiring password authentication before viewing or downloading.
-- **In-Browser Upload Wizard:** Authenticated users on **FleetLink.online** can upload single files, directories, and static websites directly from the browser UI with custom TTL, preview images, and titles.
+- **In-Browser Upload Wizard:** Operators on **FleetLink.online** can upload single files, photos, directories, and static websites directly from the browser UI with custom TTL, preview images, and titles.  The wizard is displayed prominently below the header with an inline token field and auto session persistence.
 - **Admin Password Auto-Bypass:** Visiting password-protected shares with an active Admin browser session cookie automatically bypasses password prompts!
 
 ## Authentication: Two Token Tiers (Legacy Auth Retired)
