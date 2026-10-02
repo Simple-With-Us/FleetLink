@@ -66,7 +66,7 @@ curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
 # 5. Permanent hosting (Admin token only)
 curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
      -T ./report.html \
-     -H "X-Fleet-Auth: $FLEET_ADMIN_SECRET" \
+     -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET" \
      -H "Content-Type: text/html; charset=utf-8" \
      -H "X-Expire-Days: forever"
 ```
@@ -211,15 +211,21 @@ FleetLink provides a native Model Context Protocol (MCP) server for Claude Code,
 
 Located in `ios/`, the iOS project contains both the standalone App Clip and parent application:
 
-- **App Clip Target:** `FleetLinkClip` (`online.fleetlink.Clip`)
-- **Main App Target:** `FleetLink` (`online.fleetlink`)
-- **Architecture Note:** Apple requires App Clips to be embedded inside a parent host app (`online.fleetlink`).  Both targets are defined in XcodeGen and built in `ios/build/FleetLink.xcarchive`.
+- **App Clip Target:** `FleetLinkClip` (`online.fleetlink.ios.Clip`)
+- **Main App Target:** `FleetLink` (`online.fleetlink.ios`)
+- **Architecture Note & TestFlight Requirement:** Apple requires App Clips to be embedded inside a parent host app (`online.fleetlink.ios`).  Apple's CDN requires the parent app to be registered and published to App Store Connect / TestFlight before serving App Clips to uninstalled devices.  Public artifact viewing remains 100% zero-auth.
 - **Associated Domains:**
   - `appclips:fleetlink.online`
   - `appclips:fleetlink.app`
   - `applinks:fleetlink.online`
   - `applinks:fleetlink.app`
 - **Project Generation:** Managed with XcodeGen (`cd ios && xcodegen generate`).  Do not hand-edit `.pbxproj`.
+- **TestFlight Deployment:** Registered in `/Users/jay/apps/ios-fleet/apps.json` for deployment via `/Users/jay/apps/ios-fleet/ship-testflight.sh fleetlink`.
+
+## iOS Share Sheet & Mobile Uploads
+
+- **Apple Shortcut:** Easily share files, documents, or photos to FleetLink directly from the native iOS Share Sheet in any app.  See `docs/IOS-SHORTCUT-SHARE.md` for full instructions.
+- **Mobile Web Wizard:** Upload directly via Safari on iOS at `https://fleetlink.online` with custom slug, TTL, and password options.
 
 ## CI/CD & GitHub Actions
 
