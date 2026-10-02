@@ -57,18 +57,18 @@ FleetLink provides temporary, high-performance artifact, file, and directory hos
 - **In-Browser Upload Wizard:** Authenticated users on **FleetLink.online** can upload single files, directories, and static websites directly from the browser UI with custom TTL, preview images, and titles.
 - **Admin Password Auto-Bypass:** Visiting password-protected shares with an active Admin browser session cookie automatically bypasses password prompts!
 
-## Authentication: Two Token Tiers
+## Authentication: Two Token Tiers (Legacy Auth Retired)
 
-Every write operation requires an authentication token passed in the `X-Fleet-Admin` header (or legacy `X-Fleet-Auth` alias, or `Authorization: Bearer <TOKEN>`):
+Every write operation requires an authentication token passed in the `X-Fleet-Admin` (for admin tasks) or `X-Fleet-Agent` (for autonomous fleet seat tasks) header (or `Authorization: Bearer <TOKEN>`).  **The legacy `X-Fleet-Auth` header and `AUTH_SECRET` token are completely retired and rejected with HTTP 401.**
 
-1. **Admin Token (`ADMIN_SECRET` / `FLEET_ADMIN_SECRET`):**
+1. **Admin Token (`ADMIN_SECRET` / `FLEET_ADMIN_SECRET`, header `X-Fleet-Admin`):**
    - Full administrative privileges.
    - Allows custom expiration durations including permanent hosting (`X-Expire-Days: forever`).
    - Allows reserving custom slugs and directory paths.
    - Auto-bypasses password challenges on protected links in browser sessions.
    - For human operators and administrative tasks.
 
-2. **Agent Token (`AGENT_SECRET` / `FLEET_AGENT_SECRET`):**
+2. **Agent Token (`AGENT_SECRET` / `FLEET_AGENT_SECRET`, header `X-Fleet-Agent`):**
    - Scoped token for automated AI fleet seats.
    - Hard TTL enforcement: capped at a maximum of 7 days (defaults to 3 days).  Attempts to request `forever` or > 7 days are automatically rejected with an explicit explanation.
    - For automated test reports, build drops, screenshot verification, and agent-to-agent asset sharing.
@@ -101,9 +101,19 @@ FleetLink features a real-time administrative back-end portal accessible at `htt
 - **Interactive Filtering & Search:** Instant client-side text filtering and quick filter pills (`All`, `Permanent`, `Expiring Soon`, `Expired`, `Large (> 50MB)`).
 - **1-Click Pruning / Deletion:** Instant administrative deletion of any slug, pruning the root record and all batch objects from R2 concurrently with immediate UI update.
 - **Authentication:** Requires `FLEET_ADMIN_SECRET`.  Visiting unauthenticated displays a clean token prompt modal and stores a secure session cookie.
+- **Protected System Assets:** Core system files (`preview.png`, `preview-locked.png`, `favicon.ico`, `robots.txt`, `apple-app-site-association`) are segregated into a collapsible `⚙️ System Assets` section at the bottom of the portal.  Deleting any system asset requires explicit two-step confirmation (including typing the asset name) to prevent accidental loss of root domain social sharing previews.
 - **API Endpoints:**
-  - `GET /api/portal/data`: Returns JSON metrics (`{ totalBytes, totalFiles, slugCount, slugs: [...] }`).
+  - `GET /api/portal/data`: Returns JSON metrics (`{ totalBytes, totalFiles, totalSlugs, userSlugCount, systemAssetCount, slugs: [...] }`).
   - `POST /api/portal/delete`: Accepts `{ slug: string }` with Admin bearer auth to delete a slug and all underlying R2 files.
+
+## Master Design Assets (/assets)
+
+- **Location:** `assets/` in this repository.
+- **Preserved Assets:**
+  - `assets/preview.png`: 1200x630 Open Graph / Twitter card image served at `https://fleetlink.online/preview.png`.
+  - `assets/preview-locked.png`: Password unlock gate social preview card.
+  - `assets/social-preview-master.jpg`: Full-resolution source artwork for the FleetLink sharing banner.
+- All master design files and promotional assets are committed directly into this repository to ensure permanence across agent platforms.
 
 ## FleetLink MCP Server (Model Context Protocol)
 
