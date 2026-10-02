@@ -99,12 +99,14 @@ FleetLink features a real-time administrative back-end portal accessible at `htt
 - **Overview Dashboard:** Aggregates live Cloudflare R2 bucket inventory (`env.FLEET_SHARES.list`), displaying total storage consumption, total object count, and all active slugs/shares.
 - **Slug Metrics:** Inspects each slug's total byte size, file count, expiration timestamp, time remaining (or `Permanent` badge), and security state (`Password Protected` vs `Public`).
 - **Interactive Filtering & Search:** Instant client-side text filtering and quick filter pills (`All`, `Permanent`, `Expiring Soon`, `Expired`, `Large (> 50MB)`).
-- **1-Click Pruning / Deletion:** Instant administrative deletion of any slug, pruning the root record and all batch objects from R2 concurrently with immediate UI update.
+- **Interactive Multi-Column Sorting:** Sort active shares by Uploaded Date, Total Size, File Count, Expiration, Security status, or Slug name with ascending/descending toggle indicators.
+- **Batch Deletion & Checkboxes:** Select individual shares via row checkboxes or all visible shares via the master header checkbox.  A floating batch action bar displays selected count, total file count, and formatted byte size.
+- **Confirmation Popup Modal:** Deleting single or multiple slugs triggers a modal dialog detailing the exact slug names, file counts, and aggregate data volume before permanently pruning from Cloudflare R2.
 - **Authentication:** Requires `FLEET_ADMIN_SECRET`.  Visiting unauthenticated displays a clean token prompt modal and stores a secure session cookie.
 - **Protected System Assets:** Core system files (`preview.png`, `preview-locked.png`, `favicon.ico`, `robots.txt`, `apple-app-site-association`) are segregated into a collapsible `⚙️ System Assets` section at the bottom of the portal.  Deleting any system asset requires explicit two-step confirmation (including typing the asset name) to prevent accidental loss of root domain social sharing previews.
 - **API Endpoints:**
   - `GET /api/portal/data`: Returns JSON metrics (`{ totalBytes, totalFiles, totalSlugs, userSlugCount, systemAssetCount, slugs: [...] }`).
-  - `POST /api/portal/delete`: Accepts `{ slug: string }` with Admin bearer auth to delete a slug and all underlying R2 files.
+  - `POST /api/portal/delete`: Accepts `{ slug: string }` or `{ slugs: string[] }` with Admin bearer auth to delete one or multiple slugs and all underlying R2 files.
 
 ## Master Design Assets (/assets)
 
@@ -136,16 +138,26 @@ FleetLink includes a first-class MCP server enabling AI agents across platforms 
 
 FleetLink includes a native SwiftUI iOS App and App Clip located in `ios/`:
 
-- **Main App:** `online.fleetlink` (`FleetLink`)
-- **App Clip:** `online.fleetlink.Clip` (`FleetLinkClip`)
+- **Main App:** `online.fleetlink.ios` (`FleetLink`)
+- **App Clip:** `online.fleetlink.ios.Clip` (`FleetLinkClip`)
 - **Team ID:** `CC8UTF7ATG`
+- **App Store Connect Registrations:**
+  - Main App Bundle ID: `online.fleetlink.ios` (Apple ID `8Y42K8JC9N`)
+  - App Clip Bundle ID: `online.fleetlink.ios.Clip` (Apple ID `3SSXWAMH8C`)
+  - Registered in fleet shipping engine `/Users/jay/apps/ios-fleet/apps.json` under `fleetlink`.
+  - Shipped to TestFlight via `/Users/jay/apps/ios-fleet/ship-testflight.sh fleetlink`.
 - **Associated Domains:**
   - `appclips:fleetlink.online`
   - `appclips:fleetlink.app`
   - `applinks:fleetlink.online`
   - `applinks:fleetlink.app`
-- **Architecture Note:** Apple App Clips cannot exist as standalone App Store binaries; Apple requires every App Clip to be an embedded extension target inside a parent iOS application (`online.fleetlink`).  Both the App Clip and main app are fully configured, generated with XcodeGen, and built in `ios/build/FleetLink.xcarchive`.
+- **Architecture Note & TestFlight Requirement:** Apple App Clips cannot exist as standalone App Store binaries; Apple requires every App Clip to be an embedded extension target inside a parent iOS application (`online.fleetlink.ios`).  Furthermore, Apple's CDN **refuses** to invoke or stream an App Clip to uninstalled devices until the parent app is registered and published on App Store Connect (either in TestFlight or on the App Store).  Public artifact viewing in FleetLink remains 100% zero-auth.
 - **Capabilities:** Instantaneous preview of markdown artifacts, images, interactive HTML widgets, source code, and multi-file batch listings directly from Safari, Messages, NFC, or QR codes without full app installation.
 - **Generation:** Managed with XcodeGen (`cd ios && xcodegen generate`).  Never hand-edit `.pbxproj`.
 - **CI / GitHub Actions:** iOS builds are offloaded to GitHub Actions macOS runners (`macos-14`) via `.github/workflows/ci.yml`.  When code signing certificates are configured in repository secrets, the runner signs builds automatically.
+
+## iOS Share Sheet & Mobile Uploads
+
+- **Apple Shortcut:** Users can export any file or photo directly to FleetLink from the iOS Share Sheet using the "Share to FleetLink" shortcut.  Detailed step-by-step setup in `docs/IOS-SHORTCUT-SHARE.md`.
+- **Mobile Safari Web Wizard:** Authenticated operators can upload files, directories, and static sites directly from Safari on iPhone at `https://fleetlink.online`.
 
