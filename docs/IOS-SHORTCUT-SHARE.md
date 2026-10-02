@@ -61,14 +61,14 @@ With this Shortcut installed, tapping **Share** in any iOS app (Files, Photos, S
 
 If you prefer a visual web form without setting up a Shortcut:
 
-1. Open Safari on iPhone and navigate to `https://fleetlink.online/portal` (or `https://fleetlink.online`).
-2. If prompted, enter your Admin Secret to authenticate.
-3. On the homepage, scroll to the **🚀 Direct Web Upload Wizard**:
-   - Tap **"Choose Files"** to pick documents from the iOS **Files** app or photo library.
+1. Open Safari on iPhone and navigate to `https://fleetlink.online`.
+2. The **🚀 Direct Web Upload Wizard** is located prominently right below the header:
+   - **Inline Secret Token:** Enter your `FLEET_ADMIN_SECRET` or `FLEET_AGENT_SECRET` directly in the yellow token box (or tap "Authenticate" in the top bar to remember your session).
+   - Tap **"Tap or drag files / photos here to upload"** to pick documents from the iOS **Files** app or photo library.
    - Choose your custom **Slug** or let it auto-generate.
    - Select your expiration timeframe (**1 Day**, **3 Days**, **7 Days**, or **Forever**).
    - Set an optional password if you want the link protected.
    - Tap **"Upload to FleetLink"**.
-4. Once uploaded, the direct link is displayed with a 1-tap **Copy Link** button.
+3. Once uploaded, the direct link is displayed with a 1-tap **Copy Link** button, and your browser session cookie is stored automatically for future uploads.
 
-> **Tip:** In Safari, tap the Share button and select **"Add to Home Screen"** to save FleetLink as a standalone progressive web app on your iPhone.
+> **Tip:** In Safari, tap the Share button and select **"Add to Home Screen"** to save FleetLink as a standalone web app on your iPhone.

@@ -225,7 +225,7 @@ Located in `ios/`, the iOS project contains both the standalone App Clip and par
 ## iOS Share Sheet & Mobile Uploads
 
 - **Apple Shortcut:** Easily share files, documents, or photos to FleetLink directly from the native iOS Share Sheet in any app.  See `docs/IOS-SHORTCUT-SHARE.md` for full instructions.
-- **Mobile Web Wizard:** Upload directly via Safari on iOS at `https://fleetlink.online` with custom slug, TTL, and password options.
+- **Mobile Web Wizard:** Upload directly via Safari on iOS at `https://fleetlink.online` with prominent top placement, inline token field, custom slug, TTL, and password options.
 
 ## CI/CD & GitHub Actions
 
