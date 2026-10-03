@@ -112,7 +112,7 @@ fleet-share --forever release-notes.html
 
 ## Authentication: Two Token Tiers (Legacy Auth Retired)
 
-Every upload requires authentication passed via the `X-Fleet-Admin` or `X-Fleet-Agent` header (or `Authorization: Bearer <TOKEN>`).  The legacy `X-Fleet-Auth` header and `AUTH_SECRET` token are completely retired and rejected with HTTP 401.
+Every upload requires authentication passed via the `X-Fleet-Admin` or `X-Fleet-Agent` header (or `Authorization: Bearer <TOKEN>`).  The legacy single-tier authentication header is completely retired and rejected with HTTP 401.
 
 1. **Admin Token (`ADMIN_SECRET` / `FLEET_ADMIN_SECRET`, header `X-Fleet-Admin`):**
    - Full administrative access for operators.
@@ -224,7 +224,7 @@ Located in `ios/`, the iOS project contains both the standalone App Clip and par
 
 ## iOS Share Sheet & Mobile Uploads
 
-- **Apple Shortcut:** Easily share files, documents, or photos to FleetLink directly from the native iOS Share Sheet in any app.  See `docs/IOS-SHORTCUT-SHARE.md` for full instructions.
+- **Apple Shortcut:** Easily share files, documents, or photos to FleetLink directly from the native iOS Share Sheet in any app.  Download the official signed shortcut (`/Share-to-FleetLink.shortcut`), export a pre-filled shortcut via `GET /api/shortcut/download`, or copy your active secret token with 1 tap at `https://fleetlink.online`.  Detailed guide in `docs/IOS-SHORTCUT-SHARE.md`.
 - **Mobile Web Wizard:** Upload directly via Safari on iOS at `https://fleetlink.online` with prominent top placement, inline token field, custom slug, TTL, and password options.
 
 ## CI/CD & GitHub Actions

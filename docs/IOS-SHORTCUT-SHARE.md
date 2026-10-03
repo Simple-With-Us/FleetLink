@@ -8,14 +8,21 @@ This guide explains how to export and share files directly from an iPhone or iPa
 
 With this Shortcut installed, tapping **Share** in any iOS app (Files, Photos, Safari, Notes, etc.) and selecting **"Share to FleetLink"** uploads the item directly to FleetLink and copies the share URL to your clipboard.
 
-### Quick Setup Instructions
+### Option A: 1-Tap Download & Install (Recommended)
 
-1. Open the **Shortcuts** app on your iPhone or iPad.
-2. Tap the **`+`** icon in the top right to create a new shortcut.
-3. Rename the shortcut to **`Share to FleetLink`**.
-4. Tap the **(i)** info button at the bottom and enable **"Show in Share Sheet"**.
-5. Set "Receive **Any** input from **Share Sheet**".  If there's no input, set to **"Ask for Files"**.
-6. Add the following sequence of actions:
+1. Navigate to **`https://fleetlink.online`** on your iPhone, iPad, or Mac.
+2. In the **📲 Apple Shortcut** card at the top:
+   - Tap **"Copy Secret for Shortcut"** (copies your active Admin or Agent secret to the clipboard).
+   - Tap **"Download Official Shortcut (.shortcut)"** to download the Apple-signed shortcut (`/Share-to-FleetLink.shortcut`).
+   - Alternatively, tap **"Download Pre-Filled Shortcut"** (`/api/shortcut/download`) to get a shortcut with your secret already baked in.
+3. Safari will open the file in the **Shortcuts** app:
+   - Tap **"Add Shortcut"**.
+   - If prompted for your secret token, simply tap **Paste**.
+4. You're done!  Open **Photos**, **Files**, or **Safari**, tap **Share**, and select **"Share to FleetLink"**.
+
+---
+
+### Option B: Manual Setup (Build from Scratch)
 
 ```
 1. Receive [Any] from [Share Sheet]
@@ -71,4 +78,4 @@ If you prefer a visual web form without setting up a Shortcut:
    - Tap **"Upload to FleetLink"**.
 3. Once uploaded, the direct link is displayed with a 1-tap **Copy Link** button, and your browser session cookie is stored automatically for future uploads.
 
-> **Tip:** In Safari, tap the Share button and select **"Add to Home Screen"** to save FleetLink as a standalone web app on your iPhone.
+> **Tip:** In Safari, tap the Share button and select **"Add to Home Screen"** to save FleetLink as a convenient home screen shortcut icon on your iPhone for quick mobile access to the web upload wizard.
