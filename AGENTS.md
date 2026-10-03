@@ -59,7 +59,7 @@ FleetLink provides temporary, high-performance artifact, file, and directory hos
 
 ## Authentication: Two Token Tiers (Legacy Auth Retired)
 
-Every write operation requires an authentication token passed in the `X-Fleet-Admin` (for admin tasks) or `X-Fleet-Agent` (for autonomous fleet seat tasks) header (or `Authorization: Bearer <TOKEN>`).  **The legacy `X-Fleet-Auth` header and `AUTH_SECRET` token are completely retired and rejected with HTTP 401.**
+Every write operation requires an authentication token passed in the `X-Fleet-Admin` (for admin tasks) or `X-Fleet-Agent` (for autonomous fleet seat tasks) header (or `Authorization: Bearer <TOKEN>`).  **The legacy single-tier authentication header is completely retired and rejected with HTTP 401.**
 
 1. **Admin Token (`ADMIN_SECRET` / `FLEET_ADMIN_SECRET`, header `X-Fleet-Admin`):**
    - Full administrative privileges.
@@ -158,6 +158,6 @@ FleetLink includes a native SwiftUI iOS App and App Clip located in `ios/`:
 
 ## iOS Share Sheet & Mobile Uploads
 
-- **Apple Shortcut:** Users can export any file or photo directly to FleetLink from the iOS Share Sheet using the "Share to FleetLink" shortcut.  Detailed step-by-step setup in `docs/IOS-SHORTCUT-SHARE.md`.
+- **Apple Shortcut:** Users can export any file or photo directly to FleetLink from the iOS Share Sheet using the "Share to FleetLink" shortcut.  Operators can download the official signed shortcut (`/Share-to-FleetLink.shortcut`), generate a pre-filled shortcut via `GET /api/shortcut/download`, or copy their active token with 1 tap at `https://fleetlink.online`.  Detailed step-by-step setup in `docs/IOS-SHORTCUT-SHARE.md`.
 - **Mobile Safari Web Wizard:** Authenticated operators can upload files, directories, and static sites directly from Safari on iPhone at `https://fleetlink.online`.
 
