@@ -97,6 +97,18 @@ test('GitHub sign-in creates a user, a session, and a portal that lists only the
   assert.doesNotMatch(anon, /\/auth\/apple\/start/);
 });
 
+test('the portal shows each share as a full public link with a copy button', async () => {
+  const { env } = environment();
+  const cookie = cookiesOf(await githubLogin(env));
+  const created = await (await upload(env, cookie)).json();
+  assert.match(created.url, /^https:\/\/share\.test\/s\/[0-9a-f]+\/$/);
+  const { shares } = await (await call(env, 'GET', '/api/shares', cookie, null)).json();
+  assert.equal(shares[0].url, created.url);
+  const html = await (await worker.fetch(new Request(`${ORIGIN}/`, { headers: { Cookie: cookie } }), env)).text();
+  assert.match(html, /a\.textContent=s\.url/);
+  assert.match(html, /Copy link/);
+});
+
 test('non-admins create, list and delete only their own shares', async () => {
   const { env, objects } = environment();
   const alice = cookiesOf(await githubLogin(env, { id: 1 }));
