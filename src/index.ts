@@ -1,20 +1,23 @@
 import { cleanPath, contentType, escapeHtml, slugPattern } from './pure';
+import { type AuthEnv, type User, configuredProviders, finishLogin, isProvider, logout, purgeExpiredSessions, sameOrigin, sessionUser, SESSION_COOKIE, startLogin } from './auth';
 
-interface Env {
+interface Env extends AuthEnv {
   FILES: R2Bucket;
-  DB: D1Database;
   ADMIN_TOKEN: string;
-  SESSION_SECRET: string;
-  ADMIN_HOST: string;
   SHARE_HOSTS: string;
   DEFAULT_SHARE_HOST: string;
 }
 type Entry = { path: string; key: string; size: number };
-type Share = { slug: string; mode: 'directory' | 'site'; expires_at: number; password_salt: string | null; password_hash: string | null; objects_json: string; created_at: number };
+type Share = { slug: string; mode: 'directory' | 'site'; expires_at: number; password_salt: string | null; password_hash: string | null; objects_json: string; created_at: number; owner_id?: string | null };
 const ADMIN_MAX_FILES = 1000, ADMIN_MAX_FILE_BYTES = 300 * 1024 * 1024, ADMIN_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
 const AGENT_MAX_FILES = 50, AGENT_MAX_FILE_BYTES = 100 * 1024 * 1024, AGENT_MAX_TOTAL_BYTES = 500 * 1024 * 1024;
 const LARGE_UPLOAD_THRESHOLD = 500 * 1024 * 1024;
-const MAX_FILES = ADMIN_MAX_FILES, MAX_FILE_BYTES = ADMIN_MAX_FILE_BYTES, MAX_TOTAL_BYTES = ADMIN_MAX_TOTAL_BYTES;
+type Limits = { files: number; fileBytes: number; totalBytes: number };
+const ADMIN_LIMITS: Limits = { files: ADMIN_MAX_FILES, fileBytes: ADMIN_MAX_FILE_BYTES, totalBytes: ADMIN_MAX_TOTAL_BYTES };
+const USER_LIMITS: Limits = { files: AGENT_MAX_FILES, fileBytes: AGENT_MAX_FILE_BYTES, totalBytes: AGENT_MAX_TOTAL_BYTES };
+// A signed-in non-admin can hold this many unexpired shares at once.
+const USER_MAX_ACTIVE_SHARES = 50;
+const mb = (n: number) => `${Math.round(n / (1024 * 1024))}MB`;
 const MAX_TTL = 7 * 24 * 3600, DEFAULT_TTL = 24 * 3600;
 const enc = new TextEncoder();
 const hex = (a: Uint8Array) => Array.from(a, v => v.toString(16).padStart(2, '0')).join('');
@@ -38,12 +41,12 @@ function decodePath(s: string): string | null {
 }
 const urlPath = (s: string) => s.split('/').map(encodeURIComponent).join('/');
 const page = (body: string, status = 200, headers: Record<string,string> = {}) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.Clip, app-clip-display=card"><title>FleetLink</title><style>body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}input,button,select{font:inherit;margin:.3rem 0;padding:.5rem}li{margin:.6rem 0}pre{white-space:pre-wrap}</style></head><body>${body}</body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
-function getFiles(form: FormData): { files: { path: string, file: File }[], error?: string } {
+function getFiles(form: FormData, limits: Limits): { files: { path: string, file: File }[], error?: string } {
   const out: { path: string, file: File }[] = [];
   const paths = form.getAll('path');
   const files = form.getAll('file');
   if (!files.length) return { files: [], error: 'Upload rejected: No files provided in request.' };
-  if (files.length > MAX_FILES) return { files: [], error: `Upload rejected: Batch contains ${files.length} files, exceeding limit of ${MAX_FILES} files.` };
+  if (files.length > limits.files) return { files: [], error: `Upload rejected: Batch contains ${files.length} files, exceeding limit of ${limits.files} files.` };
   if (paths.length !== files.length) return { files: [], error: `Upload rejected: Mismatched count between paths (${paths.length}) and files (${files.length}).` };
   let total = 0;
   const seen = new Set<string>();
@@ -53,30 +56,40 @@ function getFiles(form: FormData): { files: { path: string, file: File }[], erro
     const path = cleanPath(paths[i] as string);
     if (!path) return { files: [], error: `Upload rejected: Invalid or unsafe path "${paths[i]}".` };
     if (seen.has(path)) return { files: [], error: `Upload rejected: Duplicate relative path "${path}" in batch.` };
-    if (file.size > MAX_FILE_BYTES) {
-      const mb = (file.size / (1024 * 1024)).toFixed(1);
-      return { files: [], error: `Upload rejected: File "${path}" (${mb}MB) exceeds the maximum limit of 100MB per file.` };
+    if (file.size > limits.fileBytes) {
+      return { files: [], error: `Upload rejected: File "${path}" (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the maximum limit of ${mb(limits.fileBytes)} per file.` };
     }
     total += file.size;
     seen.add(path);
     out.push({ path, file });
   }
-  if (total > MAX_TOTAL_BYTES) {
-    const totalMb = (total / (1024 * 1024)).toFixed(1);
-    return { files: [], error: `Upload rejected: Total batch size (${totalMb}MB) exceeds the maximum limit of 500MB.` };
+  if (total > limits.totalBytes) {
+    return { files: [], error: `Upload rejected: Total batch size (${(total / (1024 * 1024)).toFixed(1)}MB) exceeds the maximum limit of ${mb(limits.totalBytes)}.` };
   }
   return { files: out };
 }
-async function createShare(request: Request, env: Env): Promise<Response> {
-  if (!env.ADMIN_TOKEN || !env.SESSION_SECRET || !safeEq(request.headers.get('authorization') || '', `Bearer ${env.ADMIN_TOKEN}`)) {
-    return err('Upload rejected: Unauthorized. Provide a valid Bearer token.', 401);
+type Principal = { role: 'admin' | 'user'; userId: string | null; viaSession: boolean };
+/** The admin Bearer token (unchanged) or a signed-in portal session.  A wrong Bearer token never falls back to a cookie. */
+async function principal(request: Request, env: Env): Promise<Principal | null> {
+  const bearer = request.headers.get('authorization');
+  if (bearer) {
+    return env.ADMIN_TOKEN && env.SESSION_SECRET && safeEq(bearer, `Bearer ${env.ADMIN_TOKEN}`) ? { role: 'admin', userId: null, viaSession: false } : null;
   }
+  if (!request.headers.get('cookie')?.includes(`${SESSION_COOKIE}=`)) return null;
+  const user = await sessionUser(request, env);
+  return user ? { role: user.role, userId: user.id, viaSession: true } : null;
+}
+async function createShare(request: Request, env: Env): Promise<Response> {
+  const who = await principal(request, env);
+  if (!who) return err('Upload rejected: Unauthorized. Provide a valid Bearer token or sign in.', 401);
+  if (who.viaSession && !sameOrigin(request, env)) return err('Upload rejected: Cross-origin request.', 403);
+  const limits = who.role === 'admin' ? ADMIN_LIMITS : USER_LIMITS;
   const length = Number(request.headers.get('content-length'));
   if (Number.isFinite(length) && length > 520 * 1024 * 1024) return err('Upload rejected: Request body exceeds 500MB total limit.', 413);
   if (!request.headers.get('content-type')?.startsWith('multipart/form-data')) return err('Upload rejected: Expected multipart/form-data content type.');
   let form: FormData;
   try { form = await request.formData(); } catch { return err('Upload rejected: Failed to parse multipart form data.'); }
-  const { files, error } = getFiles(form);
+  const { files, error } = getFiles(form, limits);
   if (error) return err(error);
   const mode = form.get('mode');
   if (mode !== 'directory' && mode !== 'site') return err('Upload rejected: Mode must be "directory" or "site".');
@@ -84,6 +97,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   if (!Number.isInteger(ttl) || ttl < 60 || ttl > MAX_TTL) return err(`Upload rejected: TTL must be between 60 seconds and 30 days (received: ${ttl}).`);
   const rawSlug = form.get('slug');
   if (rawSlug !== null && typeof rawSlug !== 'string') return err('Upload rejected: Invalid slug format.');
+  if (who.role !== 'admin' && (rawSlug || '').trim()) return err('Upload rejected: Only admins can choose a custom slug.', 403);
   const slug = (rawSlug || '').trim() || randomHex();
   if (!slugPattern.test(slug) || slug === 'api' || slug === 's') return err('Upload rejected: Slug must be 1-64 lowercase letters, digits, or interior hyphens (reserved: "api", "s").');
   const rawHost = form.get('domain');
@@ -93,6 +107,10 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   const password = form.get('password');
   if (password !== null && typeof password !== 'string') return err('Upload rejected: Invalid password format.');
   if (typeof password === 'string' && password.length > 256) return err('Upload rejected: Password exceeds maximum length of 256 characters.');
+  if (who.role !== 'admin' && who.userId) {
+    const active = await env.DB.prepare('SELECT COUNT(*) AS n FROM shares WHERE owner_id = ? AND expires_at > ?').bind(who.userId, Math.floor(Date.now() / 1000)).first<{ n: number }>();
+    if ((active?.n ?? 0) >= USER_MAX_ACTIVE_SHARES) return err(`Upload rejected: You already have ${USER_MAX_ACTIVE_SHARES} active shares.  Delete one or wait for one to expire.`, 429);
+  }
   const existing = await env.DB.prepare('SELECT slug FROM shares WHERE slug = ?').bind(slug).first();
   if (existing) return err(`Upload rejected: Slug "${slug}" is already active and reserved.`, 409);
   const id = randomHex(), entries: Entry[] = [], keys: string[] = [];
@@ -105,8 +123,8 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     const salt = password ? randomHex() : null;
     const hash = password && salt ? await passwordHash(password, salt) : null;
     const now = Math.floor(Date.now() / 1000), expires = now + ttl;
-    await env.DB.prepare('INSERT INTO shares (slug,mode,expires_at,password_salt,password_hash,objects_json,created_at) VALUES (?,?,?,?,?,?,?)')
-      .bind(slug, mode, expires, salt, hash, JSON.stringify(entries), now).run();
+    await env.DB.prepare('INSERT INTO shares (slug,mode,expires_at,password_salt,password_hash,objects_json,created_at,owner_id) VALUES (?,?,?,?,?,?,?,?)')
+      .bind(slug, mode, expires, salt, hash, JSON.stringify(entries), now, who.userId).run();
     return Response.json({ url: `https://${domain}/s/${slug}/`, slug, domain, expires_at: new Date(expires * 1000).toISOString(), mode, files: entries.map(({ path, size }) => ({ path, size })) }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch (e) {
     await Promise.allSettled(keys.map(key => env.FILES.delete(key)));
@@ -181,13 +199,65 @@ async function cleanup(env: Env) {
     } catch (e) { console.error('Cleanup failed', share.slug, e); }
   }
 }
-const uploadPage = (env: Env) => page(`<h1>FleetLink</h1><p>Upload files or a folder. Keep your admin token private; it stays in this tab and is not saved.</p><form id="f"><label>Admin token <input id="token" type="password" autocomplete="off" required></label><br><label>Files <input id="files" type="file" multiple></label><br><label>Folder <input id="folder" type="file" webkitdirectory multiple></label><br><label>Mode <select name="mode"><option value="directory">Directory</option><option value="site">Hosted site</option></select></label><br><label>TTL (seconds) <input name="ttl_seconds" type="number" min="60" max="2592000" value="86400"></label><br><label>Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br><label>Password (optional) <input name="password" type="password"></label><br><label>Domain <select name="domain">${canonicalHosts(env).map(h => `<option value="${escapeHtml(h)}" ${h === env.DEFAULT_SHARE_HOST ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}</select></label><br><button>Make share</button></form><pre id="result"></pre><script>document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}const result=document.querySelector('#result');result.textContent='Uploading...';try{const r=await fetch('/api/shares',{method:'POST',headers:{Authorization:'Bearer '+document.querySelector('#token').value},body:d});const data=await r.json();result.textContent=data.url||data.error||'Failed'}catch(err){result.textContent=String(err)}};</script>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
+async function listShares(request: Request, env: Env): Promise<Response> {
+  const who = await principal(request, env);
+  if (!who) return err('Unauthorized.', 401);
+  const now = Math.floor(Date.now() / 1000);
+  const rows = who.role === 'admin'
+    ? await env.DB.prepare('SELECT * FROM shares WHERE expires_at > ? ORDER BY created_at DESC LIMIT 500').bind(now).all<Share>()
+    : await env.DB.prepare('SELECT * FROM shares WHERE owner_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 500').bind(who.userId, now).all<Share>();
+  const shares = rows.results.map(r => {
+    let entries: Entry[] = [];
+    try { entries = JSON.parse(r.objects_json); } catch { /* keep empty */ }
+    return { slug: r.slug, url: `https://${env.DEFAULT_SHARE_HOST}/s/${r.slug}/`, mode: r.mode, files: entries.length, bytes: entries.reduce((n, e) => n + e.size, 0), password_protected: !!r.password_hash, created_at: new Date(r.created_at * 1000).toISOString(), expires_at: new Date(r.expires_at * 1000).toISOString(), ...(who.role === 'admin' ? { owner_id: r.owner_id ?? null } : {}) };
+  });
+  return Response.json({ shares }, { headers: { 'Cache-Control': 'no-store' } });
+}
+async function deleteShare(request: Request, env: Env, slug: string): Promise<Response> {
+  const who = await principal(request, env);
+  if (!who) return err('Unauthorized.', 401);
+  if (who.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
+  const share = await env.DB.prepare('SELECT * FROM shares WHERE slug = ?').bind(slug).first<Share>();
+  // Someone else's share looks the same as a missing one.
+  if (!share || (who.role !== 'admin' && share.owner_id !== who.userId)) return err('Share not found.', 404);
+  let entries: Entry[] = [];
+  try { entries = JSON.parse(share.objects_json); } catch { console.error('Invalid manifest', slug); }
+  try {
+    await Promise.all(entries.map(x => env.FILES.delete(x.key)));
+    await env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug).run();
+  } catch (e) { console.error('Delete failed', slug, e); return err('Delete failed.', 500); }
+  return Response.json({ deleted: slug }, { headers: { 'Cache-Control': 'no-store' } });
+}
+const providerNames = { github: 'GitHub', google: 'Google', apple: 'Apple' } as const;
+const homePage = (env: Env, user: User | null) => {
+  const signedIn = user !== null;
+  const providers = configuredProviders(env);
+  const head = signedIn
+    ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}). <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
+    : `<p>Upload files or a folder. Keep your admin token private; it stays in this tab and is not saved.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
+  const tokenField = signedIn ? '' : '<label>Admin token <input id="token" type="password" autocomplete="off" required></label><br>';
+  const slugField = !signedIn || user.role === 'admin' ? '<label>Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br>' : '';
+  const mine = signedIn ? `<h2>${user.role === 'admin' ? 'All active shares' : 'Your shares'}</h2><ul id="mine"></ul>` : '';
+  return page(`<h1>FleetLink</h1>${head}<form id="f">${tokenField}<label>Files <input id="files" type="file" multiple></label><br><label>Folder <input id="folder" type="file" webkitdirectory multiple></label><br><label>Mode <select name="mode"><option value="directory">Directory</option><option value="site">Hosted site</option></select></label><br><label>TTL (seconds) <input name="ttl_seconds" type="number" min="60" max="2592000" value="86400"></label><br>${slugField}<label>Password (optional) <input name="password" type="password"></label><br><label>Domain <select name="domain">${canonicalHosts(env).map(h => `<option value="${escapeHtml(h)}" ${h === env.DEFAULT_SHARE_HOST ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}</select></label><br><button>Make share</button></form><pre id="result"></pre>${mine}<script>const signedIn=${signedIn ? 'true' : 'false'};const result=document.querySelector('#result');
+async function refresh(){if(!signedIn)return;const ul=document.querySelector('#mine');const r=await fetch('/api/shares');if(!r.ok){ul.textContent='Could not load shares.';return}const {shares}=await r.json();ul.replaceChildren();if(!shares.length){ul.textContent='No active shares.';return}for(const s of shares){const li=document.createElement('li');const a=document.createElement('a');a.href=s.url;a.textContent=s.slug;li.append(a,' - '+s.files+' file(s), expires '+s.expires_at+' ');const b=document.createElement('button');b.textContent='Delete';b.onclick=async()=>{if(!confirm('Delete '+s.slug+'?'))return;const d=await fetch('/api/shares/'+encodeURIComponent(s.slug),{method:'DELETE'});if(!d.ok)result.textContent='Delete failed';refresh()};li.append(b);ul.append(li)}}
+document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}result.textContent='Uploading...';try{const init={method:'POST',body:d};if(!signedIn)init.headers={Authorization:'Bearer '+document.querySelector('#token').value};const r=await fetch('/api/shares',init);const data=await r.json();result.textContent=data.url||data.error||'Failed';refresh()}catch(err){result.textContent=String(err)}};refresh();</script>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
+};
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url), host = url.hostname.toLowerCase();
     if (host === env.ADMIN_HOST.toLowerCase()) {
-      if (url.pathname === '/' && request.method === 'GET') return uploadPage(env);
+      if (url.pathname === '/' && request.method === 'GET') return homePage(env, request.headers.get('cookie')?.includes(`${SESSION_COOKIE}=`) ? await sessionUser(request, env) : null);
       if (url.pathname === '/api/shares' && request.method === 'POST') return createShare(request, env);
+      if (url.pathname === '/api/shares' && request.method === 'GET') return listShares(request, env);
+      const del = /^\/api\/shares\/([a-z0-9-]{1,64})$/.exec(url.pathname);
+      if (del && request.method === 'DELETE') return deleteShare(request, env, del[1]);
+      if (url.pathname === '/api/me' && request.method === 'GET') {
+        const user = await sessionUser(request, env);
+        return user ? Response.json({ id: user.id, role: user.role, display_name: user.display_name, email: user.email }, { headers: { 'Cache-Control': 'no-store' } }) : err('Unauthorized.', 401);
+      }
+      if (url.pathname === '/logout' && request.method === 'POST') return sameOrigin(request, env) ? logout(request, env) : err('Cross-origin request.', 403);
+      const auth = /^\/auth\/([a-z]+)\/(start|callback)$/.exec(url.pathname);
+      if (auth && isProvider(auth[1])) return auth[2] === 'start' && request.method === 'GET' ? startLogin(env, auth[1]) : auth[2] === 'callback' ? finishLogin(request, env, auth[1]) : err('Not found.', 404);
       return err('Not found.', 404);
     }
     if (canonicalHosts(env).includes(host)) {
@@ -217,6 +287,6 @@ export default {
     }
     return err('Unknown host.', 404);
   },
-  async scheduled(_event: ScheduledController, env: Env): Promise<void> { await cleanup(env); }
+  async scheduled(_event: ScheduledController, env: Env): Promise<void> { await cleanup(env); await purgeExpiredSessions(env); }
 } satisfies ExportedHandler<Env>;
 

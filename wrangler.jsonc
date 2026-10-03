@@ -6,6 +6,7 @@
   "d1_databases": [{ "binding": "DB", "database_name": "fleetlink", "database_id": "REPLACE_WITH_D1_DATABASE_ID", "migrations_dir": "migrations" }],
   "triggers": { "crons": ["0 * * * *"] },
   "vars": {
+    "ADMIN_EMAILS": "",
     "ADMIN_HOST": "admin.example.invalid",
     "SHARE_HOSTS": "fleetlink.online,fleetlink.app",
     "DEFAULT_SHARE_HOST": "fleetlink.online"
