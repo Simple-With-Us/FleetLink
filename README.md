@@ -146,6 +146,23 @@ Every upload requires authentication passed via the `X-Fleet-Admin` or `X-Fleet-
 - **Terms & Fine Print:** Storage quotas, allowances, and timeframes are best effort and non-binding.  FleetLink reserves the right to prune or delete shares/files at any time without notice for excessive utilization or administrative hygiene.
 - **Quota Increases:** Contact `support@fleetlink.online` for custom quotas or enterprise tier hosting.
 
+## Multi-User Sign-In (Worker)
+
+The worker can let people sign in with GitHub, Google or Apple and manage their own shares.  Nothing changes until at least one provider has credentials.  The admin Bearer token keeps working exactly as before.
+
+- **Roles:** A signed-in user can create shares (agent-sized limits, 7 day maximum TTL, random slugs, at most 50 active), list them, and delete them.  Admins see and delete every share and can choose slugs.  A user is made admin only when a provider-verified email is listed in the `ADMIN_EMAILS` var (comma separated).
+- **Accounts:** Each provider identity is its own account, keyed by the provider's subject id.  Accounts are never linked by email.
+- **Sessions:** A random token in an HttpOnly cookie, 14 days.  Only its SHA-256 is stored in D1.  Cookie-authenticated writes must send the portal's own `Origin`.
+- **Migration:** Run `migrations/0002_users.sql` on D1 before deploying.  Existing shares keep a NULL owner and belong to the admin.
+- **Redirect URIs:** Register `https://<ADMIN_HOST>/auth/github/callback`, `/auth/google/callback` and `/auth/apple/callback` with each provider.
+- **Secrets:** Set with `wrangler secret put`.
+
+| Provider | Names |
+|---|---|
+| GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` |
+| Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
+| Apple | `APPLE_CLIENT_ID` (Services ID), `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` (the .p8 contents) |
+
 ## Back-End Admin Portal (`/portal` & `/admin`)
 
 FleetLink includes an interactive administrative portal at `https://fleetlink.online/portal` (or `/admin`):
