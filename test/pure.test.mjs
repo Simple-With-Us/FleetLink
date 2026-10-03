@@ -17,4 +17,7 @@ test('restrict slugs and escape listings', () => {
   assert.equal(slugPattern.test('my-files'), true);
   assert.equal(escapeHtml('<img src="x">'), '&lt;img src=&quot;x&quot;&gt;');
   assert.match(contentType('index.html'), /text\/html/);
+  assert.equal(contentType('Share-to-FleetLink.shortcut'), 'application/x-apple-shortcut');
+  assert.equal(contentType('wifi.mobileconfig'), 'application/x-apple-aspen-config');
+  assert.equal(contentType('profile.mobileprovision'), 'application/x-apple-aspen-provision');
 });

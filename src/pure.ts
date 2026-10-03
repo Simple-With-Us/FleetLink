@@ -10,7 +10,27 @@ export function escapeHtml(s: string): string {
 }
 export function contentType(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase();
-  return ({html:'text/html; charset=utf-8',htm:'text/html; charset=utf-8',css:'text/css; charset=utf-8',js:'text/javascript; charset=utf-8',mjs:'text/javascript; charset=utf-8',json:'application/json; charset=utf-8',svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',webp:'image/webp',ico:'image/x-icon',txt:'text/plain; charset=utf-8',pdf:'application/pdf',wasm:'application/wasm'} as Record<string,string>)[ext || ''] || 'application/octet-stream';
+  return ({
+    html: 'text/html; charset=utf-8',
+    htm: 'text/html; charset=utf-8',
+    css: 'text/css; charset=utf-8',
+    js: 'text/javascript; charset=utf-8',
+    mjs: 'text/javascript; charset=utf-8',
+    json: 'application/json; charset=utf-8',
+    svg: 'image/svg+xml',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    ico: 'image/x-icon',
+    txt: 'text/plain; charset=utf-8',
+    pdf: 'application/pdf',
+    wasm: 'application/wasm',
+    shortcut: 'application/x-apple-shortcut',
+    mobileconfig: 'application/x-apple-aspen-config',
+    mobileprovision: 'application/x-apple-aspen-provision'
+  } as Record<string, string>)[ext || ''] || 'application/octet-stream';
 }
 export const hexOf = (a: Uint8Array) => Array.from(a, v => v.toString(16).padStart(2, '0')).join('');
 export const randomToken = (bytes = 32) => hexOf(crypto.getRandomValues(new Uint8Array(bytes)));
