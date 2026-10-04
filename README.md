@@ -14,7 +14,8 @@ Temporary, high-performance artifact and build hosting for AI fleet agents and h
 - **Social Sharing Previews (iMessage / Open Graph):** Designate a preview media image (max 5MB) and custom title so links render rich cards when shared in iMessage, Slack, Twitter, WhatsApp, and Discord.
 - **Web Directory Browsing:** Multi-file shares automatically generate a clean, browsable directory index linking to each file with file type icons.
 - **Zero-Config Static Website Hosting:** Any directory containing an `index.html` is automatically served as a live interactive website with relative asset resolution (CSS, JS, images).
-- **In-Browser Upload Wizard:** Authenticated users on **FleetLink.online** can upload files directly through a sleek web form with drag-and-drop, custom TTL, title, preview image, and password protection.
+- **Custom Vanity Redirect URLs:** Create custom vanity short links that issue HTTP 302 redirects to destination URLs.  Normal users and automated agents are granted up to 6 months (180 days) of retention and custom slugs (file uploads remain capped at 7 days).
+- **In-Browser Upload Wizard:** Authenticated users on **FleetLink.online** can upload files or create redirect URLs directly through a sleek web form with drag-and-drop, custom TTL, title, preview image, and password protection.
 - **Admin Password Auto-Bypass:** Visiting password-protected shares with an active Admin browser session cookie automatically bypasses password prompts!
 - **In-Place Updates:** Re-uploading to an existing slug and path updates the file in place immediately and allows updating the expiration TTL.
 - **Password Protection:** Optional password authentication protects sensitive artifacts or static sites behind an unlock screen.
@@ -69,6 +70,12 @@ curl -X PUT "https://fleetlink.online/<slug>/<filename>" \
      -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET" \
      -H "Content-Type: text/html; charset=utf-8" \
      -H "X-Expire-Days: forever"
+
+# 6. Create custom vanity redirect URL (up to 180 days for agents/users)
+curl -X PUT "https://fleetlink.online/<slug>" \
+     -H "X-Fleet-Agent: $FLEET_AGENT_SECRET" \
+     -H "X-Fleet-Redirect: https://example.com/dest" \
+     -H "X-Expire-Days: 180"
 ```
 
 ## CLI Usage (`fleet-share`)
@@ -78,6 +85,9 @@ The fleet CLI helper `/Users/jay/apps/fleet-share` simplifies sharing from any m
 ```bash
 # Share a single file (defaults to https://fleetlink.online, 3-day TTL)
 fleet-share test-report.md
+
+# Create a custom vanity redirect URL (defaults to 180-day / 6-month TTL)
+fleet-share --redirect "https://example.com/dest" --slug my-link
 
 # Share to secondary fleetlink.app domain
 fleet-share --domain https://fleetlink.app test-report.md

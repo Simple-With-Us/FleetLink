@@ -1,0 +1,2 @@
+-- Support custom vanity redirect URLs.
+-- Mode check constraint expanded to include 'redirect'.

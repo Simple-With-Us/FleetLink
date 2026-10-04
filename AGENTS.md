@@ -57,6 +57,31 @@ FleetLink provides temporary, high-performance artifact, file, and directory hos
 - **In-Browser Upload Wizard:** Operators on **FleetLink.online** can upload single files, photos, directories, and static websites directly from the browser UI with custom TTL, preview images, and titles.  The wizard is displayed prominently below the header with an inline token field and auto session persistence.
 - **Admin Password Auto-Bypass:** Visiting password-protected shares with an active Admin browser session cookie automatically bypasses password prompts!
 
+## Custom Vanity Redirect URLs (6-Month Retention)
+
+FleetLink allows operators and automated agents to create vanity short links that issue HTTP 302 redirects to destination URLs:
+- **6-Month Retention for Normal Users & Agents:** Normal users and agents can create vanity redirect URLs with up to 180 days (6 months) retention (while file/batch uploads remain strictly capped at 7 days).  Admins can create permanent (`forever`) redirects.
+- **Custom Vanity Slugs:** Normal users and agents are permitted to specify custom vanity slugs for redirect URLs (e.g., `https://fleetlink.online/my-link` &rarr; `https://github.com/...`).
+- **CLI Syntax:**
+  ```bash
+  fleet-share --redirect "https://example.com/dest" --slug my-link
+  fleet-share --redirect "https://example.com/dest" --slug my-link --days 180
+  ```
+- **Direct curl Syntax:**
+  ```bash
+  # Using PUT with X-Fleet-Redirect header:
+  curl -X PUT "https://fleetlink.online/my-link" \
+       -H "X-Fleet-Agent: $FLEET_AGENT_SECRET" \
+       -H "X-Fleet-Redirect: https://example.com/dest" \
+       -H "X-Expire-Days: 180"
+
+  # Or via POST /api/redirect:
+  curl -X POST "https://fleetlink.online/api/redirect" \
+       -H "X-Fleet-Agent: $FLEET_AGENT_SECRET" \
+       -H "Content-Type: application/json" \
+       -d '{"slug": "my-link", "target_url": "https://example.com/dest", "expire_days": 180}'
+  ```
+
 ## Authentication: Two Token Tiers (Legacy Auth Retired)
 
 Every write operation requires an authentication token passed in the `X-Fleet-Admin` (for admin tasks) or `X-Fleet-Agent` (for autonomous fleet seat tasks) header (or `Authorization: Bearer <TOKEN>`).  **The legacy single-tier authentication header is completely retired and rejected with HTTP 401.**
