@@ -94,7 +94,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   const isAdminHost = host === env.ADMIN_HOST.toLowerCase();
   if (!who) {
     if (isAdminHost || request.headers.get('authorization')) {
-      return err('Upload rejected: Unauthorized. Provide a valid Bearer token or sign in.', 401);
+      return err('Upload rejected: Unauthorized.  Provide a valid Bearer token or sign in.', 401);
     }
     // Mass user access: unauthenticated uploads create an anonymous guest user & session
     const id = randomHex(8), now = Math.floor(Date.now() / 1000);
@@ -319,8 +319,8 @@ const homePage = (env: Env, user: User | null) => {
   const userIsAdmin = user?.role === 'admin';
   const providers = configuredProviders(env);
   const head = signedIn
-    ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}). <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
-    : `<p>Upload files or create redirect URLs. Admin token optional.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
+    ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}).  <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
+    : `<p>Upload files or create redirect URLs.  Admin token optional.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
   const tokenField = signedIn ? '' : '<label>Admin token (optional) <input id="token" type="password" autocomplete="off"></label><br>';
   const slugField = `<label id="l_slug" style="display:${userIsAdmin ? 'inline' : 'none'}">Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br id="b_slug" style="display:${userIsAdmin ? 'inline' : 'none'}">`;
   const mine = `<h2>${userIsAdmin ? 'All active shares' : 'Your shares'}</h2><ul id="mine"></ul>`;

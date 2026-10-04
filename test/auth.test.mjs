@@ -335,7 +335,7 @@ test('normal user can create custom vanity redirect url with 6-month TTL and 302
 test('mass user public access allows unauthenticated upload and redirect creation on share host', async () => {
   const { env } = environment();
 
-  // 1. Public user uploads a file with no auth headers or cookies on share.test
+  // 1.  Public user uploads a file with no auth headers or cookies on share.test
   const form = new FormData();
   form.set('mode', 'directory');
   form.set('ttl_seconds', '3600');
@@ -356,7 +356,7 @@ test('mass user public access allows unauthenticated upload and redirect creatio
   assert.ok(setCookie.some(c => c.includes('fl_session=')));
   const sessionCookie = cookiesOf(uploadRes);
 
-  // 2. The user can view their newly uploaded share via GET /api/shares using the session cookie
+  // 2.  The user can view their newly uploaded share via GET /api/shares using the session cookie
   const listRes = await worker.fetch(new Request('https://share.test/api/shares', {
     headers: { Cookie: sessionCookie }
   }), env);
@@ -364,7 +364,7 @@ test('mass user public access allows unauthenticated upload and redirect creatio
   const shares = (await listRes.json()).shares;
   assert.ok(shares.some(s => s.slug === uploadData.slug));
 
-  // 3. Public user creates vanity redirect on share.test without existing auth
+  // 3.  Public user creates vanity redirect on share.test without existing auth
   const redirectForm = new FormData();
   redirectForm.set('mode', 'redirect');
   redirectForm.set('slug', 'public-redirect');
