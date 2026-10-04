@@ -332,3 +332,111 @@ test('normal user can create custom vanity redirect url with 6-month TTL and 302
   assert.equal((await worker.fetch(new Request('https://share.test/s/my-vanity-link/'), env)).status, 404);
 });
 
+test('mass user public access allows unauthenticated upload and redirect creation on share host', async () => {
+  const { env } = environment();
+
+  // 1. Public user uploads a file with no auth headers or cookies on share.test
+  const form = new FormData();
+  form.set('mode', 'directory');
+  form.set('ttl_seconds', '3600');
+  form.append('path', 'public-file.txt');
+  form.append('file', new File(['hello public world'], 'public-file.txt'));
+
+  const uploadRes = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    body: form
+  }), env);
+  assert.equal(uploadRes.status, 201);
+  const uploadData = await uploadRes.json();
+  assert.equal(uploadData.mode, 'directory');
+  assert.equal(uploadData.files.length, 1);
+
+  // Auto-issued session cookie
+  const setCookie = uploadRes.headers.getSetCookie();
+  assert.ok(setCookie.some(c => c.includes('fl_session=')));
+  const sessionCookie = cookiesOf(uploadRes);
+
+  // 2. The user can view their newly uploaded share via GET /api/shares using the session cookie
+  const listRes = await worker.fetch(new Request('https://share.test/api/shares', {
+    headers: { Cookie: sessionCookie }
+  }), env);
+  assert.equal(listRes.status, 200);
+  const shares = (await listRes.json()).shares;
+  assert.ok(shares.some(s => s.slug === uploadData.slug));
+
+  // 3. Public user creates vanity redirect on share.test without existing auth
+  const redirectForm = new FormData();
+  redirectForm.set('mode', 'redirect');
+  redirectForm.set('slug', 'public-redirect');
+  redirectForm.set('target_url', 'https://example.com/welcome');
+  redirectForm.set('ttl_seconds', String(180 * 24 * 3600));
+
+  const redirectRes = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    body: redirectForm
+  }), env);
+  assert.equal(redirectRes.status, 201);
+  const redirectData = await redirectRes.json();
+  assert.equal(redirectData.slug, 'public-redirect');
+  assert.equal(redirectData.target_url, 'https://example.com/welcome');
+
+  // Verify redirect resolves via 302
+  const getRes = await worker.fetch(new Request('https://share.test/s/public-redirect/'), env);
+  assert.equal(getRes.status, 302);
+  assert.equal(getRes.headers.get('location'), 'https://example.com/welcome');
+});
+
+test('URL length validation rejects non-ASCII percent-encoded URLs exceeding 2048 characters', async () => {
+  const { env } = environment();
+  const cookie = cookiesOf(await githubLogin(env));
+
+  // 1500 'é' characters is < 2048 characters raw, but encodes to ~4500 characters in WHATWG URL serialization (%C3%A9)
+  const longNonAsciiUrl = 'https://example.com/' + 'é'.repeat(1500);
+  const form = new FormData();
+  form.set('mode', 'redirect');
+  form.set('slug', 'encoded-overflow');
+  form.set('target_url', longNonAsciiUrl);
+
+  const res = await worker.fetch(new Request(`${ORIGIN}/api/shares`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN },
+    body: form
+  }), env);
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /Destination URL exceeds 2048 characters/);
+});
+
+test('expanded reserved slugs reject sensitive paths to prevent slug-squatting', async () => {
+  const { env } = environment();
+  const cookie = cookiesOf(await githubLogin(env));
+
+  const sensitiveSlugs = ['billing', 'support', 'verify-account', 'password-reset', 'security', 'dashboard'];
+  for (const slug of sensitiveSlugs) {
+    const form = new FormData();
+    form.set('mode', 'redirect');
+    form.set('slug', slug);
+    form.set('target_url', 'https://example.com');
+    const res = await worker.fetch(new Request(`${ORIGIN}/api/shares`, {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: ORIGIN },
+      body: form
+    }), env);
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /is invalid or reserved/);
+  }
+});
+
+test('portal and admin routes are accessible on share host as well as admin host', async () => {
+  const { env } = environment();
+
+  const portalRes = await worker.fetch(new Request('https://share.test/portal'), env);
+  assert.equal(portalRes.status, 200);
+  const portalHtml = await portalRes.text();
+  assert.match(portalHtml, /FleetLink/);
+
+  const adminRes = await worker.fetch(new Request('https://share.test/admin'), env);
+  assert.equal(adminRes.status, 200);
+  const adminHtml = await adminRes.text();
+  assert.match(adminHtml, /FleetLink/);
+});
+

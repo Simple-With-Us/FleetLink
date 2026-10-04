@@ -236,8 +236,14 @@ export async function logout(request: Request, env: AuthEnv): Promise<Response> 
   return new Response(null, { status: 303, headers: { Location: '/', 'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`, 'Cache-Control': 'no-store' } });
 }
 
-/** Cookie-authenticated writes must come from the portal's own origin. */
-export const sameOrigin = (request: Request, env: AuthEnv) => request.headers.get('origin') === portalOrigin(env);
+/** Cookie-authenticated writes must come from the portal's own origin or configured share hosts. */
+export const sameOrigin = (request: Request, env: AuthEnv) => {
+  const origin = request.headers.get('origin');
+  if (!origin) return false;
+  if (origin === portalOrigin(env)) return true;
+  const hosts = (env as unknown as { SHARE_HOSTS?: string }).SHARE_HOSTS?.split(',').map(x => x.trim().toLowerCase()).filter(Boolean) || [];
+  return hosts.some(h => origin === `https://${h}` || origin === `http://${h}`);
+};
 
 export async function purgeExpiredSessions(env: AuthEnv) {
   await env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Math.floor(Date.now() / 1000)).run();
