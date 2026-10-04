@@ -90,7 +90,7 @@ test('GitHub sign-in creates a user, a session, and a portal that lists only the
   const html = await home.text();
   assert.match(html, /Your shares/);
   assert.doesNotMatch(html, /id="token"/);
-  assert.doesNotMatch(html, /name="slug"/);
+  assert.match(html, /name="slug"/);
   const anon = await (await worker.fetch(new Request(`${ORIGIN}/`), env)).text();
   assert.match(anon, /id="token"/);
   assert.match(anon, /\/auth\/github\/start/);
@@ -277,7 +277,7 @@ test('normal user can create custom vanity redirect url with 6-month TTL and 302
   assert.equal(getRes.status, 302);
   assert.equal(getRes.headers.get('location'), 'https://example.com/target-page');
 
-  // 3. Normal user requesting > 183 days is rejected
+  // 3. Normal user requesting > 180 days is rejected
   const formExcess = new FormData();
   formExcess.set('mode', 'redirect');
   formExcess.set('slug', 'too-long');
@@ -289,9 +289,34 @@ test('normal user can create custom vanity redirect url with 6-month TTL and 302
     body: formExcess
   }), env);
   assert.equal(resExcess.status, 400);
-  assert.match((await resExcess.json()).error, /must be between 60 seconds and 180 days \(6 months\)/);
+  assert.match((await resExcess.json()).error, /must be between 60 seconds and 180 days/);
 
-  // 4. Shares list includes the redirect target
+  // 4. Invalid or non-http(s) destination URL is rejected
+  const formBadUrl = new FormData();
+  formBadUrl.set('mode', 'redirect');
+  formBadUrl.set('target_url', 'ftp://example.com/file');
+  const resBadUrl = await worker.fetch(new Request(`${ORIGIN}/api/shares`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN },
+    body: formBadUrl
+  }), env);
+  assert.equal(resBadUrl.status, 400);
+  assert.match((await resBadUrl.json()).error, /must use http or https/);
+
+  // 5. Reserved slug is rejected
+  const formReserved = new FormData();
+  formReserved.set('mode', 'redirect');
+  formReserved.set('slug', 'login');
+  formReserved.set('target_url', 'https://example.com/login');
+  const resReserved = await worker.fetch(new Request(`${ORIGIN}/api/shares`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN },
+    body: formReserved
+  }), env);
+  assert.equal(resReserved.status, 400);
+  assert.match((await resReserved.json()).error, /is invalid or reserved/);
+
+  // 6. Shares list includes the redirect target
   const listRes = await worker.fetch(new Request(`${ORIGIN}/api/shares`, { headers: { Cookie: cookie } }), env);
   assert.equal(listRes.status, 200);
   const shares = (await listRes.json()).shares;
@@ -299,5 +324,11 @@ test('normal user can create custom vanity redirect url with 6-month TTL and 302
   assert.ok(myShare);
   assert.equal(myShare.mode, 'redirect');
   assert.equal(myShare.target_url, 'https://example.com/target-page');
+
+  // 7. Deleting a redirect share succeeds without crashing on non-array objects_json
+  const delRes = await call(env, 'DELETE', '/api/shares/my-vanity-link', cookie);
+  assert.equal(delRes.status, 200);
+  assert.deepEqual(await delRes.json(), { deleted: 'my-vanity-link' });
+  assert.equal((await worker.fetch(new Request('https://share.test/s/my-vanity-link/'), env)).status, 404);
 });
 

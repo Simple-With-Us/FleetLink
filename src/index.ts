@@ -19,8 +19,9 @@ const USER_LIMITS: Limits = { files: AGENT_MAX_FILES, fileBytes: AGENT_MAX_FILE_
 const USER_MAX_ACTIVE_SHARES = 50;
 const mb = (n: number) => `${Math.round(n / (1024 * 1024))}MB`;
 const MAX_TTL = 7 * 24 * 3600, DEFAULT_TTL = 24 * 3600;
-const REDIRECT_MAX_TTL_USER = 183 * 24 * 3600; // 6 months (180-183 days) for normal users and agents
+const REDIRECT_MAX_TTL_USER = 180 * 24 * 3600; // 6 months (180 days) for normal users and agents
 const REDIRECT_DEFAULT_TTL = 180 * 24 * 3600;
+const RESERVED_SLUGS = new Set(['api', 's', 'auth', 'login', 'logout', 'portal', 'admin', 'instructions', 'apple-app-site-association', 'robots.txt', 'favicon.ico']);
 const enc = new TextEncoder();
 const hex = (a: Uint8Array) => Array.from(a, v => v.toString(16).padStart(2, '0')).join('');
 const randomHex = (bytes = 16) => hex(crypto.getRandomValues(new Uint8Array(bytes)));
@@ -98,10 +99,12 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   if (mode === 'redirect') {
     const rawTarget = form.get('target_url') || form.get('url') || form.get('redirect_url');
     if (typeof rawTarget !== 'string' || !rawTarget.trim()) return err('Upload rejected: Destination URL is required for redirect mode.');
-    targetUrl = rawTarget.trim();
-    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-      return err('Upload rejected: Destination URL must begin with http:// or https://.');
-    }
+    const trimmed = rawTarget.trim();
+    let parsedTarget: URL;
+    try { parsedTarget = new URL(trimmed); } catch { return err('Upload rejected: Destination URL is not a valid URL.'); }
+    if (!/^https?:$/.test(parsedTarget.protocol)) return err('Upload rejected: Destination URL must use http or https.');
+    if (trimmed.length > 2048) return err('Upload rejected: Destination URL exceeds 2048 characters.');
+    targetUrl = parsedTarget.toString();
   } else {
     const { files: gotFiles, error } = getFiles(form, limits);
     if (error) return err(error);
@@ -114,7 +117,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     : (who.role === 'admin' ? 30 * 24 * 3600 : MAX_TTL);
   if (!Number.isInteger(ttl) || ttl < 60 || ttl > maxTtl) {
     if (mode === 'redirect') {
-      return err(`Upload rejected: TTL for redirect URLs must be between 60 seconds and 180 days (6 months) for normal users (received: ${ttl}).`);
+      return err(`Upload rejected: TTL for redirect URLs must be between 60 seconds and ${Math.round(maxTtl / 86400)} days (received: ${ttl}).`);
     }
     return err(`Upload rejected: TTL must be between 60 seconds and 30 days (received: ${ttl}).`);
   }
@@ -122,7 +125,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   if (rawSlug !== null && typeof rawSlug !== 'string') return err('Upload rejected: Invalid slug format.');
   if (who.role !== 'admin' && mode !== 'redirect' && (rawSlug || '').trim()) return err('Upload rejected: Only admins can choose a custom slug.', 403);
   const slug = (rawSlug || '').trim() || randomHex();
-  if (!slugPattern.test(slug) || slug === 'api' || slug === 's') return err('Upload rejected: Slug must be 1-64 lowercase letters, digits, or interior hyphens (reserved: "api", "s").');
+  if (!slugPattern.test(slug) || RESERVED_SLUGS.has(slug)) return err(`Upload rejected: Slug "${slug}" is invalid or reserved.`);
   const rawHost = form.get('domain');
   if (rawHost !== null && typeof rawHost !== 'string') return err('Upload rejected: Invalid domain format.');
   const domain = (rawHost || env.DEFAULT_SHARE_HOST).trim().toLowerCase();
@@ -272,9 +275,12 @@ async function deleteShare(request: Request, env: Env, slug: string): Promise<Re
   // Someone else's share looks the same as a missing one.
   if (!share || (who.role !== 'admin' && share.owner_id !== who.userId)) return err('Share not found.', 404);
   let entries: Entry[] = [];
-  try { entries = JSON.parse(share.objects_json); } catch { console.error('Invalid manifest', slug); }
   try {
-    await Promise.all(entries.map(x => env.FILES.delete(x.key)));
+    const parsed = JSON.parse(share.objects_json);
+    if (Array.isArray(parsed)) entries = parsed;
+  } catch { console.error('Invalid manifest', slug); }
+  try {
+    if (entries.length) await Promise.all(entries.map(x => env.FILES.delete(x.key)));
     await env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug).run();
   } catch (e) { console.error('Delete failed', slug, e); return err('Delete failed.', 500); }
   return Response.json({ deleted: slug }, { headers: { 'Cache-Control': 'no-store' } });
@@ -287,7 +293,7 @@ const homePage = (env: Env, user: User | null) => {
     ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}). <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
     : `<p>Upload files or a folder. Keep your admin token private; it stays in this tab and is not saved.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
   const tokenField = signedIn ? '' : '<label>Admin token <input id="token" type="password" autocomplete="off" required></label><br>';
-  const slugField = !signedIn || user.role === 'admin' ? '<label>Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br>' : '';
+  const slugField = '<label id="l_slug">Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br id="b_slug">';
   const mine = signedIn ? `<h2>${user.role === 'admin' ? 'All active shares' : 'Your shares'}</h2><ul id="mine"></ul>` : '';
   return page(`<h1>FleetLink</h1>${head}<form id="f">${tokenField}<label>Files <input id="files" type="file" multiple></label><br><label>Folder <input id="folder" type="file" webkitdirectory multiple></label><br><label>Mode <select name="mode"><option value="directory">Directory</option><option value="site">Hosted site</option><option value="redirect">Redirect URL</option></select></label><br><label id="l_target" style="display:none">Target URL <input name="target_url" type="url" placeholder="https://..."></label><br id="b_target" style="display:none"><label>TTL (seconds) <input name="ttl_seconds" type="number" min="60" max="315360000" value="86400"></label><br>${slugField}<label>Password (optional) <input name="password" type="password"></label><br><label>Domain <select name="domain">${canonicalHosts(env).map(h => `<option value="${escapeHtml(h)}" ${h === env.DEFAULT_SHARE_HOST ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}</select></label><br><button>Make share</button></form><pre id="result"></pre>${mine}<script>const signedIn=${signedIn ? 'true' : 'false'};const result=document.querySelector('#result');
 document.querySelector('select[name="mode"]').onchange=e=>{const isR=e.target.value==='redirect';document.querySelector('#l_target').style.display=isR?'inline':'none';document.querySelector('#b_target').style.display=isR?'inline':'none';if(isR)document.querySelector('input[name="ttl_seconds"]').value='15552000';};

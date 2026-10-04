@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS shares (
   slug TEXT PRIMARY KEY,
-  mode TEXT NOT NULL CHECK (mode IN ('directory','site','redirect')),
+  mode TEXT NOT NULL CHECK (mode IN ('directory','site')),
   expires_at INTEGER NOT NULL,
   password_salt TEXT,
   password_hash TEXT,
