@@ -15,7 +15,7 @@ const ORIGIN = 'https://admin.test';
 // A real SQLite database behind the D1 calls the worker uses.
 function d1() {
   const db = new SQL.Database();
-  for (const f of ['0001_shares.sql', '0002_users.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
+  for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
   const exec = (sql, args) => { const st = db.prepare(sql); st.bind(args); const rows = []; while (st.step()) rows.push(st.getAsObject()); st.free(); return rows; };
   const stmt = (sql) => { let args = []; const s = { bind(...a) { args = a; return s; }, async first() { return exec(sql, args)[0] ?? null; }, async all() { return { results: exec(sql, args) }; }, async run() { exec(sql, args); return {}; }, _run: () => exec(sql, args) }; return s; };
   return { prepare: stmt, async batch(list) { return list.map(s => ({ results: s._run() })); }, raw: exec };
@@ -90,7 +90,7 @@ test('GitHub sign-in creates a user, a session, and a portal that lists only the
   const html = await home.text();
   assert.match(html, /Your shares/);
   assert.doesNotMatch(html, /id="token"/);
-  assert.doesNotMatch(html, /name="slug"/);
+  assert.match(html, /name="slug"/);
   const anon = await (await worker.fetch(new Request(`${ORIGIN}/`), env)).text();
   assert.match(anon, /id="token"/);
   assert.match(anon, /\/auth\/github\/start/);
@@ -248,3 +248,87 @@ test('unconfigured providers are inert', async () => {
   assert.equal((await worker.fetch(new Request(`${ORIGIN}/auth/github/start`), env)).status, 404);
   assert.equal((await worker.fetch(new Request(`${ORIGIN}/auth/nope/start`), env)).status, 404);
 });
+
+test('normal user can create custom vanity redirect url with 6-month TTL and 302 resolution', async () => {
+  const { env } = environment();
+  const cookie = cookiesOf(await githubLogin(env));
+
+  // 1. Normal user specifying custom slug on redirect works with 180-day (6-month) TTL
+  const SIX_MONTHS_SECONDS = 180 * 24 * 3600;
+  const form = new FormData();
+  form.set('mode', 'redirect');
+  form.set('slug', 'my-vanity-link');
+  form.set('target_url', 'https://example.com/target-page');
+  form.set('ttl_seconds', String(SIX_MONTHS_SECONDS));
+
+  const res = await worker.fetch(new Request(`${ORIGIN}/api/shares`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN },
+    body: form
+  }), env);
+  assert.equal(res.status, 201);
+  const data = await res.json();
+  assert.equal(data.slug, 'my-vanity-link');
+  assert.equal(data.target_url, 'https://example.com/target-page');
+  assert.equal(data.mode, 'redirect');
+
+  // 2. Visiting the redirect short link issues HTTP 302 to destination
+  const getRes = await worker.fetch(new Request('https://share.test/s/my-vanity-link/'), env);
+  assert.equal(getRes.status, 302);
+  assert.equal(getRes.headers.get('location'), 'https://example.com/target-page');
+
+  // 3. Normal user requesting > 180 days is rejected
+  const formExcess = new FormData();
+  formExcess.set('mode', 'redirect');
+  formExcess.set('slug', 'too-long');
+  formExcess.set('target_url', 'https://example.com/target');
+  formExcess.set('ttl_seconds', String(200 * 24 * 3600));
+  const resExcess = await worker.fetch(new Request(`${ORIGIN}/api/shares`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN },
+    body: formExcess
+  }), env);
+  assert.equal(resExcess.status, 400);
+  assert.match((await resExcess.json()).error, /must be between 60 seconds and 180 days/);
+
+  // 4. Invalid or non-http(s) destination URL is rejected
+  const formBadUrl = new FormData();
+  formBadUrl.set('mode', 'redirect');
+  formBadUrl.set('target_url', 'ftp://example.com/file');
+  const resBadUrl = await worker.fetch(new Request(`${ORIGIN}/api/shares`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN },
+    body: formBadUrl
+  }), env);
+  assert.equal(resBadUrl.status, 400);
+  assert.match((await resBadUrl.json()).error, /must use http or https/);
+
+  // 5. Reserved slug is rejected
+  const formReserved = new FormData();
+  formReserved.set('mode', 'redirect');
+  formReserved.set('slug', 'login');
+  formReserved.set('target_url', 'https://example.com/login');
+  const resReserved = await worker.fetch(new Request(`${ORIGIN}/api/shares`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN },
+    body: formReserved
+  }), env);
+  assert.equal(resReserved.status, 400);
+  assert.match((await resReserved.json()).error, /is invalid or reserved/);
+
+  // 6. Shares list includes the redirect target
+  const listRes = await worker.fetch(new Request(`${ORIGIN}/api/shares`, { headers: { Cookie: cookie } }), env);
+  assert.equal(listRes.status, 200);
+  const shares = (await listRes.json()).shares;
+  const myShare = shares.find(s => s.slug === 'my-vanity-link');
+  assert.ok(myShare);
+  assert.equal(myShare.mode, 'redirect');
+  assert.equal(myShare.target_url, 'https://example.com/target-page');
+
+  // 7. Deleting a redirect share succeeds without crashing on non-array objects_json
+  const delRes = await call(env, 'DELETE', '/api/shares/my-vanity-link', cookie);
+  assert.equal(delRes.status, 200);
+  assert.deepEqual(await delRes.json(), { deleted: 'my-vanity-link' });
+  assert.equal((await worker.fetch(new Request('https://share.test/s/my-vanity-link/'), env)).status, 404);
+});
+
