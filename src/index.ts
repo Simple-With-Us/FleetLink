@@ -1,4 +1,4 @@
-import { cleanPath, contentType, escapeHtml, slugPattern } from './pure';
+import { cleanPath, contentType, escapeHtml, sha256Hex, slugPattern } from './pure';
 import { type AuthEnv, type User, configuredProviders, finishLogin, isProvider, logout, purgeExpiredSessions, sameOrigin, sessionUser, SESSION_COOKIE, startLogin } from './auth';
 
 interface Env extends AuthEnv {
@@ -21,7 +21,12 @@ const mb = (n: number) => `${Math.round(n / (1024 * 1024))}MB`;
 const MAX_TTL = 7 * 24 * 3600, DEFAULT_TTL = 24 * 3600;
 const REDIRECT_MAX_TTL_USER = 180 * 24 * 3600; // 6 months (180 days) for normal users and agents
 const REDIRECT_DEFAULT_TTL = 180 * 24 * 3600;
-const RESERVED_SLUGS = new Set(['api', 's', 'auth', 'login', 'logout', 'portal', 'admin', 'instructions', 'apple-app-site-association', 'robots.txt', 'favicon.ico']);
+const RESERVED_SLUGS = new Set([
+  'api', 's', 'auth', 'login', 'logout', 'portal', 'admin', 'instructions',
+  'apple-app-site-association', 'robots.txt', 'favicon.ico', 'billing', 'support',
+  'verify-account', 'password-reset', 'account', 'security', 'signin', 'signup',
+  'help', 'terms', 'privacy', 'status', 'dashboard', 'app', 'oauth', 'webhook', 'assets'
+]);
 const enc = new TextEncoder();
 const hex = (a: Uint8Array) => Array.from(a, v => v.toString(16).padStart(2, '0')).join('');
 const randomHex = (bytes = 16) => hex(crypto.getRandomValues(new Uint8Array(bytes)));
@@ -83,9 +88,29 @@ async function principal(request: Request, env: Env): Promise<Principal | null> 
   return user ? { role: user.role, userId: user.id, viaSession: true } : null;
 }
 async function createShare(request: Request, env: Env): Promise<Response> {
-  const who = await principal(request, env);
-  if (!who) return err('Upload rejected: Unauthorized. Provide a valid Bearer token or sign in.', 401);
-  if (who.viaSession && !sameOrigin(request, env)) return err('Upload rejected: Cross-origin request.', 403);
+  let who = await principal(request, env);
+  let newSessionCookie: string | null = null;
+  const host = new URL(request.url).hostname.toLowerCase();
+  const isAdminHost = host === env.ADMIN_HOST.toLowerCase();
+  if (!who) {
+    if (isAdminHost || request.headers.get('authorization')) {
+      return err('Upload rejected: Unauthorized.  Provide a valid Bearer token or sign in.', 401);
+    }
+    // Mass user access: unauthenticated uploads create an anonymous guest user & session
+    const id = randomHex(8), now = Math.floor(Date.now() / 1000);
+    const token = randomHex(32);
+    try {
+      await env.DB.prepare('INSERT INTO users (id,role,display_name,email,disabled,created_at) VALUES (?,?,?,?,0,?)')
+        .bind(id, 'user', 'Guest User', null, now).run();
+      await env.DB.prepare('INSERT INTO sessions (token_hash,user_id,created_at,expires_at) VALUES (?,?,?,?)')
+        .bind(await sha256Hex(token), id, now, now + 14 * 24 * 3600).run();
+      who = { role: 'user', userId: id, viaSession: true };
+      newSessionCookie = `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${14 * 24 * 3600}`;
+    } catch {
+      who = { role: 'user', userId: null, viaSession: false };
+    }
+  }
+  if (who.viaSession && !newSessionCookie && !sameOrigin(request, env)) return err('Upload rejected: Cross-origin request.', 403);
   const limits = who.role === 'admin' ? ADMIN_LIMITS : USER_LIMITS;
   const length = Number(request.headers.get('content-length'));
   if (Number.isFinite(length) && length > 520 * 1024 * 1024) return err('Upload rejected: Request body exceeds 500MB total limit.', 413);
@@ -103,8 +128,9 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     let parsedTarget: URL;
     try { parsedTarget = new URL(trimmed); } catch { return err('Upload rejected: Destination URL is not a valid URL.'); }
     if (!/^https?:$/.test(parsedTarget.protocol)) return err('Upload rejected: Destination URL must use http or https.');
-    if (trimmed.length > 2048) return err('Upload rejected: Destination URL exceeds 2048 characters.');
-    targetUrl = parsedTarget.toString();
+    const normalized = parsedTarget.toString();
+    if (normalized.length > 2048) return err('Upload rejected: Destination URL exceeds 2048 characters.');
+    targetUrl = normalized;
   } else {
     const { files: gotFiles, error } = getFiles(form, limits);
     if (error) return err(error);
@@ -152,6 +178,8 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     const objectsJson = mode === 'redirect' ? JSON.stringify({ target_url: targetUrl }) : JSON.stringify(entries);
     await env.DB.prepare('INSERT INTO shares (slug,mode,expires_at,password_salt,password_hash,objects_json,created_at,owner_id) VALUES (?,?,?,?,?,?,?,?)')
       .bind(slug, mode, expires, salt, hash, objectsJson, now, who.userId).run();
+    const resHeaders: Record<string, string> = { 'Cache-Control': 'no-store' };
+    if (newSessionCookie) resHeaders['Set-Cookie'] = newSessionCookie;
     return Response.json({
       url: `https://${domain}/s/${slug}/`,
       slug,
@@ -159,11 +187,11 @@ async function createShare(request: Request, env: Env): Promise<Response> {
       expires_at: new Date(expires * 1000).toISOString(),
       mode,
       ...(mode === 'redirect' ? { target_url: targetUrl } : { files: entries.map(({ path, size }) => ({ path, size })) })
-    }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
+    }, { status: 201, headers: resHeaders });
   } catch (e) {
     await Promise.allSettled(keys.map(key => env.FILES.delete(key)));
     if (String(e).includes('UNIQUE constraint')) return err(`Upload rejected: Slug "${slug}" is already taken.`, 409);
-    console.error('Upload failed', e);
+    console.error(JSON.stringify({ event: 'upload_failed', slug }));
     return err(`Upload rejected: Server error - ${String(e)}`, 500);
   }
 }
@@ -278,34 +306,40 @@ async function deleteShare(request: Request, env: Env, slug: string): Promise<Re
   try {
     const parsed = JSON.parse(share.objects_json);
     if (Array.isArray(parsed)) entries = parsed;
-  } catch { console.error('Invalid manifest', slug); }
+  } catch { console.error(JSON.stringify({ event: 'invalid_manifest', slug })); }
   try {
     if (entries.length) await Promise.all(entries.map(x => env.FILES.delete(x.key)));
     await env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug).run();
-  } catch (e) { console.error('Delete failed', slug, e); return err('Delete failed.', 500); }
+  } catch { console.error(JSON.stringify({ event: 'delete_failed', slug })); return err('Delete failed.', 500); }
   return Response.json({ deleted: slug }, { headers: { 'Cache-Control': 'no-store' } });
 }
 const providerNames = { github: 'GitHub', google: 'Google', apple: 'Apple' } as const;
 const homePage = (env: Env, user: User | null) => {
   const signedIn = user !== null;
+  const userIsAdmin = user?.role === 'admin';
   const providers = configuredProviders(env);
   const head = signedIn
-    ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}). <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
-    : `<p>Upload files or a folder. Keep your admin token private; it stays in this tab and is not saved.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
-  const tokenField = signedIn ? '' : '<label>Admin token <input id="token" type="password" autocomplete="off" required></label><br>';
-  const slugField = '<label id="l_slug">Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br id="b_slug">';
-  const mine = signedIn ? `<h2>${user.role === 'admin' ? 'All active shares' : 'Your shares'}</h2><ul id="mine"></ul>` : '';
-  return page(`<h1>FleetLink</h1>${head}<form id="f">${tokenField}<label>Files <input id="files" type="file" multiple></label><br><label>Folder <input id="folder" type="file" webkitdirectory multiple></label><br><label>Mode <select name="mode"><option value="directory">Directory</option><option value="site">Hosted site</option><option value="redirect">Redirect URL</option></select></label><br><label id="l_target" style="display:none">Target URL <input name="target_url" type="url" placeholder="https://..."></label><br id="b_target" style="display:none"><label>TTL (seconds) <input name="ttl_seconds" type="number" min="60" max="315360000" value="86400"></label><br>${slugField}<label>Password (optional) <input name="password" type="password"></label><br><label>Domain <select name="domain">${canonicalHosts(env).map(h => `<option value="${escapeHtml(h)}" ${h === env.DEFAULT_SHARE_HOST ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}</select></label><br><button>Make share</button></form><pre id="result"></pre>${mine}<script>const signedIn=${signedIn ? 'true' : 'false'};const result=document.querySelector('#result');
-document.querySelector('select[name="mode"]').onchange=e=>{const isR=e.target.value==='redirect';document.querySelector('#l_target').style.display=isR?'inline':'none';document.querySelector('#b_target').style.display=isR?'inline':'none';if(isR)document.querySelector('input[name="ttl_seconds"]').value='15552000';};
+    ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}).  <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
+    : `<p>Upload files or create redirect URLs.  Admin token optional.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
+  const tokenField = signedIn ? '' : '<label>Admin token (optional) <input id="token" type="password" autocomplete="off"></label><br>';
+  const slugField = `<label id="l_slug" style="display:${userIsAdmin ? 'inline' : 'none'}">Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br id="b_slug" style="display:${userIsAdmin ? 'inline' : 'none'}">`;
+  const mine = `<h2>${userIsAdmin ? 'All active shares' : 'Your shares'}</h2><ul id="mine"></ul>`;
+  return page(`<h1>FleetLink</h1>${head}<form id="f">${tokenField}<label>Files <input id="files" type="file" multiple></label><br><label>Folder <input id="folder" type="file" webkitdirectory multiple></label><br><label>Mode <select name="mode"><option value="directory">Directory</option><option value="site">Hosted site</option><option value="redirect">Redirect URL</option></select></label><br><label id="l_target" style="display:none">Target URL <input name="target_url" type="url" placeholder="https://..."></label><br id="b_target" style="display:none"><label>TTL (seconds) <input name="ttl_seconds" type="number" min="60" max="315360000" value="86400"></label><br>${slugField}<label>Password (optional) <input name="password" type="password"></label><br><label>Domain <select name="domain">${canonicalHosts(env).map(h => `<option value="${escapeHtml(h)}" ${h === env.DEFAULT_SHARE_HOST ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}</select></label><br><button>Make share</button></form><pre id="result"></pre>${mine}<script>const signedIn=${signedIn ? 'true' : 'false'};const userIsAdmin=${userIsAdmin ? 'true' : 'false'};const result=document.querySelector('#result');
+document.querySelector('select[name="mode"]').onchange=e=>{const isR=e.target.value==='redirect';document.querySelector('#l_target').style.display=isR?'inline':'none';document.querySelector('#b_target').style.display=isR?'inline':'none';if(document.querySelector('#l_slug'))document.querySelector('#l_slug').style.display=(isR||userIsAdmin)?'inline':'none';if(document.querySelector('#b_slug'))document.querySelector('#b_slug').style.display=(isR||userIsAdmin)?'inline':'none';if(isR)document.querySelector('input[name="ttl_seconds"]').value='15552000';};
 function copyButton(text){const b=document.createElement('button');b.type='button';b.textContent='Copy link';b.onclick=async()=>{try{await navigator.clipboard.writeText(text);b.textContent='Copied'}catch{const t=document.createElement('textarea');t.value=text;document.body.append(t);t.select();try{document.execCommand('copy');b.textContent='Copied'}catch{b.textContent='Copy failed'}t.remove()}setTimeout(()=>{b.textContent='Copy link'},1500)};return b}
-async function refresh(){if(!signedIn)return;const ul=document.querySelector('#mine');const r=await fetch('/api/shares');if(!r.ok){ul.textContent='Could not load shares.';return}const {shares}=await r.json();ul.replaceChildren();if(!shares.length){ul.textContent='No active shares.';return}for(const s of shares){const li=document.createElement('li');const a=document.createElement('a');a.href=s.url;a.textContent=s.url;li.append(a,' ');li.append(copyButton(s.url));li.append(' - '+(s.mode==='redirect'?'↳ '+(s.target_url||'redirect'):s.files+' file(s)')+(s.password_protected?', password':'')+', expires '+s.expires_at+' ');const b=document.createElement('button');b.textContent='Delete';b.onclick=async()=>{if(!confirm('Delete '+s.slug+'?'))return;const d=await fetch('/api/shares/'+encodeURIComponent(s.slug),{method:'DELETE'});if(!d.ok)result.textContent='Delete failed';refresh()};li.append(b);ul.append(li)}}
-document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}result.textContent='Uploading...';try{const init={method:'POST',body:d};if(!signedIn)init.headers={Authorization:'Bearer '+document.querySelector('#token').value};const r=await fetch('/api/shares',init);const data=await r.json();result.textContent='';if(data.url){const a=document.createElement('a');a.href=data.url;a.textContent=data.url;result.append(a,' ',copyButton(data.url))}else result.textContent=data.error||'Failed';refresh()}catch(err){result.textContent=String(err)}};refresh();</script>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
+async function refresh(){const ul=document.querySelector('#mine');if(!ul)return;const r=await fetch('/api/shares');if(!r.ok){if(!signedIn)return;ul.textContent='Could not load shares.';return}const {shares}=await r.json();ul.replaceChildren();if(!shares.length){ul.textContent='No active shares.';return}for(const s of shares){const li=document.createElement('li');const a=document.createElement('a');a.href=s.url;a.textContent=s.url;li.append(a,' ');li.append(copyButton(s.url));li.append(' - '+(s.mode==='redirect'?'↳ '+(s.target_url||'redirect'):s.files+' file(s)')+(s.password_protected?', password':'')+', expires '+s.expires_at+' ');const b=document.createElement('button');b.textContent='Delete';b.onclick=async()=>{if(!confirm('Delete '+s.slug+'?'))return;const d=await fetch('/api/shares/'+encodeURIComponent(s.slug),{method:'DELETE'});if(!d.ok)result.textContent='Delete failed';refresh()};li.append(b);ul.append(li)}}
+document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}result.textContent='Uploading...';try{const init={method:'POST',body:d};const tokInput=document.querySelector('#token');if(tokInput&&tokInput.value.trim())init.headers={Authorization:'Bearer '+tokInput.value.trim()};const r=await fetch('/api/shares',init);const data=await r.json();result.textContent='';if(data.url){const a=document.createElement('a');a.href=data.url;a.textContent=data.url;result.append(a,' ',copyButton(data.url))}else result.textContent=data.error||'Failed';refresh()}catch(err){result.textContent=String(err)}};refresh();</script>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
 };
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url), host = url.hostname.toLowerCase();
-    if (host === env.ADMIN_HOST.toLowerCase()) {
-      if (url.pathname === '/' && request.method === 'GET') return homePage(env, request.headers.get('cookie')?.includes(`${SESSION_COOKIE}=`) ? await sessionUser(request, env) : null);
+    const isAdminHost = host === env.ADMIN_HOST.toLowerCase();
+    const isShareHost = canonicalHosts(env).includes(host);
+
+    if (isAdminHost || isShareHost) {
+      if ((url.pathname === '/' || url.pathname === '/portal' || url.pathname === '/portal/' || url.pathname === '/admin' || url.pathname === '/admin/') && request.method === 'GET') {
+        return homePage(env, request.headers.get('cookie')?.includes(`${SESSION_COOKIE}=`) ? await sessionUser(request, env) : null);
+      }
       if (url.pathname === '/api/shares' && request.method === 'POST') return createShare(request, env);
       if (url.pathname === '/api/shares' && request.method === 'GET') return listShares(request, env);
       const del = /^\/api\/shares\/([a-z0-9-]{1,64})$/.exec(url.pathname);
@@ -317,9 +351,8 @@ export default {
       if (url.pathname === '/logout' && request.method === 'POST') return sameOrigin(request, env) ? logout(request, env) : err('Cross-origin request.', 403);
       const auth = /^\/auth\/([a-z]+)\/(start|callback)$/.exec(url.pathname);
       if (auth && isProvider(auth[1])) return auth[2] === 'start' && request.method === 'GET' ? startLogin(env, auth[1]) : auth[2] === 'callback' ? finishLogin(request, env, auth[1]) : err('Not found.', 404);
-      return err('Not found.', 404);
     }
-    if (canonicalHosts(env).includes(host)) {
+    if (isShareHost) {
       if (url.pathname === '/.well-known/apple-app-site-association' || url.pathname === '/apple-app-site-association') {
         const aasa = {
           applinks: {
@@ -348,4 +381,5 @@ export default {
   },
   async scheduled(_event: ScheduledController, env: Env): Promise<void> { await cleanup(env); await purgeExpiredSessions(env); }
 } satisfies ExportedHandler<Env>;
+
 
