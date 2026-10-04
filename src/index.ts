@@ -40,7 +40,7 @@ function decodePath(s: string): string | null {
   try { return cleanPath(s.split('/').map(decodeURIComponent).join('/')); } catch { return null; }
 }
 const urlPath = (s: string) => s.split('/').map(encodeURIComponent).join('/');
-const page = (body: string, status = 200, headers: Record<string,string> = {}) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.Clip, app-clip-display=card"><title>FleetLink</title><style>body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}input,button,select{font:inherit;margin:.3rem 0;padding:.5rem}li{margin:.6rem 0}pre{white-space:pre-wrap}</style></head><body>${body}</body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
+const page = (body: string, status = 200, headers: Record<string,string> = {}) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.ios.Clip, app-clip-display=card"><title>FleetLink</title><style>body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}input,button,select{font:inherit;margin:.3rem 0;padding:.5rem}li{margin:.6rem 0}pre{white-space:pre-wrap}</style></head><body>${body}</body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
 function getFiles(form: FormData, limits: Limits): { files: { path: string, file: File }[], error?: string } {
   const out: { path: string, file: File }[] = [];
   const paths = form.getAll('path');
@@ -268,13 +268,13 @@ export default {
             apps: [],
             details: [
               {
-                appIDs: ['CC8UTF7ATG.online.fleetlink'],
+                appIDs: ['CC8UTF7ATG.online.fleetlink.ios', 'CC8UTF7ATG.online.fleetlink'],
                 components: [{ '/': '/*', comment: 'All artifact shares' }]
               }
             ]
           },
           appclips: {
-            apps: ['CC8UTF7ATG.online.fleetlink.Clip']
+            apps: ['CC8UTF7ATG.online.fleetlink.ios.Clip', 'CC8UTF7ATG.online.fleetlink.Clip']
           }
         };
         return new Response(JSON.stringify(aasa, null, 2), {
