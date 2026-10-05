@@ -1,5 +1,7 @@
 import { cleanPath, contentType, escapeHtml, sha256Hex, slugPattern } from './pure';
 import { type AuthEnv, type User, configuredProviders, finishLogin, isProvider, logout, purgeExpiredSessions, sameOrigin, sessionUser, SESSION_COOKIE, startLogin } from './auth';
+import { createAgentToken, listAgentTokens, revokeAgentToken, requestAgentQuotaIncrease, approveAgentQuotaRequest, rejectAgentQuotaRequest } from './tokens';
+import { createTeam, listUserTeams, addTeamMember, removeTeamMember, revertTeamShares, cleanupExpiredTeamTrials } from './teams';
 
 interface Env extends AuthEnv {
   FILES: R2Bucket;
@@ -8,7 +10,7 @@ interface Env extends AuthEnv {
   DEFAULT_SHARE_HOST: string;
 }
 type Entry = { path: string; key: string; size: number };
-type Share = { slug: string; mode: 'directory' | 'site' | 'redirect'; expires_at: number; password_salt: string | null; password_hash: string | null; objects_json: string; created_at: number; owner_id?: string | null; renewals_count?: number };
+type Share = { slug: string; mode: 'directory' | 'site' | 'redirect'; expires_at: number; password_salt: string | null; password_hash: string | null; objects_json: string; created_at: number; owner_id?: string | null; renewals_count?: number; team_id?: string | null };
 const ADMIN_MAX_FILES = 1000, ADMIN_MAX_FILE_BYTES = 300 * 1024 * 1024, ADMIN_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
 const USER_MAX_FILES = 500, USER_MAX_FILE_BYTES = 300 * 1024 * 1024, USER_MAX_TOTAL_BYTES = 300 * 1024 * 1024;
 const AGENT_MAX_FILES = 50, AGENT_MAX_FILE_BYTES = 100 * 1024 * 1024, AGENT_MAX_TOTAL_BYTES = 500 * 1024 * 1024;
@@ -55,6 +57,7 @@ function decodePath(s: string): string | null {
   try { return cleanPath(s.split('/').map(decodeURIComponent).join('/')); } catch { return null; }
 }
 const urlPath = (s: string) => s.split('/').map(encodeURIComponent).join('/');
+const formEntries = (fd: FormData): Record<string, any> => { const obj: Record<string, any> = {}; for (const [k, v] of (fd as any).entries?.() ?? []) obj[k] = v; return obj; };
 const page = (body: string, status = 200, headers: Record<string,string> = {}) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.ios.Clip, app-clip-display=card"><title>FleetLink</title><style>body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}input,button,select{font:inherit;margin:.3rem 0;padding:.5rem}li{margin:.6rem 0}pre{white-space:pre-wrap}</style></head><body>${body}</body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
 function getFiles(form: FormData, limits: Limits): { files: { path: string, file: File }[], error?: string } {
   const out: { path: string, file: File }[] = [];
@@ -83,13 +86,86 @@ function getFiles(form: FormData, limits: Limits): { files: { path: string, file
   }
   return { files: out };
 }
-type Principal = { role: 'admin' | 'user'; userId: string | null; viaSession: boolean; isGuest?: boolean };
-/** The admin Bearer token (unchanged) or a signed-in portal session.  A wrong Bearer token never falls back to a cookie. */
+type AgentTokenDetails = {
+  id: string;
+  name: string;
+  userId: string;
+  teamId?: string | null;
+  maxFileBytes?: number | null;
+  maxTotalBytes?: number | null;
+  maxFiles?: number | null;
+  maxTtlSeconds?: number | null;
+  allowRedirects: boolean;
+};
+
+type Principal = {
+  role: 'admin' | 'user';
+  userId: string | null;
+  viaSession: boolean;
+  isGuest?: boolean;
+  agentToken?: AgentTokenDetails;
+};
+
+/** The admin Bearer token, agent Bearer / X-Fleet-Agent token, or a signed-in portal session. */
 async function principal(request: Request, env: Env): Promise<Principal | null> {
-  const bearer = request.headers.get('authorization');
-  if (bearer) {
-    return env.ADMIN_TOKEN && env.SESSION_SECRET && safeEq(bearer, `Bearer ${env.ADMIN_TOKEN}`) ? { role: 'admin', userId: null, viaSession: false, isGuest: false } : null;
+  const authHeader = request.headers.get('authorization');
+  const adminHeader = request.headers.get('x-fleet-admin');
+  const agentHeader = request.headers.get('x-fleet-agent');
+
+  let bearerVal: string | null = null;
+  if (authHeader) {
+    bearerVal = authHeader.replace(/^Bearer\s+/i, '').trim();
+  } else if (adminHeader) {
+    bearerVal = adminHeader.trim();
+  } else if (agentHeader) {
+    bearerVal = agentHeader.trim();
   }
+
+  if (bearerVal) {
+    if (env.ADMIN_TOKEN && env.SESSION_SECRET && safeEq(bearerVal, env.ADMIN_TOKEN)) {
+      return { role: 'admin', userId: null, viaSession: false, isGuest: false };
+    }
+    const tokenHash = await sha256Hex(bearerVal);
+    const agentRow = await env.DB.prepare(
+      'SELECT at.*, u.role, u.disabled FROM agent_tokens at JOIN users u ON u.id = at.user_id WHERE at.token_hash = ? AND at.revoked = 0'
+    ).bind(tokenHash).first<{
+      id: string;
+      name: string;
+      user_id: string;
+      team_id: string | null;
+      max_file_bytes: number | null;
+      max_total_bytes: number | null;
+      max_files: number | null;
+      max_ttl_seconds: number | null;
+      allow_redirects: number;
+      role: 'admin' | 'user';
+      disabled: number;
+    }>();
+
+    if (agentRow && agentRow.disabled === 0) {
+      env.DB.prepare('UPDATE agent_tokens SET last_used_at = ? WHERE id = ?')
+        .bind(Math.floor(Date.now() / 1000), agentRow.id).run().catch(() => {});
+      return {
+        role: agentRow.role,
+        userId: agentRow.user_id,
+        viaSession: false,
+        isGuest: false,
+        agentToken: {
+          id: agentRow.id,
+          name: agentRow.name,
+          userId: agentRow.user_id,
+          teamId: agentRow.team_id,
+          maxFileBytes: agentRow.max_file_bytes,
+          maxTotalBytes: agentRow.max_total_bytes,
+          maxFiles: agentRow.max_files,
+          maxTtlSeconds: agentRow.max_ttl_seconds,
+          allowRedirects: agentRow.allow_redirects === 1
+        }
+      };
+    }
+    return null;
+  }
+
   if (!request.headers.get('cookie')?.includes(`${SESSION_COOKIE}=`)) return null;
   const user = await sessionUser(request, env);
   return user ? { role: user.role, userId: user.id, viaSession: true, isGuest: !user.email } : null;
@@ -119,10 +195,25 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   }
   if (who.viaSession && !newSessionCookie && !sameOrigin(request, env)) return err('Upload rejected: Cross-origin request.', 403);
   const isGuest = who.role !== 'admin' && Boolean(who.isGuest);
-  const limits = who.role === 'admin' ? ADMIN_LIMITS : (isGuest ? GUEST_LIMITS : USER_LIMITS);
+  let limits: Limits = who.role === 'admin' ? { ...ADMIN_LIMITS } : (isGuest ? { ...GUEST_LIMITS } : { ...USER_LIMITS });
+
+  if (who.agentToken) {
+    if (who.agentToken.maxFileBytes && who.agentToken.maxFileBytes < limits.fileBytes) {
+      limits.fileBytes = who.agentToken.maxFileBytes;
+    }
+    if (who.agentToken.maxTotalBytes && who.agentToken.maxTotalBytes < limits.totalBytes) {
+      limits.totalBytes = who.agentToken.maxTotalBytes;
+    }
+    if (who.agentToken.maxFiles && who.agentToken.maxFiles < limits.files) {
+      limits.files = who.agentToken.maxFiles;
+    }
+  }
+
   const length = Number(request.headers.get('content-length'));
   if (isGuest && Number.isFinite(length) && length > 22 * 1024 * 1024) return err('Upload rejected: Request body exceeds 20MB limit for unauthenticated guests.', 413);
-  if (!isGuest && Number.isFinite(length) && length > 520 * 1024 * 1024) return err('Upload rejected: Request body exceeds 500MB total limit.', 413);
+  if (!isGuest && limits.totalBytes && Number.isFinite(length) && length > (limits.totalBytes + 20 * 1024 * 1024)) {
+    return err(`Upload rejected: Request body exceeds limit of ${mb(limits.totalBytes)}.`, 413);
+  }
   if (!request.headers.get('content-type')?.startsWith('multipart/form-data')) return err('Upload rejected: Expected multipart/form-data content type.');
   let form: FormData;
   try { form = await request.formData(); } catch { return err('Upload rejected: Failed to parse multipart form data.'); }
@@ -131,6 +222,9 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   let files: { path: string, file: File }[] = [];
   let targetUrl: string | null = null;
   if (mode === 'redirect') {
+    if (who.agentToken && !who.agentToken.allowRedirects) {
+      return err('Upload rejected: This agent token is not permitted to create redirect URLs.', 403);
+    }
     const rawTarget = form.get('target_url') || form.get('url') || form.get('redirect_url');
     if (typeof rawTarget !== 'string' || !rawTarget.trim()) return err('Upload rejected: Destination URL is required for redirect mode.');
     const trimmed = rawTarget.trim();
@@ -147,15 +241,20 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   }
   const defaultTtl = mode === 'redirect' ? (isGuest ? GUEST_REDIRECT_MAX_TTL : REDIRECT_DEFAULT_TTL) : (isGuest ? GUEST_FILE_MAX_TTL : DEFAULT_TTL);
   const ttl = Number(form.get('ttl_seconds') ?? defaultTtl);
-  const maxTtl = mode === 'redirect'
+  let maxTtl = mode === 'redirect'
     ? (who.role === 'admin' ? 365 * 10 * 24 * 3600 : (isGuest ? GUEST_REDIRECT_MAX_TTL : REDIRECT_MAX_TTL_USER))
     : (who.role === 'admin' ? 30 * 24 * 3600 : (isGuest ? GUEST_FILE_MAX_TTL : MAX_TTL));
+
+  if (who.agentToken?.maxTtlSeconds && who.agentToken.maxTtlSeconds < maxTtl) {
+    maxTtl = who.agentToken.maxTtlSeconds;
+  }
+
   if (!Number.isInteger(ttl) || ttl < 60 || ttl > maxTtl) {
     if (mode === 'redirect') {
       const unit = isGuest ? `${Math.round(maxTtl / 3600)} hours` : `${Math.round(maxTtl / 86400)} days`;
       return err(`Upload rejected: TTL for redirect URLs must be between 60 seconds and ${unit} (received: ${ttl}).`);
     }
-    const unit = isGuest ? `${Math.round(maxTtl / 3600)} hours` : '30 days';
+    const unit = isGuest ? `${Math.round(maxTtl / 3600)} hours` : (maxTtl < 86400 ? `${Math.round(maxTtl / 3600)} hours` : `${Math.round(maxTtl / 86400)} days`);
     return err(`Upload rejected: TTL must be between 60 seconds and ${unit} (received: ${ttl}).`);
   }
   const rawSlug = form.get('slug');
@@ -177,6 +276,32 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     const maxActive = isGuest ? GUEST_MAX_ACTIVE_SHARES : USER_MAX_ACTIVE_SHARES;
     if ((active?.n ?? 0) >= maxActive) return err(`Upload rejected: You already have ${maxActive} active shares.  Delete one or wait for one to expire.`, 429);
   }
+
+  // Handle Team Scope
+  let teamId: string | null = null;
+  const rawTeamId = (form.get('team_id') as string | null) || who.agentToken?.teamId || null;
+  if (rawTeamId && typeof rawTeamId === 'string' && rawTeamId.trim()) {
+    const tid = rawTeamId.trim();
+    if (!who.userId) {
+      return err('Upload rejected: Guests cannot upload to a team.', 403);
+    }
+    const team = await env.DB.prepare(
+      'SELECT t.* FROM teams t JOIN team_members tm ON tm.team_id = t.id WHERE t.id = ? AND tm.user_id = ?'
+    ).bind(tid, who.userId).first<{ id: string; name: string; plan: string; trial_ends_at: number }>();
+    if (!team) {
+      return err('Upload rejected: Invalid team or you are not a member of this team.', 403);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    if (team.plan === 'trial' && now > team.trial_ends_at) {
+      await revertTeamShares(env, team.id);
+      return err('Upload rejected: Team trial has expired. Upgrade to Pro to continue creating team shares.', 403);
+    }
+    if (team.plan === 'expired') {
+      return err('Upload rejected: Team trial has expired. Upgrade to Pro to continue creating team shares.', 403);
+    }
+    teamId = team.id;
+  }
+
   const existing = await env.DB.prepare('SELECT slug FROM shares WHERE slug = ?').bind(slug).first();
   if (existing) return err(`Upload rejected: Slug "${slug}" is already active and reserved.`, 409);
   const id = randomHex(), entries: Entry[] = [], keys: string[] = [];
@@ -190,8 +315,8 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     const hash = password && salt ? await passwordHash(password, salt) : null;
     const now = Math.floor(Date.now() / 1000), expires = now + ttl;
     const objectsJson = mode === 'redirect' ? JSON.stringify({ target_url: targetUrl }) : JSON.stringify(entries);
-    await env.DB.prepare('INSERT INTO shares (slug,mode,expires_at,password_salt,password_hash,objects_json,created_at,owner_id,renewals_count) VALUES (?,?,?,?,?,?,?,?,0)')
-      .bind(slug, mode, expires, salt, hash, objectsJson, now, who.userId).run();
+    await env.DB.prepare('INSERT INTO shares (slug,mode,expires_at,password_salt,password_hash,objects_json,created_at,owner_id,renewals_count,team_id) VALUES (?,?,?,?,?,?,?,?,0,?)')
+      .bind(slug, mode, expires, salt, hash, objectsJson, now, who.userId, teamId).run();
     const resHeaders: Record<string, string> = { 'Cache-Control': 'no-store' };
     if (newSessionCookie) resHeaders['Set-Cookie'] = newSessionCookie;
     return Response.json({
@@ -201,6 +326,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
       expires_at: new Date(expires * 1000).toISOString(),
       mode,
       renewals_used: 0,
+      team_id: teamId,
       ...(mode === 'redirect' ? { target_url: targetUrl } : { files: entries.map(({ path, size }) => ({ path, size })) })
     }, { status: 201, headers: resHeaders });
   } catch (e) {
@@ -210,6 +336,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     return err(`Upload rejected: Server error - ${String(e)}`, 500);
   }
 }
+
 async function authorized(request: Request, env: Env, share: Share): Promise<boolean> {
   if (!share.password_hash) return true;
   const prefix = `fl_${share.slug}=`;
@@ -295,9 +422,22 @@ async function listShares(request: Request, env: Env): Promise<Response> {
   const who = await principal(request, env);
   if (!who) return err('Unauthorized.', 401);
   const now = Math.floor(Date.now() / 1000);
+
+  if (who.role !== 'admin' && who.userId) {
+    const expiredTrials = await env.DB.prepare(
+      "SELECT t.id FROM teams t JOIN team_members tm ON tm.team_id = t.id WHERE tm.user_id = ? AND t.plan = 'trial' AND t.trial_ends_at <= ?"
+    ).bind(who.userId, now).all<{ id: string }>();
+    for (const t of expiredTrials.results) {
+      await revertTeamShares(env, t.id);
+    }
+  }
+
   const rows = who.role === 'admin'
     ? await env.DB.prepare('SELECT * FROM shares WHERE expires_at > ? ORDER BY created_at DESC LIMIT 500').bind(now).all<Share>()
-    : await env.DB.prepare('SELECT * FROM shares WHERE owner_id = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 500').bind(who.userId, now).all<Share>();
+    : await env.DB.prepare(
+        'SELECT * FROM shares WHERE (owner_id = ? OR (team_id IS NOT NULL AND team_id IN (SELECT team_id FROM team_members WHERE user_id = ?))) AND expires_at > ? ORDER BY created_at DESC LIMIT 500'
+      ).bind(who.userId, who.userId, now).all<Share>();
+
   const shares = rows.results.map(r => {
     let entries: Entry[] = [];
     let targetUrl: string | null = null;
@@ -306,7 +446,22 @@ async function listShares(request: Request, env: Env): Promise<Response> {
       if (Array.isArray(parsed)) entries = parsed;
       else if (parsed && parsed.target_url) targetUrl = parsed.target_url;
     } catch { /* keep empty */ }
-    return { slug: r.slug, url: `https://${env.DEFAULT_SHARE_HOST}/s/${r.slug}/`, mode: r.mode, files: entries.length, bytes: entries.reduce((n, e) => n + e.size, 0), password_protected: !!r.password_hash, created_at: new Date(r.created_at * 1000).toISOString(), expires_at: new Date(r.expires_at * 1000).toISOString(), renewals_used: r.renewals_count ?? 0, ...(targetUrl ? { target_url: targetUrl } : {}), ...(who.role === 'admin' ? { owner_id: r.owner_id ?? null } : {}) };
+    return {
+      slug: r.slug,
+      url: `https://${env.DEFAULT_SHARE_HOST}/s/${r.slug}/`,
+      mode: r.mode,
+      files: entries.length,
+      bytes: entries.reduce((n, e) => n + e.size, 0),
+      password_protected: !!r.password_hash,
+      created_at: new Date(r.created_at * 1000).toISOString(),
+      expires_at: new Date(r.expires_at * 1000).toISOString(),
+      renewals_used: r.renewals_count ?? 0,
+      team_id: r.team_id ?? null,
+      is_team: Boolean(r.team_id),
+      is_mine: r.owner_id === who.userId,
+      ...(targetUrl ? { target_url: targetUrl } : {}),
+      ...(who.role === 'admin' ? { owner_id: r.owner_id ?? null } : {})
+    };
   });
   return Response.json({ shares }, { headers: { 'Cache-Control': 'no-store' } });
 }
@@ -348,8 +503,20 @@ async function deleteShare(request: Request, env: Env, slug: string): Promise<Re
   if (!who) return err('Unauthorized.', 401);
   if (who.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
   const share = await env.DB.prepare('SELECT * FROM shares WHERE slug = ?').bind(slug).first<Share>();
-  // Someone else's share looks the same as a missing one.
-  if (!share || (who.role !== 'admin' && share.owner_id !== who.userId)) return err('Share not found.', 404);
+  if (!share) return err('Share not found.', 404);
+
+  let canDelete = who.role === 'admin' || share.owner_id === who.userId;
+  if (!canDelete && share.team_id && who.userId) {
+    const membership = await env.DB.prepare(
+      'SELECT role FROM team_members WHERE team_id = ? AND user_id = ?'
+    ).bind(share.team_id, who.userId).first<{ role: string }>();
+    if (membership && (membership.role === 'organizer' || membership.role === 'admin')) {
+      canDelete = true;
+    }
+  }
+
+  if (!canDelete) return err('Share not found.', 404);
+
   let entries: Entry[] = [];
   try {
     const parsed = JSON.parse(share.objects_json);
@@ -373,12 +540,91 @@ const homePage = (env: Env, user: User | null) => {
     : `<p>Upload files or create redirect URLs.  Admin token optional.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
   const tokenField = signedIn ? '' : '<label>Admin token (optional) <input id="token" type="password" autocomplete="off"></label><br>';
   const slugField = `<label id="l_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br id="b_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">`;
+  const teamSelector = (signedIn && !userIsGuest) ? '<label id="l_team">Scope <select name="team_id" id="s_team"><option value="">Personal (default)</option></select></label><br>' : '';
   const mine = `<h2>${userIsAdmin ? 'All active shares' : 'Your shares'}</h2><ul id="mine"></ul>`;
-  return page(`<h1>FleetLink</h1>${head}<form id="f">${tokenField}<label>Files <input id="files" type="file" multiple></label><br><label>Folder <input id="folder" type="file" webkitdirectory multiple></label><br><label>Mode <select name="mode"><option value="directory">Directory</option><option value="site">Hosted site</option><option value="redirect">Redirect URL</option></select></label><br><label id="l_target" style="display:none">Target URL <input name="target_url" type="url" placeholder="https://..."></label><br id="b_target" style="display:none"><label>TTL (seconds) <input name="ttl_seconds" type="number" min="60" max="315360000" value="86400"></label><br>${slugField}<label>Password (optional) <input name="password" type="password"></label><br><label>Domain <select name="domain">${canonicalHosts(env).map(h => `<option value="${escapeHtml(h)}" ${h === env.DEFAULT_SHARE_HOST ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}</select></label><br><button>Make share</button></form><pre id="result"></pre>${mine}<script>const signedIn=${signedIn ? 'true' : 'false'};const userIsAdmin=${userIsAdmin ? 'true' : 'false'};const userIsGuest=${userIsGuest ? 'true' : 'false'};const userCanCustomSlug=${userCanCustomSlug ? 'true' : 'false'};const result=document.querySelector('#result');
+  const agentSection = (signedIn && !userIsGuest)
+    ? `<h2>Agent Tokens</h2><p id="quota_info"></p><ul id="tokens_list"></ul><details style="margin:.5rem 0"><summary><strong>+ Create Agent Token (Custom Limits)</strong></summary><form id="f_token" style="margin:.5rem 0;padding:.8rem;border:1px solid #ccc;border-radius:4px"><label>Name: <input name="name" required placeholder="e.g. CI Worker"></label><br><label>Max File MB: <input name="max_file_mb" type="number" min="1" placeholder="default 300"></label><br><label>Max Batch MB: <input name="max_batch_mb" type="number" min="1" placeholder="default 300"></label><br><label>Max Files: <input name="max_files" type="number" min="1" placeholder="default 500"></label><br><label>Max TTL (seconds): <input name="max_ttl_seconds" type="number" min="60" placeholder="default 604800"></label><br><label><input name="allow_redirects" type="checkbox" checked> Allow Redirects</label><br><button>Create Token</button></form></details><details style="margin:.5rem 0"><summary><strong>Request Token Limit Increase (Free Tier)</strong></summary><form id="f_quota" style="margin:.5rem 0;padding:.8rem;border:1px solid #ccc;border-radius:4px"><p>Free tier users can request access to more than 3 agent tokens.</p><label>Requested Count: <input name="requested_count" type="number" min="4" max="20" value="5" required></label><br><label>Reason: <input name="reason" placeholder="e.g. 5 parallel CI workers" required></label><br><button>Submit Request</button></form></details>`
+    : '';
+  const teamSection = (signedIn && !userIsGuest)
+    ? `<h2>Team Workspaces</h2><div id="team_box" style="margin:.5rem 0;padding:.8rem;border:1px solid #ccc;border-radius:4px"></div>`
+    : '';
+
+  return page(`<h1>FleetLink</h1>${head}<form id="f">${tokenField}<label>Files <input id="files" type="file" multiple></label><br><label>Folder <input id="folder" type="file" webkitdirectory multiple></label><br><label>Mode <select name="mode"><option value="directory">Directory</option><option value="site">Hosted site</option><option value="redirect">Redirect URL</option></select></label><br><label id="l_target" style="display:none">Target URL <input name="target_url" type="url" placeholder="https://..."></label><br id="b_target" style="display:none"><label>TTL (seconds) <input name="ttl_seconds" type="number" min="60" max="315360000" value="86400"></label><br>${slugField}${teamSelector}<label>Password (optional) <input name="password" type="password"></label><br><label>Domain <select name="domain">${canonicalHosts(env).map(h => `<option value="${escapeHtml(h)}" ${h === env.DEFAULT_SHARE_HOST ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}</select></label><br><button>Make share</button></form><pre id="result"></pre>${mine}${agentSection}${teamSection}<script>const signedIn=${signedIn ? 'true' : 'false'};const userIsAdmin=${userIsAdmin ? 'true' : 'false'};const userIsGuest=${userIsGuest ? 'true' : 'false'};const userCanCustomSlug=${userCanCustomSlug ? 'true' : 'false'};const result=document.querySelector('#result');
 document.querySelector('select[name="mode"]').onchange=e=>{const isR=e.target.value==='redirect';document.querySelector('#l_target').style.display=isR?'inline':'none';document.querySelector('#b_target').style.display=isR?'inline':'none';if(document.querySelector('#l_slug'))document.querySelector('#l_slug').style.display=(isR && !userIsGuest || userCanCustomSlug)?'inline':'none';if(document.querySelector('#b_slug'))document.querySelector('#b_slug').style.display=(isR && !userIsGuest || userCanCustomSlug)?'inline':'none';if(isR)document.querySelector('input[name="ttl_seconds"]').value=userIsGuest?'86400':'15552000';};
 function copyButton(text){const b=document.createElement('button');b.type='button';b.textContent='Copy link';b.onclick=async()=>{try{await navigator.clipboard.writeText(text);b.textContent='Copied'}catch{const t=document.createElement('textarea');t.value=text;document.body.append(t);t.select();try{document.execCommand('copy');b.textContent='Copied'}catch{b.textContent='Copy failed'}t.remove()}setTimeout(()=>{b.textContent='Copy link'},1500)};return b}
-async function refresh(){const ul=document.querySelector('#mine');if(!ul)return;const r=await fetch('/api/shares');if(!r.ok){if(!signedIn)return;ul.textContent='Could not load shares.';return}const {shares}=await r.json();ul.replaceChildren();if(!shares.length){ul.textContent='No active shares.';return}for(const s of shares){const li=document.createElement('li');const a=document.createElement('a');a.href=s.url;a.textContent=s.url;li.append(a,' ');li.append(copyButton(s.url));li.append(' - '+(s.mode==='redirect'?'↳ '+(s.target_url||'redirect'):s.files+' file(s)')+(s.password_protected?', password':'')+', expires '+s.expires_at+' ');const b=document.createElement('button');b.textContent='Delete';b.onclick=async()=>{if(!confirm('Delete '+s.slug+'?'))return;const d=await fetch('/api/shares/'+encodeURIComponent(s.slug),{method:'DELETE'});if(!d.ok)result.textContent='Delete failed';refresh()};li.append(b);ul.append(li)}}
-document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}result.textContent='Uploading...';try{const init={method:'POST',body:d};const tokInput=document.querySelector('#token');if(tokInput&&tokInput.value.trim())init.headers={Authorization:'Bearer '+tokInput.value.trim()};const r=await fetch('/api/shares',init);const data=await r.json();result.textContent='';if(data.url){const a=document.createElement('a');a.href=data.url;a.textContent=data.url;result.append(a,' ',copyButton(data.url))}else result.textContent=data.error||'Failed';refresh()}catch(err){result.textContent=String(err)}};refresh();</script>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
+async function refresh(){
+  const ul=document.querySelector('#mine');if(!ul)return;
+  const r=await fetch('/api/shares');
+  if(!r.ok){if(!signedIn)return;ul.textContent='Could not load shares.';return}
+  const {shares}=await r.json();ul.replaceChildren();
+  if(!shares.length){ul.textContent='No active shares.';return}
+  for(const s of shares){
+    const li=document.createElement('li');
+    const a=document.createElement('a');a.href=s.url;a.textContent=s.url;li.append(a,' ');
+    li.append(copyButton(s.url));
+    const tag = s.is_team ? ' [Team]' : '';
+    li.append(' - '+(s.mode==='redirect'?'↳ '+(s.target_url||'redirect'):s.files+' file(s)')+(s.password_protected?', password':'')+tag+', expires '+s.expires_at+' ');
+    const b=document.createElement('button');b.textContent='Delete';
+    b.onclick=async()=>{if(!confirm('Delete '+s.slug+'?'))return;const d=await fetch('/api/shares/'+encodeURIComponent(s.slug),{method:'DELETE'});if(!d.ok)result.textContent='Delete failed';refresh()};
+    li.append(b);ul.append(li)
+  }
+}
+async function refreshTokens(){
+  const ul=document.querySelector('#tokens_list');if(!ul)return;
+  const r=await fetch('/api/user/agent-tokens');if(!r.ok)return;
+  const data=await r.json();
+  const q=document.querySelector('#quota_info');if(q)q.textContent='Active Tokens: '+data.count+' / '+data.quota+' quota (Free Tier)';
+  ul.replaceChildren();
+  if(!data.tokens.length){ul.textContent='No agent tokens created yet.';return}
+  for(const t of data.tokens){
+    const li=document.createElement('li');
+    li.textContent=t.name+' ('+t.token_prefix+'...) '+(t.max_file_bytes?'max '+(t.max_file_bytes/1048576)+'MB ':'')+' ';
+    const b=document.createElement('button');b.textContent='Revoke';
+    b.onclick=async()=>{if(!confirm('Revoke '+t.name+'?'))return;await fetch('/api/user/agent-tokens/'+t.id,{method:'DELETE'});refreshTokens()};
+    li.append(b);ul.append(li)
+  }
+}
+async function refreshTeams(){
+  const box=document.querySelector('#team_box');if(!box)return;
+  const r=await fetch('/api/teams');if(!r.ok)return;
+  const data=await r.json();
+  const sTeam=document.querySelector('#s_team');
+  if(sTeam){
+    sTeam.innerHTML='<option value="">Personal (default)</option>';
+    for(const t of data.teams){
+      if(t.is_trial_active || t.plan === 'pro'){
+        const opt=document.createElement('option');opt.value=t.id;opt.textContent=t.name+' (Team)';sTeam.append(opt);
+      }
+    }
+  }
+  if(!data.teams.length){
+    box.innerHTML='<p>Organize shares across team members with a <strong>7-day free trial</strong>.  If unsubscribed after 7 days, all team shares automatically revert to their creator\\\'s personal shares.</p><form id="f_new_team"><input name="name" placeholder="Team Name" required> <button>Start 7-Day Free Trial</button></form>';
+    const f=document.querySelector('#f_new_team');
+    if(f)f.onsubmit=async e=>{e.preventDefault();const fd=new FormData(f);await fetch('/api/teams',{method:'POST',body:fd});refreshTeams();refresh()};
+    return;
+  }
+  box.innerHTML='';
+  for(const t of data.teams){
+    const div=document.createElement('div');
+    const badge = t.plan === 'trial' ? ('⏰ Trial: '+t.trial_days_remaining+' day(s) remaining (reverts to personal on expiry)') : (t.plan === 'expired' ? '⚠️ Trial Expired (Reverted to personal)' : '⭐ Pro');
+    div.innerHTML='<h3>'+t.name+' <small>('+badge+')</small></h3><p>Role: '+t.my_role+' | Members: '+t.members.length+'</p>';
+    if(t.my_role==='organizer'||t.my_role==='admin'){
+      if(t.is_trial_active || t.plan === 'pro'){
+        const fInv=document.createElement('form');
+        fInv.innerHTML='<input name="email" type="email" placeholder="Member email" required> <button>Invite Member</button>';
+        fInv.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fInv);const res=await fetch('/api/teams/'+t.id+'/members',{method:'POST',body:fd});if(!res.ok){const errData=await res.json();alert(errData.error||'Failed');}else{refreshTeams()}};
+        div.append(fInv);
+      }
+    }
+    box.append(div);
+  }
+}
+const fToken=document.querySelector('#f_token');
+if(fToken)fToken.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fToken);const r=await fetch('/api/user/agent-tokens',{method:'POST',body:fd});const d=await r.json();if(d.token){alert('Generated Token: '+d.token+'\\n\\nSave this token now; it cannot be shown again!');fToken.reset();refreshTokens()}else alert(d.error||'Failed')};
+const fQuota=document.querySelector('#f_quota');
+if(fQuota)fQuota.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fQuota);const r=await fetch('/api/user/agent-quota-request',{method:'POST',body:fd});const d=await r.json();if(d.success){alert('Quota request submitted successfully!');fQuota.reset()}else alert(d.error||'Failed')};
+document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}result.textContent='Uploading...';try{const init={method:'POST',body:d};const tokInput=document.querySelector('#token');if(tokInput&&tokInput.value.trim())init.headers={Authorization:'Bearer '+tokInput.value.trim()};const r=await fetch('/api/shares',init);const data=await r.json();result.textContent='';if(data.url){const a=document.createElement('a');a.href=data.url;a.textContent=data.url;result.append(a,' ',copyButton(data.url))}else result.textContent=data.error||'Failed';refresh()}catch(err){result.textContent=String(err)}};
+refresh();if(signedIn&&!userIsGuest){refreshTokens();refreshTeams();}</script>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
 };
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -410,9 +656,165 @@ export default {
       }
       const del = /^\/api\/shares\/([a-z0-9-]{1,64})$/.exec(url.pathname);
       if (del && request.method === 'DELETE') return deleteShare(request, env, del[1]);
+      // Agent Tokens
+      if (url.pathname === '/api/user/agent-tokens' && request.method === 'GET') {
+        const who = await principal(request, env);
+        if (!who || !who.userId || who.isGuest) return err('Unauthorized.', 401);
+        const data = await listAgentTokens(env, who.userId);
+        return Response.json(data, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      if (url.pathname === '/api/user/agent-tokens' && request.method === 'POST') {
+        const who = await principal(request, env);
+        if (!who || !who.userId || who.isGuest) return err('Unauthorized.', 401);
+        if (who.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
+        let body: Record<string, any> = {};
+        try { body = await request.json(); } catch {
+          try { const fd = await request.formData(); body = formEntries(fd); } catch {}
+        }
+        try {
+          const maxFileMb = body.max_file_mb ? Number(body.max_file_mb) : null;
+          const maxBatchMb = body.max_batch_mb ? Number(body.max_batch_mb) : null;
+          const maxFiles = body.max_files ? Number(body.max_files) : null;
+          const maxTtlSeconds = body.max_ttl_seconds ? Number(body.max_ttl_seconds) : null;
+          const allowRedirects = body.allow_redirects !== undefined ? Boolean(body.allow_redirects) : true;
+          const teamId = body.team_id ? String(body.team_id).trim() : null;
+
+          const result = await createAgentToken(env, who.userId, {
+            name: String(body.name || '').trim(),
+            max_file_bytes: maxFileMb ? Math.round(maxFileMb * 1024 * 1024) : null,
+            max_total_bytes: maxBatchMb ? Math.round(maxBatchMb * 1024 * 1024) : null,
+            max_files: maxFiles,
+            max_ttl_seconds: maxTtlSeconds,
+            allow_redirects: allowRedirects,
+            team_id: teamId
+          }, {
+            fileBytes: USER_MAX_FILE_BYTES,
+            totalBytes: USER_MAX_TOTAL_BYTES,
+            files: USER_MAX_FILES,
+            maxTtl: MAX_TTL
+          });
+          return Response.json(result, { status: 201, headers: { 'Cache-Control': 'no-store' } });
+        } catch (e: any) {
+          return err(e.message || 'Token creation failed.', 400);
+        }
+      }
+      const tokenDel = /^\/api\/user\/agent-tokens\/([a-z0-9_-]{1,64})$/.exec(url.pathname);
+      if (tokenDel && request.method === 'DELETE') {
+        const who = await principal(request, env);
+        if (!who || !who.userId || who.isGuest) return err('Unauthorized.', 401);
+        if (who.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
+        const success = await revokeAgentToken(env, who.userId, tokenDel[1], who.role === 'admin');
+        return Response.json({ success, revoked: tokenDel[1] }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+
+      // Quota Increase Requests (Free Tier)
+      if (url.pathname === '/api/user/agent-quota-request' && request.method === 'POST') {
+        const who = await principal(request, env);
+        if (!who || !who.userId || who.isGuest) return err('Unauthorized.', 401);
+        if (who.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
+        let body: Record<string, any> = {};
+        try { body = await request.json(); } catch {
+          try { const fd = await request.formData(); body = formEntries(fd); } catch {}
+        }
+        try {
+          const requestedCount = Number(body.requested_count);
+          const reason = String(body.reason || '').trim();
+          const reqRow = await requestAgentQuotaIncrease(env, who.userId, requestedCount, reason);
+          return Response.json({
+            success: true,
+            request: reqRow,
+            message: 'Quota increase request submitted.  You will remain on the free tier with your expanded limit once approved.'
+          }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
+        } catch (e: any) {
+          return err(e.message || 'Quota request failed.', 400);
+        }
+      }
+      if (url.pathname === '/api/admin/agent-quota-requests' && request.method === 'GET') {
+        const who = await principal(request, env);
+        if (!who || who.role !== 'admin') return err('Unauthorized.', 401);
+        const rows = await env.DB.prepare(
+          "SELECT aqr.*, u.display_name, u.email, u.agent_token_quota FROM agent_quota_requests aqr JOIN users u ON u.id = aqr.user_id ORDER BY aqr.created_at DESC"
+        ).all();
+        return Response.json({ requests: rows.results }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      const quotaApprove = /^\/api\/admin\/agent-quota-requests\/([a-z0-9_-]{1,64})\/approve$/.exec(url.pathname);
+      if (quotaApprove && request.method === 'POST') {
+        const who = await principal(request, env);
+        if (!who || who.role !== 'admin') return err('Unauthorized.', 401);
+        try {
+          const res = await approveAgentQuotaRequest(env, quotaApprove[1], who.userId || 'admin');
+          return Response.json(res, { headers: { 'Cache-Control': 'no-store' } });
+        } catch (e: any) {
+          return err(e.message || 'Approval failed.', 400);
+        }
+      }
+      const quotaReject = /^\/api\/admin\/agent-quota-requests\/([a-z0-9_-]{1,64})\/reject$/.exec(url.pathname);
+      if (quotaReject && request.method === 'POST') {
+        const who = await principal(request, env);
+        if (!who || who.role !== 'admin') return err('Unauthorized.', 401);
+        try {
+          const success = await rejectAgentQuotaRequest(env, quotaReject[1], who.userId || 'admin');
+          return Response.json({ success, rejected: quotaReject[1] }, { headers: { 'Cache-Control': 'no-store' } });
+        } catch (e: any) {
+          return err(e.message || 'Rejection failed.', 400);
+        }
+      }
+
+      // Teams
+      if (url.pathname === '/api/teams' && request.method === 'GET') {
+        const who = await principal(request, env);
+        if (!who || !who.userId || who.isGuest) return err('Unauthorized.', 401);
+        const teams = await listUserTeams(env, who.userId);
+        return Response.json({ teams }, { headers: { 'Cache-Control': 'no-store' } });
+      }
+      if (url.pathname === '/api/teams' && request.method === 'POST') {
+        const who = await principal(request, env);
+        if (!who || !who.userId || who.isGuest) return err('Unauthorized.', 401);
+        if (who.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
+        let body: Record<string, any> = {};
+        try { body = await request.json(); } catch {
+          try { const fd = await request.formData(); body = formEntries(fd); } catch {}
+        }
+        try {
+          const team = await createTeam(env, who.userId, String(body.name || ''));
+          return Response.json({ success: true, team }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
+        } catch (e: any) {
+          return err(e.message || 'Failed to create team.', 400);
+        }
+      }
+      const teamMemberAdd = /^\/api\/teams\/([a-z0-9_-]{1,64})\/members$/.exec(url.pathname);
+      if (teamMemberAdd && request.method === 'POST') {
+        const who = await principal(request, env);
+        if (!who || !who.userId || who.isGuest) return err('Unauthorized.', 401);
+        if (who.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
+        let body: Record<string, any> = {};
+        try { body = await request.json(); } catch {
+          try { const fd = await request.formData(); body = formEntries(fd); } catch {}
+        }
+        try {
+          const role = body.role === 'admin' ? 'admin' : 'member';
+          const member = await addTeamMember(env, teamMemberAdd[1], who.userId, String(body.email || ''), role);
+          return Response.json({ success: true, member }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
+        } catch (e: any) {
+          return err(e.message || 'Failed to add member.', 400);
+        }
+      }
+      const teamMemberDel = /^\/api\/teams\/([a-z0-9_-]{1,64})\/members\/([a-z0-9_-]{1,64})$/.exec(url.pathname);
+      if (teamMemberDel && request.method === 'DELETE') {
+        const who = await principal(request, env);
+        if (!who || !who.userId || who.isGuest) return err('Unauthorized.', 401);
+        if (who.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
+        try {
+          const success = await removeTeamMember(env, teamMemberDel[1], who.userId, teamMemberDel[2]);
+          return Response.json({ success, removed: teamMemberDel[2] }, { headers: { 'Cache-Control': 'no-store' } });
+        } catch (e: any) {
+          return err(e.message || 'Failed to remove member.', 400);
+        }
+      }
+
       if (url.pathname === '/api/me' && request.method === 'GET') {
         const user = await sessionUser(request, env);
-        return user ? Response.json({ id: user.id, role: user.role, display_name: user.display_name, email: user.email }, { headers: { 'Cache-Control': 'no-store' } }) : err('Unauthorized.', 401);
+        return user ? Response.json({ id: user.id, role: user.role, display_name: user.display_name, email: user.email, agent_token_quota: user.agent_token_quota ?? 3 }, { headers: { 'Cache-Control': 'no-store' } }) : err('Unauthorized.', 401);
       }
       if (url.pathname === '/logout' && request.method === 'POST') return sameOrigin(request, env) ? logout(request, env) : err('Cross-origin request.', 403);
       const auth = /^\/auth\/([a-z]+)\/(start|callback)$/.exec(url.pathname);
@@ -445,7 +847,11 @@ export default {
     }
     return err('Unknown host.', 404);
   },
-  async scheduled(_event: ScheduledController, env: Env): Promise<void> { await cleanup(env); await purgeExpiredSessions(env); }
+  async scheduled(_event: ScheduledController, env: Env): Promise<void> {
+    await cleanup(env);
+    await purgeExpiredSessions(env);
+    await cleanupExpiredTeamTrials(env);
+  }
 } satisfies ExportedHandler<Env>;
 
 

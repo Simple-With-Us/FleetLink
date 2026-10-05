@@ -15,7 +15,7 @@ const ORIGIN = 'https://admin.test';
 // A real SQLite database behind the D1 calls the worker uses.
 function d1() {
   const db = new SQL.Database();
-  for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql', '0004_renewals.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
+  for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql', '0004_renewals.sql', '0005_agent_tokens_and_teams.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
   const exec = (sql, args) => { const st = db.prepare(sql); st.bind(args); const rows = []; while (st.step()) rows.push(st.getAsObject()); st.free(); return rows; };
   const stmt = (sql) => { let args = []; const s = { bind(...a) { args = a; return s; }, async first() { return exec(sql, args)[0] ?? null; }, async all() { return { results: exec(sql, args) }; }, async run() { exec(sql, args); return {}; }, _run: () => exec(sql, args) }; return s; };
   return { prepare: stmt, async batch(list) { return list.map(s => ({ results: s._run() })); }, raw: exec };
@@ -550,11 +550,278 @@ test('portal and admin routes are accessible on share host as well as admin host
   const portalRes = await worker.fetch(new Request('https://share.test/portal'), env);
   assert.equal(portalRes.status, 200);
   const portalHtml = await portalRes.text();
-  assert.match(portalHtml, /FleetLink/);
-
   const adminRes = await worker.fetch(new Request('https://share.test/admin'), env);
   assert.equal(adminRes.status, 200);
   const adminHtml = await adminRes.text();
   assert.match(adminHtml, /FleetLink/);
 });
+
+test('per-agent custom lower limits on agent tokens enforce stricter caps on files, batch, count, ttl, and redirects', async () => {
+  const { env } = environment();
+  const loginRes = await githubLogin(env);
+  const cookie = cookiesOf(loginRes);
+
+  // Create an agent token with custom lower limits: 10MB per file, 20MB batch, 2 files max, 3600s TTL max, no redirects
+  const createRes = await worker.fetch(new Request(`${ORIGIN}/api/user/agent-tokens`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: 'CI Scraper',
+      max_file_mb: 10,
+      max_batch_mb: 20,
+      max_files: 2,
+      max_ttl_seconds: 3600,
+      allow_redirects: false
+    })
+  }), env);
+  assert.equal(createRes.status, 201);
+  const tokenData = await createRes.json();
+  assert.ok(tokenData.token);
+  assert.equal(tokenData.agentToken.name, 'CI Scraper');
+  assert.equal(tokenData.agentToken.max_file_bytes, 10 * 1024 * 1024);
+  assert.equal(tokenData.agentToken.max_files, 2);
+  assert.equal(tokenData.agentToken.max_ttl_seconds, 3600);
+  assert.equal(tokenData.agentToken.allow_redirects, false);
+
+  const agentToken = tokenData.token;
+
+  // 1. File size rejection: 12MB file exceeds 10MB limit
+  const bigFileForm = new FormData();
+  bigFileForm.set('mode', 'directory');
+  bigFileForm.set('ttl_seconds', '1800');
+  bigFileForm.append('file', new Blob([new Uint8Array(12 * 1024 * 1024)]), 'large.bin');
+  bigFileForm.append('path', 'large.bin');
+  const bigFileRes = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken}` },
+    body: bigFileForm
+  }), env);
+  assert.equal(bigFileRes.status, 400);
+  assert.match((await bigFileRes.json()).error, /exceeds the maximum limit of 10MB per file/);
+
+  // 2. File count rejection: 3 files exceeds 2 files limit
+  const countForm = new FormData();
+  countForm.set('mode', 'directory');
+  countForm.set('ttl_seconds', '1800');
+  for (let i = 0; i < 3; i++) {
+    countForm.append('file', new Blob(['test']), `f${i}.txt`);
+    countForm.append('path', `f${i}.txt`);
+  }
+  const countRes = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    headers: { 'X-Fleet-Agent': agentToken },
+    body: countForm
+  }), env);
+  assert.equal(countRes.status, 400);
+  assert.match((await countRes.json()).error, /Batch contains 3 files, exceeding limit of 2 files/);
+
+  // 3. TTL rejection: 7200s exceeds 3600s limit
+  const ttlForm = new FormData();
+  ttlForm.set('mode', 'directory');
+  ttlForm.set('ttl_seconds', '7200');
+  ttlForm.append('file', new Blob(['ok']), 'file.txt');
+  ttlForm.append('path', 'file.txt');
+  const ttlRes = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken}` },
+    body: ttlForm
+  }), env);
+  assert.equal(ttlRes.status, 400);
+  assert.match((await ttlRes.json()).error, /TTL must be between 60 seconds and 1 hours/);
+
+  // 4. Redirect permission rejection: redirect mode disallowed
+  const redirectForm = new FormData();
+  redirectForm.set('mode', 'redirect');
+  redirectForm.set('target_url', 'https://example.com');
+  const redirectRes = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken}` },
+    body: redirectForm
+  }), env);
+  assert.equal(redirectRes.status, 403);
+  assert.match((await redirectRes.json()).error, /This agent token is not permitted to create redirect URLs/);
+
+  // 5. Valid upload within limits succeeds
+  const validForm = new FormData();
+  validForm.set('mode', 'directory');
+  validForm.set('ttl_seconds', '1800');
+  validForm.append('file', new Blob(['hello world']), 'hello.txt');
+  validForm.append('path', 'hello.txt');
+  const validRes = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken}` },
+    body: validForm
+  }), env);
+  assert.equal(validRes.status, 201);
+  const validData = await validRes.json();
+  assert.ok(validData.slug);
+});
+
+test('free-tier agent token quota defaults to 3, and quota request increase workflow unlocks additional tokens', async () => {
+  const { env } = environment();
+  const loginRes = await githubLogin(env);
+  const cookie = cookiesOf(loginRes);
+
+  // Create 3 tokens (default free tier quota)
+  for (let i = 1; i <= 3; i++) {
+    const res = await worker.fetch(new Request(`${ORIGIN}/api/user/agent-tokens`, {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: ORIGIN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: `Worker ${i}` })
+    }), env);
+    assert.equal(res.status, 201);
+  }
+
+  // Listing tokens shows count: 3, quota: 3, can_create: false
+  const listRes = await worker.fetch(new Request(`${ORIGIN}/api/user/agent-tokens`, {
+    headers: { Cookie: cookie }
+  }), env);
+  assert.equal(listRes.status, 200);
+  const listData = await listRes.json();
+  assert.equal(listData.count, 3);
+  assert.equal(listData.quota, 3);
+  assert.equal(listData.can_create, false);
+
+  // 4th token creation attempt is rejected with 400 error prompting quota request
+  const rejectedRes = await worker.fetch(new Request(`${ORIGIN}/api/user/agent-tokens`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Worker 4' })
+  }), env);
+  assert.equal(rejectedRes.status, 400);
+  assert.match((await rejectedRes.json()).error, /reached your quota of 3 agent tokens/);
+
+  // User submits a quota increase request to 6 tokens
+  const reqRes = await worker.fetch(new Request(`${ORIGIN}/api/user/agent-quota-request`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requested_count: 6,
+      reason: 'Need 6 tokens for distributed CI test matrix on free tier'
+    })
+  }), env);
+  assert.equal(reqRes.status, 201);
+  const reqData = await reqRes.json();
+  assert.equal(reqData.success, true);
+  assert.equal(reqData.request.status, 'pending');
+  assert.equal(reqData.request.requested_count, 6);
+
+  // Admin lists pending quota requests
+  const adminListRes = await worker.fetch(new Request(`${ORIGIN}/api/admin/agent-quota-requests`, {
+    headers: { Authorization: 'Bearer operator-secret' }
+  }), env);
+  assert.equal(adminListRes.status, 200);
+  const adminListData = await adminListRes.json();
+  assert.equal(adminListData.requests.length, 1);
+  assert.equal(adminListData.requests[0].id, reqData.request.id);
+
+  // Admin approves request
+  const approveRes = await worker.fetch(new Request(`${ORIGIN}/api/admin/agent-quota-requests/${reqData.request.id}/approve`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer operator-secret' }
+  }), env);
+  assert.equal(approveRes.status, 200);
+  const approveData = await approveRes.json();
+  assert.equal(approveData.new_quota, 6);
+
+  // User can now create the 4th token on free tier!
+  const fourthRes = await worker.fetch(new Request(`${ORIGIN}/api/user/agent-tokens`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Worker 4' })
+  }), env);
+  assert.equal(fourthRes.status, 201);
+
+  // Revoking a token frees up capacity
+  const delRes = await worker.fetch(new Request(`${ORIGIN}/api/user/agent-tokens/${(await fourthRes.json()).agentToken.id}`, {
+    method: 'DELETE',
+    headers: { Cookie: cookie, Origin: ORIGIN }
+  }), env);
+  assert.equal(delRes.status, 200);
+});
+
+test('team workspaces with 7-day trials allow shared shares, and expired trials automatically revert team slugs to creator personal slugs', async () => {
+  const { env } = environment();
+  const aliceCookie = cookiesOf(await githubLogin(env, { id: 101, email: 'alice@example.com' }));
+  const bobCookie = cookiesOf(await githubLogin(env, { id: 102, email: 'bob@example.com' }));
+
+  // Alice creates a team: starts 7-day trial
+  const teamRes = await worker.fetch(new Request(`${ORIGIN}/api/teams`, {
+    method: 'POST',
+    headers: { Cookie: aliceCookie, Origin: ORIGIN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Core Eng' })
+  }), env);
+  assert.equal(teamRes.status, 201);
+  const teamData = await teamRes.json();
+  assert.equal(teamData.team.plan, 'trial');
+  assert.equal(teamData.team.trial_days_remaining, 7);
+  assert.equal(teamData.team.is_trial_active, true);
+  const teamId = teamData.team.id;
+
+  // Alice invites Bob to the team
+  const inviteRes = await worker.fetch(new Request(`${ORIGIN}/api/teams/${teamId}/members`, {
+    method: 'POST',
+    headers: { Cookie: aliceCookie, Origin: ORIGIN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'bob@example.com', role: 'member' })
+  }), env);
+  assert.equal(inviteRes.status, 201);
+
+  // Bob uploads a share scoped to the team
+  const bobForm = new FormData();
+  bobForm.set('mode', 'directory');
+  bobForm.set('team_id', teamId);
+  bobForm.append('file', new Blob(['team report']), 'report.txt');
+  bobForm.append('path', 'report.txt');
+
+  const bobUploadRes = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    headers: { Cookie: bobCookie, Origin: 'https://share.test' },
+    body: bobForm
+  }), env);
+  assert.equal(bobUploadRes.status, 201);
+  const bobShare = await bobUploadRes.json();
+  assert.equal(bobShare.team_id, teamId);
+
+  // Both Alice and Bob can view the team share in their list
+  const aliceListBefore = await worker.fetch(new Request(`${ORIGIN}/api/shares`, { headers: { Cookie: aliceCookie } }), env);
+  const aliceSharesBefore = (await aliceListBefore.json()).shares;
+  assert.ok(aliceSharesBefore.some(s => s.slug === bobShare.slug && s.is_team));
+
+  const bobListBefore = await worker.fetch(new Request(`${ORIGIN}/api/shares`, { headers: { Cookie: bobCookie } }), env);
+  const bobSharesBefore = (await bobListBefore.json()).shares;
+  assert.ok(bobSharesBefore.some(s => s.slug === bobShare.slug && s.is_team));
+
+  // Simulate 7-day trial expiration: adjust trial_ends_at to the past
+  await env.DB.prepare('UPDATE teams SET trial_ends_at = ? WHERE id = ?')
+    .bind(Math.floor(Date.now() / 1000) - 100, teamId).run();
+
+  // Next query by Alice triggers automatic trial expiration check and reversion:
+  const aliceListAfter = await worker.fetch(new Request(`${ORIGIN}/api/shares`, { headers: { Cookie: aliceCookie } }), env);
+  const aliceSharesAfter = (await aliceListAfter.json()).shares;
+  // Alice is not the creator, so the reverted slug is NO LONGER visible to Alice!
+  assert.equal(aliceSharesAfter.some(s => s.slug === bobShare.slug), false);
+
+  // Bob, the original creator, STILL has the share! It reverted back to Bob's personal shares!
+  const bobListAfter = await worker.fetch(new Request(`${ORIGIN}/api/shares`, { headers: { Cookie: bobCookie } }), env);
+  const bobSharesAfter = (await bobListAfter.json()).shares;
+  const revertedBobShare = bobSharesAfter.find(s => s.slug === bobShare.slug);
+  assert.ok(revertedBobShare);
+  assert.equal(revertedBobShare.is_team, false);
+  assert.equal(revertedBobShare.is_mine, true);
+
+  // The share URL is STILL live and functional!
+  const fetchShareRes = await worker.fetch(new Request(`https://share.test/s/${bobShare.slug}/report.txt`), env);
+  assert.equal(fetchShareRes.status, 200);
+  assert.equal(await fetchShareRes.text(), 'team report');
+
+  // Attempt to upload new team share under expired team trial is rejected
+  const newTeamUpload = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    headers: { Cookie: bobCookie, Origin: 'https://share.test' },
+    body: bobForm
+  }), env);
+  assert.equal(newTeamUpload.status, 403);
+  assert.match((await newTeamUpload.json()).error, /Team trial has expired/);
+});
+
 

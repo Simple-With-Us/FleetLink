@@ -17,7 +17,7 @@ export interface AuthEnv {
   APPLE_KEY_ID?: string;
   APPLE_PRIVATE_KEY?: string;
 }
-export type User = { id: string; role: 'user' | 'admin'; display_name: string | null; email: string | null };
+export type User = { id: string; role: 'user' | 'admin'; display_name: string | null; email: string | null; agent_token_quota?: number };
 type Profile = { subject: string; email: string | null; emailVerified: boolean; name: string | null };
 
 export const SESSION_COOKIE = 'fl_session';
@@ -226,7 +226,7 @@ export async function upsertUser(env: AuthEnv, provider: Provider, profile: Prof
 export async function sessionUser(request: Request, env: AuthEnv): Promise<User | null> {
   const token = cookieValue(request, SESSION_COOKIE);
   if (!token || !/^[0-9a-f]{64}$/.test(token)) return null;
-  const row = await env.DB.prepare('SELECT u.id, u.role, u.display_name, u.email FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0').bind(await sha256Hex(token), Math.floor(Date.now() / 1000)).first<User>();
+  const row = await env.DB.prepare('SELECT u.id, u.role, u.display_name, u.email, u.agent_token_quota FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0').bind(await sha256Hex(token), Math.floor(Date.now() / 1000)).first<User>();
   return row || null;
 }
 
