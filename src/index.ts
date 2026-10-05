@@ -8,19 +8,26 @@ interface Env extends AuthEnv {
   DEFAULT_SHARE_HOST: string;
 }
 type Entry = { path: string; key: string; size: number };
-type Share = { slug: string; mode: 'directory' | 'site' | 'redirect'; expires_at: number; password_salt: string | null; password_hash: string | null; objects_json: string; created_at: number; owner_id?: string | null };
+type Share = { slug: string; mode: 'directory' | 'site' | 'redirect'; expires_at: number; password_salt: string | null; password_hash: string | null; objects_json: string; created_at: number; owner_id?: string | null; renewals_count?: number };
 const ADMIN_MAX_FILES = 1000, ADMIN_MAX_FILE_BYTES = 300 * 1024 * 1024, ADMIN_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
+const USER_MAX_FILES = 500, USER_MAX_FILE_BYTES = 300 * 1024 * 1024, USER_MAX_TOTAL_BYTES = 300 * 1024 * 1024;
 const AGENT_MAX_FILES = 50, AGENT_MAX_FILE_BYTES = 100 * 1024 * 1024, AGENT_MAX_TOTAL_BYTES = 500 * 1024 * 1024;
+const GUEST_MAX_FILES = 40, GUEST_MAX_FILE_BYTES = 20 * 1024 * 1024, GUEST_MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const LARGE_UPLOAD_THRESHOLD = 500 * 1024 * 1024;
 type Limits = { files: number; fileBytes: number; totalBytes: number };
 const ADMIN_LIMITS: Limits = { files: ADMIN_MAX_FILES, fileBytes: ADMIN_MAX_FILE_BYTES, totalBytes: ADMIN_MAX_TOTAL_BYTES };
-const USER_LIMITS: Limits = { files: AGENT_MAX_FILES, fileBytes: AGENT_MAX_FILE_BYTES, totalBytes: AGENT_MAX_TOTAL_BYTES };
+const USER_LIMITS: Limits = { files: USER_MAX_FILES, fileBytes: USER_MAX_FILE_BYTES, totalBytes: USER_MAX_TOTAL_BYTES };
+const GUEST_LIMITS: Limits = { files: GUEST_MAX_FILES, fileBytes: GUEST_MAX_FILE_BYTES, totalBytes: GUEST_MAX_TOTAL_BYTES };
 // A signed-in non-admin can hold this many unexpired shares at once.
 const USER_MAX_ACTIVE_SHARES = 50;
+const GUEST_MAX_ACTIVE_SHARES = 3;
 const mb = (n: number) => `${Math.round(n / (1024 * 1024))}MB`;
 const MAX_TTL = 7 * 24 * 3600, DEFAULT_TTL = 24 * 3600;
+const GUEST_FILE_MAX_TTL = 6 * 3600; // 6 hours
+const GUEST_REDIRECT_MAX_TTL = 24 * 3600; // 24 hours
 const REDIRECT_MAX_TTL_USER = 180 * 24 * 3600; // 6 months (180 days) for normal users and agents
 const REDIRECT_DEFAULT_TTL = 180 * 24 * 3600;
+const MAX_LEASE_RENEWALS = 3;
 const RESERVED_SLUGS = new Set([
   'api', 's', 'auth', 'login', 'logout', 'portal', 'admin', 'instructions',
   'apple-app-site-association', 'robots.txt', 'favicon.ico', 'billing', 'support',
@@ -76,16 +83,16 @@ function getFiles(form: FormData, limits: Limits): { files: { path: string, file
   }
   return { files: out };
 }
-type Principal = { role: 'admin' | 'user'; userId: string | null; viaSession: boolean };
+type Principal = { role: 'admin' | 'user'; userId: string | null; viaSession: boolean; isGuest?: boolean };
 /** The admin Bearer token (unchanged) or a signed-in portal session.  A wrong Bearer token never falls back to a cookie. */
 async function principal(request: Request, env: Env): Promise<Principal | null> {
   const bearer = request.headers.get('authorization');
   if (bearer) {
-    return env.ADMIN_TOKEN && env.SESSION_SECRET && safeEq(bearer, `Bearer ${env.ADMIN_TOKEN}`) ? { role: 'admin', userId: null, viaSession: false } : null;
+    return env.ADMIN_TOKEN && env.SESSION_SECRET && safeEq(bearer, `Bearer ${env.ADMIN_TOKEN}`) ? { role: 'admin', userId: null, viaSession: false, isGuest: false } : null;
   }
   if (!request.headers.get('cookie')?.includes(`${SESSION_COOKIE}=`)) return null;
   const user = await sessionUser(request, env);
-  return user ? { role: user.role, userId: user.id, viaSession: true } : null;
+  return user ? { role: user.role, userId: user.id, viaSession: true, isGuest: !user.email } : null;
 }
 async function createShare(request: Request, env: Env): Promise<Response> {
   let who = await principal(request, env);
@@ -104,16 +111,18 @@ async function createShare(request: Request, env: Env): Promise<Response> {
         .bind(id, 'user', 'Guest User', null, now).run();
       await env.DB.prepare('INSERT INTO sessions (token_hash,user_id,created_at,expires_at) VALUES (?,?,?,?)')
         .bind(await sha256Hex(token), id, now, now + 14 * 24 * 3600).run();
-      who = { role: 'user', userId: id, viaSession: true };
+      who = { role: 'user', userId: id, viaSession: true, isGuest: true };
       newSessionCookie = `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${14 * 24 * 3600}`;
     } catch {
-      who = { role: 'user', userId: null, viaSession: false };
+      who = { role: 'user', userId: null, viaSession: false, isGuest: true };
     }
   }
   if (who.viaSession && !newSessionCookie && !sameOrigin(request, env)) return err('Upload rejected: Cross-origin request.', 403);
-  const limits = who.role === 'admin' ? ADMIN_LIMITS : USER_LIMITS;
+  const isGuest = who.role !== 'admin' && Boolean(who.isGuest);
+  const limits = who.role === 'admin' ? ADMIN_LIMITS : (isGuest ? GUEST_LIMITS : USER_LIMITS);
   const length = Number(request.headers.get('content-length'));
-  if (Number.isFinite(length) && length > 520 * 1024 * 1024) return err('Upload rejected: Request body exceeds 500MB total limit.', 413);
+  if (isGuest && Number.isFinite(length) && length > 22 * 1024 * 1024) return err('Upload rejected: Request body exceeds 20MB limit for unauthenticated guests.', 413);
+  if (!isGuest && Number.isFinite(length) && length > 520 * 1024 * 1024) return err('Upload rejected: Request body exceeds 500MB total limit.', 413);
   if (!request.headers.get('content-type')?.startsWith('multipart/form-data')) return err('Upload rejected: Expected multipart/form-data content type.');
   let form: FormData;
   try { form = await request.formData(); } catch { return err('Upload rejected: Failed to parse multipart form data.'); }
@@ -136,21 +145,25 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     if (error) return err(error);
     files = gotFiles;
   }
-  const defaultTtl = mode === 'redirect' ? REDIRECT_DEFAULT_TTL : DEFAULT_TTL;
+  const defaultTtl = mode === 'redirect' ? (isGuest ? GUEST_REDIRECT_MAX_TTL : REDIRECT_DEFAULT_TTL) : (isGuest ? GUEST_FILE_MAX_TTL : DEFAULT_TTL);
   const ttl = Number(form.get('ttl_seconds') ?? defaultTtl);
   const maxTtl = mode === 'redirect'
-    ? (who.role === 'admin' ? 365 * 10 * 24 * 3600 : REDIRECT_MAX_TTL_USER)
-    : (who.role === 'admin' ? 30 * 24 * 3600 : MAX_TTL);
+    ? (who.role === 'admin' ? 365 * 10 * 24 * 3600 : (isGuest ? GUEST_REDIRECT_MAX_TTL : REDIRECT_MAX_TTL_USER))
+    : (who.role === 'admin' ? 30 * 24 * 3600 : (isGuest ? GUEST_FILE_MAX_TTL : MAX_TTL));
   if (!Number.isInteger(ttl) || ttl < 60 || ttl > maxTtl) {
     if (mode === 'redirect') {
-      return err(`Upload rejected: TTL for redirect URLs must be between 60 seconds and ${Math.round(maxTtl / 86400)} days (received: ${ttl}).`);
+      const unit = isGuest ? `${Math.round(maxTtl / 3600)} hours` : `${Math.round(maxTtl / 86400)} days`;
+      return err(`Upload rejected: TTL for redirect URLs must be between 60 seconds and ${unit} (received: ${ttl}).`);
     }
-    return err(`Upload rejected: TTL must be between 60 seconds and 30 days (received: ${ttl}).`);
+    const unit = isGuest ? `${Math.round(maxTtl / 3600)} hours` : '30 days';
+    return err(`Upload rejected: TTL must be between 60 seconds and ${unit} (received: ${ttl}).`);
   }
   const rawSlug = form.get('slug');
   if (rawSlug !== null && typeof rawSlug !== 'string') return err('Upload rejected: Invalid slug format.');
-  if (who.role !== 'admin' && mode !== 'redirect' && (rawSlug || '').trim()) return err('Upload rejected: Only admins can choose a custom slug.', 403);
-  const slug = (rawSlug || '').trim() || randomHex();
+  const trimmedSlug = (rawSlug || '').trim();
+  if (isGuest && trimmedSlug) return err('Upload rejected: Unauthenticated guests cannot choose custom slugs. Please sign in or use an agent token.', 403);
+  if (who.role !== 'admin' && mode !== 'redirect' && !isGuest && trimmedSlug) return err('Upload rejected: Only admins can choose a custom slug.', 403);
+  const slug = trimmedSlug || randomHex();
   if (!slugPattern.test(slug) || RESERVED_SLUGS.has(slug)) return err(`Upload rejected: Slug "${slug}" is invalid or reserved.`);
   const rawHost = form.get('domain');
   if (rawHost !== null && typeof rawHost !== 'string') return err('Upload rejected: Invalid domain format.');
@@ -161,7 +174,8 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   if (typeof password === 'string' && password.length > 256) return err('Upload rejected: Password exceeds maximum length of 256 characters.');
   if (who.role !== 'admin' && who.userId) {
     const active = await env.DB.prepare('SELECT COUNT(*) AS n FROM shares WHERE owner_id = ? AND expires_at > ?').bind(who.userId, Math.floor(Date.now() / 1000)).first<{ n: number }>();
-    if ((active?.n ?? 0) >= USER_MAX_ACTIVE_SHARES) return err(`Upload rejected: You already have ${USER_MAX_ACTIVE_SHARES} active shares.  Delete one or wait for one to expire.`, 429);
+    const maxActive = isGuest ? GUEST_MAX_ACTIVE_SHARES : USER_MAX_ACTIVE_SHARES;
+    if ((active?.n ?? 0) >= maxActive) return err(`Upload rejected: You already have ${maxActive} active shares.  Delete one or wait for one to expire.`, 429);
   }
   const existing = await env.DB.prepare('SELECT slug FROM shares WHERE slug = ?').bind(slug).first();
   if (existing) return err(`Upload rejected: Slug "${slug}" is already active and reserved.`, 409);
@@ -176,7 +190,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
     const hash = password && salt ? await passwordHash(password, salt) : null;
     const now = Math.floor(Date.now() / 1000), expires = now + ttl;
     const objectsJson = mode === 'redirect' ? JSON.stringify({ target_url: targetUrl }) : JSON.stringify(entries);
-    await env.DB.prepare('INSERT INTO shares (slug,mode,expires_at,password_salt,password_hash,objects_json,created_at,owner_id) VALUES (?,?,?,?,?,?,?,?)')
+    await env.DB.prepare('INSERT INTO shares (slug,mode,expires_at,password_salt,password_hash,objects_json,created_at,owner_id,renewals_count) VALUES (?,?,?,?,?,?,?,?,0)')
       .bind(slug, mode, expires, salt, hash, objectsJson, now, who.userId).run();
     const resHeaders: Record<string, string> = { 'Cache-Control': 'no-store' };
     if (newSessionCookie) resHeaders['Set-Cookie'] = newSessionCookie;
@@ -186,6 +200,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
       domain,
       expires_at: new Date(expires * 1000).toISOString(),
       mode,
+      renewals_used: 0,
       ...(mode === 'redirect' ? { target_url: targetUrl } : { files: entries.map(({ path, size }) => ({ path, size })) })
     }, { status: 201, headers: resHeaders });
   } catch (e) {
@@ -291,9 +306,42 @@ async function listShares(request: Request, env: Env): Promise<Response> {
       if (Array.isArray(parsed)) entries = parsed;
       else if (parsed && parsed.target_url) targetUrl = parsed.target_url;
     } catch { /* keep empty */ }
-    return { slug: r.slug, url: `https://${env.DEFAULT_SHARE_HOST}/s/${r.slug}/`, mode: r.mode, files: entries.length, bytes: entries.reduce((n, e) => n + e.size, 0), password_protected: !!r.password_hash, created_at: new Date(r.created_at * 1000).toISOString(), expires_at: new Date(r.expires_at * 1000).toISOString(), ...(targetUrl ? { target_url: targetUrl } : {}), ...(who.role === 'admin' ? { owner_id: r.owner_id ?? null } : {}) };
+    return { slug: r.slug, url: `https://${env.DEFAULT_SHARE_HOST}/s/${r.slug}/`, mode: r.mode, files: entries.length, bytes: entries.reduce((n, e) => n + e.size, 0), password_protected: !!r.password_hash, created_at: new Date(r.created_at * 1000).toISOString(), expires_at: new Date(r.expires_at * 1000).toISOString(), renewals_used: r.renewals_count ?? 0, ...(targetUrl ? { target_url: targetUrl } : {}), ...(who.role === 'admin' ? { owner_id: r.owner_id ?? null } : {}) };
   });
   return Response.json({ shares }, { headers: { 'Cache-Control': 'no-store' } });
+}
+async function renewShare(request: Request, env: Env, slug: string): Promise<Response> {
+  const who = await principal(request, env);
+  const share = await env.DB.prepare('SELECT * FROM shares WHERE slug = ?').bind(slug).first<Share>();
+  const now = Math.floor(Date.now() / 1000);
+  if (!share || share.expires_at <= now) return err('Share expired or not found.', 404);
+
+  const renewalsCount = share.renewals_count ?? 0;
+  if (renewalsCount >= MAX_LEASE_RENEWALS) {
+    return err(`Renewal rejected: Maximum of ${MAX_LEASE_RENEWALS} lease renewals reached for this share. Please sign up or create a new share.`, 400);
+  }
+
+  const isGuest = !who || (who.role !== 'admin' && Boolean(who.isGuest));
+  let renewTtlSeconds: number;
+  if (isGuest) {
+    renewTtlSeconds = share.mode === 'redirect' ? GUEST_REDIRECT_MAX_TTL : GUEST_FILE_MAX_TTL;
+  } else if (who.role === 'admin') {
+    renewTtlSeconds = 7 * 24 * 3600;
+  } else {
+    renewTtlSeconds = share.mode === 'redirect' ? (30 * 24 * 3600) : MAX_TTL;
+  }
+
+  const newExpires = now + renewTtlSeconds;
+  await env.DB.prepare('UPDATE shares SET expires_at = ?, renewals_count = renewals_count + 1 WHERE slug = ?')
+    .bind(newExpires, slug).run();
+
+  return Response.json({
+    success: true,
+    slug,
+    expires_at: new Date(newExpires * 1000).toISOString(),
+    renewals_used: renewalsCount + 1,
+    max_renewals: MAX_LEASE_RENEWALS
+  }, { headers: { 'Cache-Control': 'no-store' } });
 }
 async function deleteShare(request: Request, env: Env, slug: string): Promise<Response> {
   const who = await principal(request, env);
@@ -317,15 +365,17 @@ const providerNames = { github: 'GitHub', google: 'Google', apple: 'Apple' } as 
 const homePage = (env: Env, user: User | null) => {
   const signedIn = user !== null;
   const userIsAdmin = user?.role === 'admin';
+  const userIsGuest = !signedIn || !user.email;
+  const userCanCustomSlug = userIsAdmin || (signedIn && !userIsGuest);
   const providers = configuredProviders(env);
   const head = signedIn
     ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}).  <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
     : `<p>Upload files or create redirect URLs.  Admin token optional.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
   const tokenField = signedIn ? '' : '<label>Admin token (optional) <input id="token" type="password" autocomplete="off"></label><br>';
-  const slugField = `<label id="l_slug" style="display:${userIsAdmin ? 'inline' : 'none'}">Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br id="b_slug" style="display:${userIsAdmin ? 'inline' : 'none'}">`;
+  const slugField = `<label id="l_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br id="b_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">`;
   const mine = `<h2>${userIsAdmin ? 'All active shares' : 'Your shares'}</h2><ul id="mine"></ul>`;
-  return page(`<h1>FleetLink</h1>${head}<form id="f">${tokenField}<label>Files <input id="files" type="file" multiple></label><br><label>Folder <input id="folder" type="file" webkitdirectory multiple></label><br><label>Mode <select name="mode"><option value="directory">Directory</option><option value="site">Hosted site</option><option value="redirect">Redirect URL</option></select></label><br><label id="l_target" style="display:none">Target URL <input name="target_url" type="url" placeholder="https://..."></label><br id="b_target" style="display:none"><label>TTL (seconds) <input name="ttl_seconds" type="number" min="60" max="315360000" value="86400"></label><br>${slugField}<label>Password (optional) <input name="password" type="password"></label><br><label>Domain <select name="domain">${canonicalHosts(env).map(h => `<option value="${escapeHtml(h)}" ${h === env.DEFAULT_SHARE_HOST ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}</select></label><br><button>Make share</button></form><pre id="result"></pre>${mine}<script>const signedIn=${signedIn ? 'true' : 'false'};const userIsAdmin=${userIsAdmin ? 'true' : 'false'};const result=document.querySelector('#result');
-document.querySelector('select[name="mode"]').onchange=e=>{const isR=e.target.value==='redirect';document.querySelector('#l_target').style.display=isR?'inline':'none';document.querySelector('#b_target').style.display=isR?'inline':'none';if(document.querySelector('#l_slug'))document.querySelector('#l_slug').style.display=(isR||userIsAdmin)?'inline':'none';if(document.querySelector('#b_slug'))document.querySelector('#b_slug').style.display=(isR||userIsAdmin)?'inline':'none';if(isR)document.querySelector('input[name="ttl_seconds"]').value='15552000';};
+  return page(`<h1>FleetLink</h1>${head}<form id="f">${tokenField}<label>Files <input id="files" type="file" multiple></label><br><label>Folder <input id="folder" type="file" webkitdirectory multiple></label><br><label>Mode <select name="mode"><option value="directory">Directory</option><option value="site">Hosted site</option><option value="redirect">Redirect URL</option></select></label><br><label id="l_target" style="display:none">Target URL <input name="target_url" type="url" placeholder="https://..."></label><br id="b_target" style="display:none"><label>TTL (seconds) <input name="ttl_seconds" type="number" min="60" max="315360000" value="86400"></label><br>${slugField}<label>Password (optional) <input name="password" type="password"></label><br><label>Domain <select name="domain">${canonicalHosts(env).map(h => `<option value="${escapeHtml(h)}" ${h === env.DEFAULT_SHARE_HOST ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('')}</select></label><br><button>Make share</button></form><pre id="result"></pre>${mine}<script>const signedIn=${signedIn ? 'true' : 'false'};const userIsAdmin=${userIsAdmin ? 'true' : 'false'};const userIsGuest=${userIsGuest ? 'true' : 'false'};const userCanCustomSlug=${userCanCustomSlug ? 'true' : 'false'};const result=document.querySelector('#result');
+document.querySelector('select[name="mode"]').onchange=e=>{const isR=e.target.value==='redirect';document.querySelector('#l_target').style.display=isR?'inline':'none';document.querySelector('#b_target').style.display=isR?'inline':'none';if(document.querySelector('#l_slug'))document.querySelector('#l_slug').style.display=(isR && !userIsGuest || userCanCustomSlug)?'inline':'none';if(document.querySelector('#b_slug'))document.querySelector('#b_slug').style.display=(isR && !userIsGuest || userCanCustomSlug)?'inline':'none';if(isR)document.querySelector('input[name="ttl_seconds"]').value=userIsGuest?'86400':'15552000';};
 function copyButton(text){const b=document.createElement('button');b.type='button';b.textContent='Copy link';b.onclick=async()=>{try{await navigator.clipboard.writeText(text);b.textContent='Copied'}catch{const t=document.createElement('textarea');t.value=text;document.body.append(t);t.select();try{document.execCommand('copy');b.textContent='Copied'}catch{b.textContent='Copy failed'}t.remove()}setTimeout(()=>{b.textContent='Copy link'},1500)};return b}
 async function refresh(){const ul=document.querySelector('#mine');if(!ul)return;const r=await fetch('/api/shares');if(!r.ok){if(!signedIn)return;ul.textContent='Could not load shares.';return}const {shares}=await r.json();ul.replaceChildren();if(!shares.length){ul.textContent='No active shares.';return}for(const s of shares){const li=document.createElement('li');const a=document.createElement('a');a.href=s.url;a.textContent=s.url;li.append(a,' ');li.append(copyButton(s.url));li.append(' - '+(s.mode==='redirect'?'↳ '+(s.target_url||'redirect'):s.files+' file(s)')+(s.password_protected?', password':'')+', expires '+s.expires_at+' ');const b=document.createElement('button');b.textContent='Delete';b.onclick=async()=>{if(!confirm('Delete '+s.slug+'?'))return;const d=await fetch('/api/shares/'+encodeURIComponent(s.slug),{method:'DELETE'});if(!d.ok)result.textContent='Delete failed';refresh()};li.append(b);ul.append(li)}}
 document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}result.textContent='Uploading...';try{const init={method:'POST',body:d};const tokInput=document.querySelector('#token');if(tokInput&&tokInput.value.trim())init.headers={Authorization:'Bearer '+tokInput.value.trim()};const r=await fetch('/api/shares',init);const data=await r.json();result.textContent='';if(data.url){const a=document.createElement('a');a.href=data.url;a.textContent=data.url;result.append(a,' ',copyButton(data.url))}else result.textContent=data.error||'Failed';refresh()}catch(err){result.textContent=String(err)}};refresh();</script>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
@@ -342,6 +392,22 @@ export default {
       }
       if (url.pathname === '/api/shares' && request.method === 'POST') return createShare(request, env);
       if (url.pathname === '/api/shares' && request.method === 'GET') return listShares(request, env);
+      const renew = /^\/api\/(?:shares|portal)\/([a-z0-9-]{1,64})\/renew$/.exec(url.pathname);
+      if (renew && request.method === 'POST') return renewShare(request, env, renew[1]);
+      if ((url.pathname === '/api/shares/renew' || url.pathname === '/api/portal/renew') && request.method === 'POST') {
+        let slug = '';
+        try {
+          const body = await request.clone().json() as { slug?: string };
+          slug = String(body?.slug || '').trim();
+        } catch {
+          try {
+            const fd = await request.clone().formData();
+            slug = String(fd.get('slug') || '').trim();
+          } catch {}
+        }
+        if (!slug) return err('Missing required parameter: slug.', 400);
+        return renewShare(request, env, slug);
+      }
       const del = /^\/api\/shares\/([a-z0-9-]{1,64})$/.exec(url.pathname);
       if (del && request.method === 'DELETE') return deleteShare(request, env, del[1]);
       if (url.pathname === '/api/me' && request.method === 'GET') {

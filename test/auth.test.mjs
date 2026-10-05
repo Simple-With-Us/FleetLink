@@ -15,7 +15,7 @@ const ORIGIN = 'https://admin.test';
 // A real SQLite database behind the D1 calls the worker uses.
 function d1() {
   const db = new SQL.Database();
-  for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
+  for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql', '0004_renewals.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
   const exec = (sql, args) => { const st = db.prepare(sql); st.bind(args); const rows = []; while (st.step()) rows.push(st.getAsObject()); st.free(); return rows; };
   const stmt = (sql) => { let args = []; const s = { bind(...a) { args = a; return s; }, async first() { return exec(sql, args)[0] ?? null; }, async all() { return { results: exec(sql, args) }; }, async run() { exec(sql, args); return {}; }, _run: () => exec(sql, args) }; return s; };
   return { prepare: stmt, async batch(list) { return list.map(s => ({ results: s._run() })); }, raw: exec };
@@ -335,7 +335,7 @@ test('normal user can create custom vanity redirect url with 6-month TTL and 302
 test('mass user public access allows unauthenticated upload and redirect creation on share host', async () => {
   const { env } = environment();
 
-  // 1.  Public user uploads a file with no auth headers or cookies on share.test
+  // 1.  Public user uploads a file with no auth headers or cookies on share.test (random slug auto-assigned)
   const form = new FormData();
   form.set('mode', 'directory');
   form.set('ttl_seconds', '3600');
@@ -350,6 +350,7 @@ test('mass user public access allows unauthenticated upload and redirect creatio
   const uploadData = await uploadRes.json();
   assert.equal(uploadData.mode, 'directory');
   assert.equal(uploadData.files.length, 1);
+  assert.ok(uploadData.slug, 'auto-assigned random slug');
 
   // Auto-issued session cookie
   const setCookie = uploadRes.headers.getSetCookie();
@@ -364,12 +365,11 @@ test('mass user public access allows unauthenticated upload and redirect creatio
   const shares = (await listRes.json()).shares;
   assert.ok(shares.some(s => s.slug === uploadData.slug));
 
-  // 3.  Public user creates vanity redirect on share.test without existing auth
+  // 3.  Public user creates redirect on share.test without existing auth (auto random slug, 24h max TTL)
   const redirectForm = new FormData();
   redirectForm.set('mode', 'redirect');
-  redirectForm.set('slug', 'public-redirect');
   redirectForm.set('target_url', 'https://example.com/welcome');
-  redirectForm.set('ttl_seconds', String(180 * 24 * 3600));
+  redirectForm.set('ttl_seconds', String(24 * 3600));
 
   const redirectRes = await worker.fetch(new Request('https://share.test/api/shares', {
     method: 'POST',
@@ -377,13 +377,131 @@ test('mass user public access allows unauthenticated upload and redirect creatio
   }), env);
   assert.equal(redirectRes.status, 201);
   const redirectData = await redirectRes.json();
-  assert.equal(redirectData.slug, 'public-redirect');
+  assert.ok(redirectData.slug, 'auto-assigned random slug');
   assert.equal(redirectData.target_url, 'https://example.com/welcome');
 
   // Verify redirect resolves via 302
-  const getRes = await worker.fetch(new Request('https://share.test/s/public-redirect/'), env);
+  const getRes = await worker.fetch(new Request(`https://share.test/s/${redirectData.slug}/`), env);
   assert.equal(getRes.status, 302);
   assert.equal(getRes.headers.get('location'), 'https://example.com/welcome');
+});
+
+test('guest abuse prevention limits: file caps, ttl restrictions, random slug enforcement, and 3x lease renewals', async () => {
+  const { env } = environment();
+
+  // 1. Custom vanity slug on file upload is rejected for unauthenticated guest
+  const formCustomSlug = new FormData();
+  formCustomSlug.set('mode', 'directory');
+  formCustomSlug.set('slug', 'guest-vanity-slug');
+  formCustomSlug.append('path', 'test.txt');
+  formCustomSlug.append('file', new File(['hello'], 'test.txt'));
+  const resCustomSlug = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    body: formCustomSlug
+  }), env);
+  assert.equal(resCustomSlug.status, 403);
+  assert.match((await resCustomSlug.json()).error, /Unauthenticated guests cannot choose custom slugs/);
+
+  // 2. Custom vanity slug on redirect is rejected for unauthenticated guest
+  const formRedirectCustom = new FormData();
+  formRedirectCustom.set('mode', 'redirect');
+  formRedirectCustom.set('slug', 'guest-redirect-vanity');
+  formRedirectCustom.set('target_url', 'https://example.com');
+  const resRedirectCustom = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    body: formRedirectCustom
+  }), env);
+  assert.equal(resRedirectCustom.status, 403);
+  assert.match((await resRedirectCustom.json()).error, /Unauthenticated guests cannot choose custom slugs/);
+
+  // 3. TTL > 6 hours (21600s) on file upload is rejected for unauthenticated guest
+  const formOverTtl = new FormData();
+  formOverTtl.set('mode', 'directory');
+  formOverTtl.set('ttl_seconds', String(7 * 3600)); // 7 hours
+  formOverTtl.append('path', 'test.txt');
+  formOverTtl.append('file', new File(['hello'], 'test.txt'));
+  const resOverTtl = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    body: formOverTtl
+  }), env);
+  assert.equal(resOverTtl.status, 400);
+  assert.match((await resOverTtl.json()).error, /TTL must be between 60 seconds and 6 hours/);
+
+  // 4. TTL > 24 hours (86400s) on redirect is rejected for unauthenticated guest
+  const formRedirectOverTtl = new FormData();
+  formRedirectOverTtl.set('mode', 'redirect');
+  formRedirectOverTtl.set('target_url', 'https://example.com');
+  formRedirectOverTtl.set('ttl_seconds', String(25 * 3600)); // 25 hours
+  const resRedirectOverTtl = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    body: formRedirectOverTtl
+  }), env);
+  assert.equal(resRedirectOverTtl.status, 400);
+  assert.match((await resRedirectOverTtl.json()).error, /TTL for redirect URLs must be between 60 seconds and 24 hours/);
+
+  // 5. File count > 40 is rejected for unauthenticated guest
+  const formTooManyFiles = new FormData();
+  formTooManyFiles.set('mode', 'directory');
+  for (let i = 0; i < 41; i++) {
+    formTooManyFiles.append('path', `f${i}.txt`);
+    formTooManyFiles.append('file', new File(['x'], `f${i}.txt`));
+  }
+  const resTooManyFiles = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    body: formTooManyFiles
+  }), env);
+  assert.equal(resTooManyFiles.status, 400);
+  assert.match((await resTooManyFiles.json()).error, /exceeding limit of 40 files/);
+
+  // 6. Valid guest upload allows 3 lease renewals, and 4th is rejected
+  const formValid = new FormData();
+  formValid.set('mode', 'directory');
+  formValid.set('ttl_seconds', '3600');
+  formValid.append('path', 'valid.txt');
+  formValid.append('file', new File(['valid content'], 'valid.txt'));
+  const resValid = await worker.fetch(new Request('https://share.test/api/shares', {
+    method: 'POST',
+    body: formValid
+  }), env);
+  assert.equal(resValid.status, 201);
+  const validData = await resValid.json();
+  const guestSlug = validData.slug;
+
+  // Renewal 1
+  const renew1 = await worker.fetch(new Request(`https://share.test/api/shares/${guestSlug}/renew`, {
+    method: 'POST'
+  }), env);
+  assert.equal(renew1.status, 200);
+  const data1 = await renew1.json();
+  assert.equal(data1.success, true);
+  assert.equal(data1.renewals_used, 1);
+
+  // Renewal 2 (via /api/shares/renew POST body)
+  const renew2 = await worker.fetch(new Request('https://share.test/api/shares/renew', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug: guestSlug })
+  }), env);
+  assert.equal(renew2.status, 200);
+  const data2 = await renew2.json();
+  assert.equal(data2.renewals_used, 2);
+
+  // Renewal 3 (via /api/portal/renew POST body)
+  const renew3 = await worker.fetch(new Request('https://share.test/api/portal/renew', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug: guestSlug })
+  }), env);
+  assert.equal(renew3.status, 200);
+  const data3 = await renew3.json();
+  assert.equal(data3.renewals_used, 3);
+
+  // Renewal 4 (must be rejected)
+  const renew4 = await worker.fetch(new Request(`https://share.test/api/shares/${guestSlug}/renew`, {
+    method: 'POST'
+  }), env);
+  assert.equal(renew4.status, 400);
+  assert.match((await renew4.json()).error, /Maximum of 3 lease renewals reached/);
 });
 
 test('URL length validation rejects non-ASCII percent-encoded URLs exceeding 2048 characters', async () => {
