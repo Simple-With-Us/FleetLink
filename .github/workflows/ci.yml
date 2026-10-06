@@ -84,7 +84,7 @@ jobs:
           if [ -n "$APP_PATH" ]; then
             echo "Installing and launching Main App..."
             xcrun simctl install "$SIM_ID" "$APP_PATH"
-            xcrun simctl launch "$SIM_ID" online.fleetlink || true
+            xcrun simctl launch "$SIM_ID" online.fleetlink.ios || true
             sleep 3
             xcrun simctl io "$SIM_ID" screenshot ./screenshots/app.png || true
           fi
@@ -92,7 +92,7 @@ jobs:
           if [ -n "$CLIP_PATH" ]; then
             echo "Installing and launching App Clip..."
             xcrun simctl install "$SIM_ID" "$CLIP_PATH"
-            xcrun simctl launch "$SIM_ID" online.fleetlink.Clip || true
+            xcrun simctl launch "$SIM_ID" online.fleetlink.ios.Clip || true
             sleep 3
             xcrun simctl io "$SIM_ID" screenshot ./screenshots/appclip.png || true
           fi
