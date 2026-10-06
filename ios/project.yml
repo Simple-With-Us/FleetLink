@@ -35,6 +35,17 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Clip/Info.plist
+      properties:
+        CFBundleDisplayName: FleetLink Clip
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        NSAppClip:
+          NSAppClipRequestEphemeralUserNotification: false
+          NSAppClipRequestLocationConfirmation: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
 
   FleetLink:
     type: application
@@ -58,6 +69,19 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: App/Info.plist
+      properties:
+        CFBundleDisplayName: FleetLink
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
 
 schemes:
   FleetLink:

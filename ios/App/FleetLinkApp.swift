@@ -3,12 +3,40 @@ import SwiftUI
 @main
 struct FleetLinkApp: App {
     @StateObject private var loader = ArtifactLoader()
+    @StateObject private var portalManager = PortalManager()
     @State private var inputURLString = "https://fleetlink.online"
     @State private var selectedTab = 0
 
     var body: some Scene {
         WindowGroup {
             TabView(selection: $selectedTab) {
+                // Tab 0: Portal & Analytics
+                PortalView(portalManager: portalManager) { targetURL in
+                    inputURLString = targetURL.absoluteString
+                    selectedTab = 2
+                    Task {
+                        await loader.load(url: targetURL)
+                    }
+                }
+                .tabItem {
+                    Label("Portal", systemImage: "chart.bar.xaxis")
+                }
+                .tag(0)
+
+                // Tab 1: Make Slug / Upload
+                CreateSlugView(portalManager: portalManager) { targetURL in
+                    inputURLString = targetURL.absoluteString
+                    selectedTab = 2
+                    Task {
+                        await loader.load(url: targetURL)
+                    }
+                }
+                .tabItem {
+                    Label("Make Slug", systemImage: "plus.circle.fill")
+                }
+                .tag(1)
+
+                // Tab 2: Artifact Viewer
                 NavigationStack {
                     VStack(spacing: 0) {
                         // Quick input bar
@@ -32,83 +60,41 @@ struct FleetLinkApp: App {
                         .padding(.vertical, 8)
                         .background(Color(UIColor.secondarySystemGroupedBackground))
                         .cornerRadius(10)
-                        .padding()
+                        .padding([.horizontal, .top])
 
                         Divider()
+                            .padding(.top, 8)
 
                         ArtifactContainerView(loader: loader, isClip: false)
                     }
-                    .navigationTitle("FleetLink")
+                    .navigationTitle("Artifact Viewer")
                     .navigationBarTitleDisplayMode(.inline)
                 }
                 .tabItem {
-                    Label("Artifact", systemImage: "doc.text.magnifyingglass")
+                    Label("Viewer", systemImage: "doc.text.magnifyingglass")
                 }
-                .tag(0)
+                .tag(2)
 
-                NavigationStack {
-                    List {
-                        Section("Recent Links") {
-                            Button("https://fleetlink.online") {
-                                inputURLString = "https://fleetlink.online"
-                                selectedTab = 0
-                                if let url = URL(string: inputURLString) {
-                                    Task { await loader.load(url: url) }
-                                }
-                            }
-                        }
-
-                        Section("Supported Domains") {
-                            HStack {
-                                Text("fleetlink.online")
-                                Spacer()
-                                Text("Default")
-                                    .font(.caption.bold())
-                                    .foregroundColor(.green)
-                            }
-                            HStack {
-                                Text("fleetlink.app")
-                                Spacer()
-                                Text("Secondary")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-
-                        Section("Features") {
-                            Label("App Clip Quick Preview", systemImage: "bolt.badge.automatic.fill")
-                            Label("Universal Links", systemImage: "arrow.up.right.square")
-                            Label("Multi-file Batch Shares", systemImage: "folder")
-                            Label("Automatic Expiration", systemImage: "clock")
-                        }
+                // Tab 3: Settings & Info
+                SettingsView()
+                    .tabItem {
+                        Label("Settings", systemImage: "gearshape")
                     }
-                    .navigationTitle("Settings & Info")
-                }
-                .tabItem {
-                    Label("Info", systemImage: "info.circle")
-                }
-                .tag(1)
+                    .tag(3)
             }
             .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
                 guard let incomingURL = userActivity.webpageURL else { return }
                 inputURLString = incomingURL.absoluteString
-                selectedTab = 0
+                selectedTab = 2
                 Task {
                     await loader.load(url: incomingURL)
                 }
             }
             .onOpenURL { url in
                 inputURLString = url.absoluteString
-                selectedTab = 0
+                selectedTab = 2
                 Task {
                     await loader.load(url: url)
-                }
-            }
-            .task {
-                if case .idle = loader.state {
-                    if let defaultURL = URL(string: "https://fleetlink.online") {
-                        await loader.load(url: defaultURL)
-                    }
                 }
             }
         }
