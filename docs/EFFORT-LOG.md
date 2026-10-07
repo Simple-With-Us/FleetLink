@@ -28,3 +28,4 @@ Two-space sentence gaps required in every human-facing prose block.
 
 
 
+| 2026-10-07 | AG | Privacy Policy & App Store metadata: /privacy endpoint, SWU catalog integration, and ASC URLs (PR #36, SWU PR #41) | Completed/Deployed | Built and deployed dedicated boilerplate Privacy Policy for FleetLink at https://fleetlink.online/privacy (aliases /privacy-policy, /privacy.html) detailing ephemeral TTL storage, R2/D1 zero-monetization architecture, and self-serve deletion.  Added privacy notice and TestFlight beta status to Simple-With-Us catalog at https://simplewithus.com/fleetlink/privacy.html (SWU PR #41 merged).  Updated App Store Connect appInfoLocalizations with privacyPolicyUrl and appStoreVersionLocalizations with marketingUrl and supportUrl for online.fleetlink.ios.  Deployed live worker fc0d0146, verified 29/29 tests, and merged PR #36 to main.
