@@ -165,9 +165,11 @@ public struct CreateSlugView: View {
                 }
 
                 Section("Options") {
-                    TextField("Custom Slug (optional)", text: $customSlug)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                    if creationMode == .redirect || !authToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        TextField("Custom Slug (optional)", text: $customSlug)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    }
 
                     Picker("Expiration", selection: $selectedTTLSeconds) {
                         if creationMode == .redirect {

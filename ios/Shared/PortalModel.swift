@@ -33,12 +33,24 @@ public struct PortalShare: Identifiable, Codable, Hashable, Sendable {
         return String(format: "%.2f GB", gb)
     }
 
+    private static let iso8601Fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let iso8601Standard: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     public var createdDate: Date? {
-        ISO8601DateFormatter().date(from: created_at)
+        Self.iso8601Fractional.date(from: created_at) ?? Self.iso8601Standard.date(from: created_at)
     }
 
     public var expiresDate: Date? {
-        ISO8601DateFormatter().date(from: expires_at)
+        Self.iso8601Fractional.date(from: expires_at) ?? Self.iso8601Standard.date(from: expires_at)
     }
 
     public var timeRemainingString: String {
@@ -266,7 +278,8 @@ public enum PortalError: LocalizedError, Sendable {
         addField("target_url", targetUrl)
         addField("ttl_seconds", "\(ttlSeconds)")
         addField("domain", domain)
-        if let s = customSlug, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let s = customSlug, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             addField("slug", s.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         if let p = password, !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -332,7 +345,9 @@ public enum PortalError: LocalizedError, Sendable {
         addField("mode", "directory")
         addField("ttl_seconds", "\(ttlSeconds)")
         addField("domain", domain)
-        if let s = customSlug, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        // API only accepts custom slug for directory/file uploads with an auth token
+        if let s = customSlug, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             addField("slug", s.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         if let p = password, !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
