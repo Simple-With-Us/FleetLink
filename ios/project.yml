@@ -36,6 +36,7 @@ targets:
       path: Clip/Info.plist
       properties:
         CFBundleDisplayName: FleetLink Clip
+        CFBundlePackageType: APPL
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         NSAppClip:
@@ -43,6 +44,12 @@ targets:
           NSAppClipRequestLocationConfirmation: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
 
