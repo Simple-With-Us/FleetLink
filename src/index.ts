@@ -1,5 +1,5 @@
 import { cleanPath, contentType, escapeHtml, sha256Hex, slugPattern } from './pure';
-import { type AuthEnv, type User, configuredProviders, finishLogin, isProvider, logout, purgeExpiredSessions, sameOrigin, sessionUser, SESSION_COOKIE, startLogin } from './auth';
+import { type AuthEnv, type User, configuredProviders, finishLogin, isProvider, loginWithCredentials, logout, purgeExpiredSessions, sameOrigin, sessionUser, SESSION_COOKIE, startLogin } from './auth';
 import { createAgentToken, listAgentTokens, revokeAgentToken, requestAgentQuotaIncrease, approveAgentQuotaRequest, rejectAgentQuotaRequest } from './tokens';
 import { createTeam, listUserTeams, addTeamMember, removeTeamMember, revertTeamShares, cleanupExpiredTeamTrials } from './teams';
 
@@ -262,7 +262,7 @@ async function createShare(request: Request, env: Env): Promise<Response> {
   const trimmedSlug = (rawSlug || '').trim();
   if (isGuest && trimmedSlug) return err('Upload rejected: Unauthenticated guests cannot choose custom slugs. Please sign in or use an agent token.', 403);
   if (who.role !== 'admin' && mode !== 'redirect' && !isGuest && trimmedSlug) return err('Upload rejected: Only admins can choose a custom slug.', 403);
-  const slug = trimmedSlug || randomHex();
+  const slug = (trimmedSlug || randomHex()).toLowerCase();
   if (!slugPattern.test(slug) || RESERVED_SLUGS.has(slug)) return err(`Upload rejected: Slug "${slug}" is invalid or reserved.`);
   const rawHost = form.get('domain');
   if (rawHost !== null && typeof rawHost !== 'string') return err('Upload rejected: Invalid domain format.');
@@ -347,9 +347,9 @@ async function authorized(request: Request, env: Env, share: Share): Promise<boo
   return safeEq(mac, await sign(env.SESSION_SECRET, `${share.slug}:${until}:${share.password_hash}`));
 }
 async function shareRequest(request: Request, env: Env, url: URL): Promise<Response> {
-  const match = /^\/s\/([a-z0-9-]{1,64})(?:\/(.*))?$/.exec(url.pathname);
+  const match = /^\/s\/([a-zA-Z0-9-]{1,64})(?:\/(.*))?$/.exec(url.pathname);
   if (!match || !slugPattern.test(match[1])) return err('Not found.', 404);
-  const slug = match[1], suffix = match[2] || '';
+  const slug = match[1].toLowerCase(), suffix = match[2] || '';
   const share = await env.DB.prepare('SELECT * FROM shares WHERE slug = ?').bind(slug).first<Share>();
   if (!share || share.expires_at <= Date.now() / 1000) return err('Share expired or not found.', 404);
   if (request.method === 'POST' && suffix === '_unlock') {
@@ -465,7 +465,8 @@ async function listShares(request: Request, env: Env): Promise<Response> {
   });
   return Response.json({ shares }, { headers: { 'Cache-Control': 'no-store' } });
 }
-async function renewShare(request: Request, env: Env, slug: string): Promise<Response> {
+async function renewShare(request: Request, env: Env, rawSlug: string): Promise<Response> {
+  const slug = rawSlug.toLowerCase();
   const who = await principal(request, env);
   const share = await env.DB.prepare('SELECT * FROM shares WHERE slug = ?').bind(slug).first<Share>();
   const now = Math.floor(Date.now() / 1000);
@@ -498,7 +499,8 @@ async function renewShare(request: Request, env: Env, slug: string): Promise<Res
     max_renewals: MAX_LEASE_RENEWALS
   }, { headers: { 'Cache-Control': 'no-store' } });
 }
-async function deleteShare(request: Request, env: Env, slug: string): Promise<Response> {
+async function deleteShare(request: Request, env: Env, rawSlug: string): Promise<Response> {
+  const slug = rawSlug.toLowerCase();
   const who = await principal(request, env);
   if (!who) return err('Unauthorized.', 401);
   if (who.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
@@ -591,6 +593,39 @@ const privacyPage = (env: Env) => {
 `;
   return page(content, 200, { 'Cache-Control': 'public, max-age=3600', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'" }, 'Privacy Policy — FleetLink');
 };
+const loginPage = (env: Env, error?: string | null) => {
+  const providers = configuredProviders(env);
+  const errorBox = error ? `<div style="background:#fee2e2;border:1px solid #f87171;color:#991b1b;padding:.75rem 1rem;border-radius:6px;margin:1rem 0;"><strong>Error:</strong> ${escapeHtml(error)}</div>` : '';
+  const oauthSection = providers.length
+    ? `<div style="margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid #e5e7eb"><p>Or sign in with OAuth provider:</p><p>${providers.map(p => `<a href="/auth/${p}/start" style="display:inline-block;margin-right:.5rem;padding:.4rem .8rem;border:1px solid #ccc;border-radius:4px;text-decoration:none;background:#fff">${providerNames[p]}</a>`).join(' ')}</p></div>`
+    : '';
+
+  const content = `
+<nav style="margin-bottom:1.5rem"><a href="/">&larr; Back to FleetLink</a> &nbsp;|&nbsp; <a href="/portal">Portal</a></nav>
+<h1>Sign In to FleetLink</h1>
+<p style="color:#666">Sign in with your username, email, account role (admin or agent), or secret token.</p>
+${errorBox}
+<form method="POST" action="/login" style="background:#f9fafb;border:1px solid #e5e7eb;padding:1.5rem;border-radius:8px;max-width:420px">
+  <label style="display:block;margin-bottom:.75rem">
+    <strong>Username or Email</strong><br>
+    <input type="text" id="username" name="username" placeholder="e.g. admin, agent, or user@example.com" autocomplete="username" required autofocus style="width:100%;box-sizing:border-box;padding:.5rem;margin-top:.25rem">
+  </label>
+  <label style="display:block;margin-bottom:.75rem">
+    <strong>Password or Secret Token</strong><br>
+    <input type="password" id="password" name="password" placeholder="Password or Secret Token" autocomplete="current-password" required style="width:100%;box-sizing:border-box;padding:.5rem;margin-top:.25rem">
+  </label>
+  <label style="display:block;margin-bottom:1rem">
+    <input type="checkbox" name="remember" value="true" checked> Keep me signed in
+  </label>
+  <button type="submit" style="background:#2563eb;color:#fff;border:none;border-radius:4px;padding:.6rem 1.2rem;font-weight:600;cursor:pointer">Sign In</button>
+</form>
+${oauthSection}
+<footer style="margin-top:3rem;padding-top:1.5rem;border-top:1px solid #eee;font-size:0.9rem;color:#666">
+  <a href="/privacy">Privacy Policy</a> &nbsp;&middot;&nbsp; <a href="/portal">Portal</a>
+</footer>
+`;
+  return page(content, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'" }, 'Sign In — FleetLink');
+};
 const homePage = (env: Env, user: User | null) => {
   const signedIn = user !== null;
   const userIsAdmin = user?.role === 'admin';
@@ -599,9 +634,9 @@ const homePage = (env: Env, user: User | null) => {
   const providers = configuredProviders(env);
   const head = signedIn
     ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}).  <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
-    : `<p>Upload files or create redirect URLs.  Admin token optional.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
+    : `<p>Upload files or create redirect URLs. <a href="/login" style="font-weight:600">Sign in</a>. Admin token optional.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
   const tokenField = signedIn ? '' : '<label>Admin token (optional) <input id="token" type="password" autocomplete="off"></label><br>';
-  const slugField = `<label id="l_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">Slug (optional) <input name="slug" pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]"></label><br id="b_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">`;
+  const slugField = `<label id="l_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">Slug (optional) <input name="slug" pattern="[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]|[a-zA-Z0-9]"></label><br id="b_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">`;
   const teamSelector = (signedIn && !userIsGuest) ? '<label id="l_team">Scope <select name="team_id" id="s_team"><option value="">Personal (default)</option></select></label><br>' : '';
   const mine = `<h2>${userIsAdmin ? 'All active shares' : 'Your shares'}</h2><ul id="mine"></ul>`;
   const agentSection = (signedIn && !userIsGuest)
@@ -627,7 +662,7 @@ async function refresh(){
     const tag = s.is_team ? ' [Team]' : '';
     li.append(' - '+(s.mode==='redirect'?'↳ '+(s.target_url||'redirect'):s.files+' file(s)')+(s.password_protected?', password':'')+tag+', expires '+s.expires_at+' ');
     const b=document.createElement('button');b.textContent='Delete';
-    b.onclick=async()=>{if(!confirm('Delete '+s.slug+'?'))return;const d=await fetch('/api/shares/'+encodeURIComponent(s.slug),{method:'DELETE'});if(!d.ok)result.textContent='Delete failed';refresh()};
+    b.onclick=async()=>{const d=await fetch('/api/shares/'+encodeURIComponent(s.slug),{method:'DELETE'});if(!d.ok)result.textContent='Delete failed';refresh()};
     li.append(b);ul.append(li)
   }
 }
@@ -642,7 +677,7 @@ async function refreshTokens(){
     const li=document.createElement('li');
     li.textContent=t.name+' ('+t.token_prefix+'...) '+(t.max_file_bytes?'max '+(t.max_file_bytes/1048576)+'MB ':'')+' ';
     const b=document.createElement('button');b.textContent='Revoke';
-    b.onclick=async()=>{if(!confirm('Revoke '+t.name+'?'))return;await fetch('/api/user/agent-tokens/'+t.id,{method:'DELETE'});refreshTokens()};
+    b.onclick=async()=>{await fetch('/api/user/agent-tokens/'+t.id,{method:'DELETE'});refreshTokens()};
     li.append(b);ul.append(li)
   }
 }
@@ -674,7 +709,7 @@ async function refreshTeams(){
       if(t.is_trial_active || t.plan === 'pro'){
         const fInv=document.createElement('form');
         fInv.innerHTML='<input name="email" type="email" placeholder="Member email" required> <button>Invite Member</button>';
-        fInv.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fInv);const res=await fetch('/api/teams/'+t.id+'/members',{method:'POST',body:fd});if(!res.ok){const errData=await res.json();alert(errData.error||'Failed');}else{refreshTeams()}};
+        fInv.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fInv);const res=await fetch('/api/teams/'+t.id+'/members',{method:'POST',body:fd});if(!res.ok){const errData=await res.json();result.textContent=errData.error||'Failed';}else{refreshTeams()}};
         div.append(fInv);
       }
     }
@@ -682,11 +717,11 @@ async function refreshTeams(){
   }
 }
 const fToken=document.querySelector('#f_token');
-if(fToken)fToken.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fToken);const r=await fetch('/api/user/agent-tokens',{method:'POST',body:fd});const d=await r.json();if(d.token){alert('Generated Token: '+d.token+'\\n\\nSave this token now; it cannot be shown again!');fToken.reset();refreshTokens()}else alert(d.error||'Failed')};
+if(fToken)fToken.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fToken);const r=await fetch('/api/user/agent-tokens',{method:'POST',body:fd});const d=await r.json();if(d.token){result.textContent='Generated Token: '+d.token+' (Save this token now; it cannot be shown again!)';fToken.reset();refreshTokens()}else result.textContent=d.error||'Failed'};
 const fQuota=document.querySelector('#f_quota');
-if(fQuota)fQuota.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fQuota);const r=await fetch('/api/user/agent-quota-request',{method:'POST',body:fd});const d=await r.json();if(d.success){alert('Quota request submitted successfully!');fQuota.reset()}else alert(d.error||'Failed')};
+if(fQuota)fQuota.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fQuota);const r=await fetch('/api/user/agent-quota-request',{method:'POST',body:fd});const d=await r.json();if(d.success){result.textContent='Quota request submitted successfully!';fQuota.reset()}else result.textContent=d.error||'Failed'};
 document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}result.textContent='Uploading...';try{const init={method:'POST',body:d};const tokInput=document.querySelector('#token');if(tokInput&&tokInput.value.trim())init.headers={Authorization:'Bearer '+tokInput.value.trim()};const r=await fetch('/api/shares',init);const data=await r.json();result.textContent='';if(data.url){const a=document.createElement('a');a.href=data.url;a.textContent=data.url;result.append(a,' ',copyButton(data.url))}else result.textContent=data.error||'Failed';refresh()}catch(err){result.textContent=String(err)}};
-refresh();if(signedIn&&!userIsGuest){refreshTokens();refreshTeams();}</script><footer style="margin-top:3rem;padding-top:1.5rem;border-top:1px solid #eee;font-size:0.9rem;color:#666"><a href="/privacy">Privacy Policy</a> &nbsp;&middot;&nbsp; <a href="/portal">Portal</a> &nbsp;&middot;&nbsp; <a href="https://simplewithus.com/fleetlink/" target="_blank" rel="noopener">Simple With Us</a> &nbsp;&middot;&nbsp; <a href="https://github.com/Simple-With-Us/FleetLink" target="_blank" rel="noopener">GitHub</a></footer>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
+refresh();if(signedIn&&!userIsGuest){refreshTokens();refreshTeams();}</script><footer style="margin-top:3rem;padding-top:1.5rem;border-top:1px solid #eee;font-size:0.9rem;color:#666"><a href="/login">Sign In</a> &nbsp;&middot;&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;&middot;&nbsp; <a href="/portal">Portal</a> &nbsp;&middot;&nbsp; <a href="https://simplewithus.com/fleetlink/" target="_blank" rel="noopener">Simple With Us</a> &nbsp;&middot;&nbsp; <a href="https://github.com/Simple-With-Us/FleetLink" target="_blank" rel="noopener">GitHub</a></footer>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
 };
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -698,29 +733,83 @@ export default {
       if ((url.pathname === '/' || url.pathname === '/portal' || url.pathname === '/portal/' || url.pathname === '/admin' || url.pathname === '/admin/') && request.method === 'GET') {
         return homePage(env, request.headers.get('cookie')?.includes(`${SESSION_COOKIE}=`) ? await sessionUser(request, env) : null);
       }
+      if ((url.pathname === '/login' || url.pathname === '/login/' || url.pathname === '/signin' || url.pathname === '/signin/') && request.method === 'GET') {
+        return loginPage(env, url.searchParams.get('error'));
+      }
+      if ((url.pathname === '/login' || url.pathname === '/login/' || url.pathname === '/signin' || url.pathname === '/signin/') && request.method === 'POST') {
+        let username = '', password = '', remember = true;
+        const contentType = request.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          try {
+            const body = await request.clone().json() as Record<string, any>;
+            username = String(body.username || body.user || body.email || '').trim();
+            password = String(body.password || body.token || body.secret || '').trim();
+            if (body.remember !== undefined) remember = Boolean(body.remember);
+          } catch {}
+        } else {
+          try {
+            const fd = await request.clone().formData();
+            username = String(fd.get('username') || fd.get('user') || fd.get('email') || '').trim();
+            password = String(fd.get('password') || fd.get('token') || fd.get('secret') || '').trim();
+            if (fd.get('remember') !== null) remember = fd.get('remember') === 'true' || fd.get('remember') === 'on' || fd.get('remember') === '1';
+          } catch {}
+        }
+
+        const authResult = await loginWithCredentials(env, username, password, remember);
+        const isJson = (request.headers.get('accept') || '').includes('application/json') || contentType.includes('application/json');
+
+        if (!authResult) {
+          if (isJson) return err('Invalid username or password.', 401);
+          return new Response(null, { status: 303, headers: { Location: '/login?error=' + encodeURIComponent('Invalid username or password. Please verify your credentials.') } });
+        }
+
+        const headers = new Headers({
+          'Set-Cookie': authResult.cookie,
+          'Cache-Control': 'no-store'
+        });
+
+        if (isJson) {
+          headers.set('Content-Type', 'application/json; charset=utf-8');
+          return new Response(JSON.stringify({ success: true, role: authResult.user.role, user: { id: authResult.user.id, role: authResult.user.role, display_name: authResult.user.display_name, email: authResult.user.email } }), { status: 200, headers });
+        }
+
+        headers.set('Location', '/portal');
+        return new Response(null, { status: 303, headers });
+      }
+      if ((url.pathname === '/logout' || url.pathname === '/logout/' || url.pathname === '/signout' || url.pathname === '/signout/')) {
+        if (request.method === 'POST') {
+          return sameOrigin(request, env) ? logout(request, env) : err('Cross-origin request.', 403);
+        }
+        if (request.method === 'GET') {
+          return logout(request, env);
+        }
+      }
+      if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+        return logout(request, env);
+      }
       if ((url.pathname === '/privacy' || url.pathname === '/privacy/' || url.pathname === '/privacy-policy' || url.pathname === '/privacy.html') && request.method === 'GET') {
         return privacyPage(env);
       }
       if (url.pathname === '/api/shares' && request.method === 'POST') return createShare(request, env);
       if (url.pathname === '/api/shares' && request.method === 'GET') return listShares(request, env);
-      const renew = /^\/api\/(?:shares|portal)\/([a-z0-9-]{1,64})\/renew$/.exec(url.pathname);
-      if (renew && request.method === 'POST') return renewShare(request, env, renew[1]);
+      const renew = /^\/api\/(?:shares|portal)\/([a-zA-Z0-9-]{1,64})\/renew$/i.exec(url.pathname);
+      if (renew && request.method === 'POST') return renewShare(request, env, renew[1].toLowerCase());
       if ((url.pathname === '/api/shares/renew' || url.pathname === '/api/portal/renew') && request.method === 'POST') {
         let slug = '';
         try {
           const body = await request.clone().json() as { slug?: string };
-          slug = String(body?.slug || '').trim();
+          slug = String(body?.slug || '').trim().toLowerCase();
         } catch {
           try {
             const fd = await request.clone().formData();
-            slug = String(fd.get('slug') || '').trim();
+            slug = String(fd.get('slug') || '').trim().toLowerCase();
           } catch {}
         }
         if (!slug) return err('Missing required parameter: slug.', 400);
         return renewShare(request, env, slug);
       }
-      const del = /^\/api\/shares\/([a-z0-9-]{1,64})$/.exec(url.pathname);
-      if (del && request.method === 'DELETE') return deleteShare(request, env, del[1]);
+      const del = /^\/api\/shares\/([a-zA-Z0-9-]{1,64})$/i.exec(url.pathname);
+      if (del && request.method === 'DELETE') return deleteShare(request, env, del[1].toLowerCase());
       // Agent Tokens
       if (url.pathname === '/api/user/agent-tokens' && request.method === 'GET') {
         const who = await principal(request, env);
@@ -881,7 +970,7 @@ export default {
         const user = await sessionUser(request, env);
         return user ? Response.json({ id: user.id, role: user.role, display_name: user.display_name, email: user.email, agent_token_quota: user.agent_token_quota ?? 3 }, { headers: { 'Cache-Control': 'no-store' } }) : err('Unauthorized.', 401);
       }
-      if (url.pathname === '/logout' && request.method === 'POST') return sameOrigin(request, env) ? logout(request, env) : err('Cross-origin request.', 403);
+      if (url.pathname === '/logout' && request.method === 'POST') return logout(request, env);
       const auth = /^\/auth\/([a-z]+)\/(start|callback)$/.exec(url.pathname);
       if (auth && isProvider(auth[1])) return auth[2] === 'start' && request.method === 'GET' ? startLogin(env, auth[1]) : auth[2] === 'callback' ? finishLogin(request, env, auth[1]) : err('Not found.', 404);
     }

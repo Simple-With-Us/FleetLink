@@ -13,7 +13,9 @@ test('reject traversal and ambiguous paths', () => {
   assert.equal(cleanPath('folder/nested/file.txt'), 'folder/nested/file.txt');
 });
 test('restrict slugs and escape listings', () => {
-  for (const slug of ['../a','a/b','a--','-a','a_b','A']) assert.equal(slugPattern.test(slug), false);
+  for (const slug of ['../a','a/b','a--','-a','a_b']) assert.equal(slugPattern.test(slug), false);
+  assert.equal(slugPattern.test('A'), true);
+  assert.equal(slugPattern.test('My-Files-123'), true);
   assert.equal(slugPattern.test('my-files'), true);
   assert.equal(escapeHtml('<img src="x">'), '&lt;img src=&quot;x&quot;&gt;');
   assert.match(contentType('index.html'), /text\/html/);
