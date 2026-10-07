@@ -88,4 +88,43 @@ test('serves privacy policy page at /privacy, /privacy-policy, and /privacy.html
     assert.match(html, /Simple With Us/);
   }
 });
+test('case-insensitive slugs: uppercase and mixed-case slugs normalize and resolve across variations', async () => {
+  const { env } = environment();
+  const res = await upload(env, [['report.txt', 'hello world']], { slug: 'MixedCase-Report' });
+  assert.equal(res.status, 201);
+  const data = await res.json();
+  assert.equal(data.url, 'https://share.test/s/mixedcase-report/');
+
+  // Verify resolution across all casing variations
+  for (const slugPath of ['/s/mixedcase-report/report.txt', '/s/MixedCase-Report/report.txt', '/s/MIXEDCASE-REPORT/report.txt']) {
+    const fetched = await worker.fetch(new Request('https://share.test' + slugPath), env);
+    assert.equal(fetched.status, 200);
+    assert.equal(await fetched.text(), 'hello world');
+  }
+});
+test('dedicated /login and /logout endpoints support bot and browser authentication', async () => {
+  const { env } = environment();
+  // GET /login renders accessible login form
+  const loginGet = await worker.fetch(new Request('https://fleetlink.online/login'), env);
+  assert.equal(loginGet.status, 200);
+  const loginHtml = await loginGet.text();
+  assert.match(loginHtml, /Sign In to FleetLink/);
+  assert.match(loginHtml, /name="username"/);
+  assert.match(loginHtml, /name="password"/);
+
+  // POST /login authenticates with credentials
+  const form = new FormData();
+  form.set('username', 'operator');
+  form.set('password', 'operator-secret');
+  const loginPost = await worker.fetch(new Request('https://fleetlink.online/login', { method: 'POST', body: form }), env);
+  assert.equal(loginPost.status, 303);
+  assert.equal(loginPost.headers.get('location'), '/portal');
+  const cookie = loginPost.headers.get('set-cookie');
+  assert.match(cookie, /fl_session=/);
+
+  // GET /logout terminates session without origin blocks
+  const logoutGet = await worker.fetch(new Request('https://fleetlink.online/logout', { headers: { Cookie: cookie.split(';')[0] } }), env);
+  assert.equal(logoutGet.status, 303);
+  assert.match(logoutGet.headers.get('set-cookie'), /Max-Age=0/);
+});
 

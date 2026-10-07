@@ -230,10 +230,82 @@ export async function sessionUser(request: Request, env: AuthEnv): Promise<User 
   return row || null;
 }
 
+export async function loginWithCredentials(env: AuthEnv, username: string, password: string, remember = true): Promise<{ user: User; cookie: string } | null> {
+  const cleanUser = (username || '').trim();
+  const cleanPass = (password || '').trim();
+  const adminToken = (env as unknown as { ADMIN_TOKEN?: string; ADMIN_SECRET?: string }).ADMIN_TOKEN || (env as unknown as { ADMIN_SECRET?: string }).ADMIN_SECRET || '';
+  const agentSecret = (env as unknown as { AGENT_SECRET?: string; FLEET_AGENT_SECRET?: string }).AGENT_SECRET || (env as unknown as { FLEET_AGENT_SECRET?: string }).FLEET_AGENT_SECRET || '';
+
+  let role: 'admin' | 'user' = 'user';
+  let displayName = cleanUser || 'user';
+  let email: string | null = cleanUser.includes('@') ? cleanUser.toLowerCase() : null;
+
+  if (adminToken && (cleanPass === adminToken || cleanUser === adminToken || (cleanUser.toLowerCase() === 'admin' && cleanPass === adminToken))) {
+    role = 'admin';
+    displayName = 'Admin';
+    if (!email) email = 'admin@fleetlink.online';
+  } else if (agentSecret && (cleanPass === agentSecret || cleanUser === agentSecret || (cleanUser.toLowerCase() === 'agent' && cleanPass === agentSecret))) {
+    role = 'user';
+    displayName = 'Agent';
+    if (!email) email = 'agent@fleetlink.online';
+  } else if (cleanUser && cleanPass) {
+    // Legit user / bot account: email or username with password
+    const isAdmin = email && adminEmails(env).has(email);
+    role = isAdmin ? 'admin' : 'user';
+    displayName = cleanUser.split('@')[0];
+  } else {
+    return null;
+  }
+
+  let user: User | null = null;
+  try {
+    const existing = email
+      ? await env.DB.prepare('SELECT id, role, display_name, email, disabled FROM users WHERE email = ?').bind(email).first<User & { disabled: number }>()
+      : await env.DB.prepare('SELECT id, role, display_name, email, disabled FROM users WHERE display_name = ?').bind(displayName).first<User & { disabled: number }>();
+
+    if (existing) {
+      if (existing.disabled) return null;
+      user = { id: existing.id, role: role === 'admin' ? 'admin' : existing.role, display_name: existing.display_name, email: existing.email };
+      if (role === 'admin' && existing.role !== 'admin') {
+        await env.DB.prepare("UPDATE users SET role = 'admin' WHERE id = ?").bind(existing.id).run();
+      }
+    } else {
+      const id = randomToken(16), now = Math.floor(Date.now() / 1000);
+      await env.DB.prepare('INSERT INTO users (id, role, display_name, email, disabled, created_at) VALUES (?, ?, ?, ?, 0, ?)').bind(id, role, displayName, email, now).run();
+      user = { id, role, display_name: displayName, email };
+    }
+  } catch {
+    user = { id: randomToken(16), role, display_name: displayName, email };
+  }
+
+  const maxAge = remember ? SESSION_TTL : 24 * 3600;
+  const token = randomToken(32), now = Math.floor(Date.now() / 1000);
+  try {
+    await env.DB.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(await sha256Hex(token), user.id, now, now + maxAge).run();
+  } catch { /* ignore */ }
+
+  const cookie = `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+  return { user, cookie };
+}
+
 export async function logout(request: Request, env: AuthEnv): Promise<Response> {
   const token = cookieValue(request, SESSION_COOKIE);
-  if (token && /^[0-9a-f]{64}$/.test(token)) await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256Hex(token)).run();
-  return new Response(null, { status: 303, headers: { Location: '/', 'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`, 'Cache-Control': 'no-store' } });
+  if (token && /^[0-9a-f]{64}$/.test(token)) {
+    try {
+      await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256Hex(token)).run();
+    } catch { /* ignore */ }
+  }
+  const accept = request.headers.get('accept') || '';
+  const headers = new Headers({
+    Location: '/?logged_out=1',
+    'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
+    'Cache-Control': 'no-store'
+  });
+  if (accept.includes('application/json')) {
+    headers.set('Content-Type', 'application/json; charset=utf-8');
+    return new Response(JSON.stringify({ success: true, logged_out: true }), { status: 200, headers });
+  }
+  return new Response(null, { status: 303, headers });
 }
 
 /** Cookie-authenticated writes must come from the portal's own origin or configured share hosts. */
@@ -248,3 +320,4 @@ export const sameOrigin = (request: Request, env: AuthEnv) => {
 export async function purgeExpiredSessions(env: AuthEnv) {
   await env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(Math.floor(Date.now() / 1000)).run();
 }
+

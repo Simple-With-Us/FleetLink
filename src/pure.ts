@@ -1,4 +1,4 @@
-export const slugPattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+export const slugPattern = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,62}[a-zA-Z0-9])?$/;
 export function cleanPath(input: string): string | null {
   if (!input || input.length > 512 || input.includes('\\') || input.includes('\0') || input.startsWith('/')) return null;
   const parts = input.split('/');
