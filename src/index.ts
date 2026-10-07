@@ -58,7 +58,7 @@ function decodePath(s: string): string | null {
 }
 const urlPath = (s: string) => s.split('/').map(encodeURIComponent).join('/');
 const formEntries = (fd: FormData): Record<string, any> => { const obj: Record<string, any> = {}; for (const [k, v] of (fd as any).entries?.() ?? []) obj[k] = v; return obj; };
-const page = (body: string, status = 200, headers: Record<string,string> = {}) => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.ios.Clip, app-clip-display=card"><title>FleetLink</title><style>body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}input,button,select{font:inherit;margin:.3rem 0;padding:.5rem}li{margin:.6rem 0}pre{white-space:pre-wrap}</style></head><body>${body}</body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
+const page = (body: string, status = 200, headers: Record<string,string> = {}, title = 'FleetLink') => new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.ios.Clip, app-clip-display=card"><title>${escapeHtml(title)}</title><style>body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem;line-height:1.55}input,button,select{font:inherit;margin:.3rem 0;padding:.5rem}li{margin:.6rem 0}pre{white-space:pre-wrap}h1{margin-bottom:.5rem}h2{margin-top:1.6rem;margin-bottom:.5rem}</style></head><body>${body}</body></html>`, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
 function getFiles(form: FormData, limits: Limits): { files: { path: string, file: File }[], error?: string } {
   const out: { path: string, file: File }[] = [];
   const paths = form.getAll('path');
@@ -529,6 +529,68 @@ async function deleteShare(request: Request, env: Env, slug: string): Promise<Re
   return Response.json({ deleted: slug }, { headers: { 'Cache-Control': 'no-store' } });
 }
 const providerNames = { github: 'GitHub', google: 'Google', apple: 'Apple' } as const;
+const privacyPage = (env: Env) => {
+  const content = `
+<nav style="margin-bottom:1.5rem"><a href="/">← Back to FleetLink</a> &nbsp;|&nbsp; <a href="/portal">Portal</a></nav>
+<h1>FleetLink Privacy Policy</h1>
+<p style="color:#666;font-size:0.95rem;margin-bottom:1.5rem">Last updated: October 7, 2026</p>
+
+<h2>Overview</h2>
+<p>FleetLink (&ldquo;we&rdquo;, &ldquo;our&rdquo;, or &ldquo;us&rdquo;) provides temporary, high-performance artifact, file, batch, and directory hosting and custom vanity redirect URLs across the AI fleet and web operators.  This privacy policy describes how data is handled across our services, including <code>fleetlink.online</code>, <code>fleetlink.app</code>, the native iOS application (<code>online.fleetlink.ios</code>), embedded App Clip (<code>online.fleetlink.ios.Clip</code>), MCP server (<code>fleetlink-mcp</code>), and CLI developer utilities (<code>fleet-share</code>).</p>
+
+<h2>Ephemeral Storage &amp; Content Lifecycle</h2>
+<p>FleetLink is designed around <strong>ephemeral, time-bounded storage</strong>:</p>
+<ul>
+  <li><strong>Automatic Expiration (TTL):</strong> Every uploaded file, document, preview image, static site, and vanity redirect is assigned a Time-to-Live expiration schedule.  When the expiration timestamp is reached, the underlying data objects stored in Cloudflare R2 and indexing records in Cloudflare D1 are permanently, irreversibly pruned.</li>
+  <li><strong>Default Retention Tiers:</strong>
+    <ul>
+      <li>Unauthenticated guest uploads: strictly capped at 6 hours for files and 24 hours for vanity redirects.</li>
+      <li>Autonomous agent token uploads: capped at a maximum of 7 days (defaulting to 3 days).</li>
+      <li>Custom vanity redirects: retained for up to 180 days (6 months).</li>
+      <li>Administrative uploads: permanent retention (<code>forever</code>) available exclusively for administrative maintenance and root domain assets under 500 MB.</li>
+    </ul>
+  </li>
+  <li><strong>Passphrase Protection:</strong> When an uploader specifies a password, the share is gated behind cryptographic passphrase verification before any file or directory index can be viewed or downloaded.</li>
+</ul>
+
+<h2>What We Collect</h2>
+<ul>
+  <li><strong>Uploaded Artifacts:</strong> Files, directories, markdown notes, code snippets, or preview media that you or your automated tools submit to FleetLink for temporary hosting.</li>
+  <li><strong>Vanity Redirect Targets:</strong> Destination URLs provided when generating short links.</li>
+  <li><strong>Authentication &amp; Profile Data:</strong> If you choose to sign in (via GitHub, Google, or Apple OAuth), we receive your verified email address, display name, and provider user ID to authenticate sessions, manage your active shares in the portal, and enforce rate limits.</li>
+  <li><strong>Agent Tokens:</strong> Scoped API tokens generated for automated fleet seats, stored in hashed format.</li>
+</ul>
+
+<h2>What We Do NOT Collect or Share</h2>
+<ul>
+  <li><strong>No Accounts Required for Viewing:</strong> Anyone with a link can preview or download public artifacts without creating an account or providing personal information.</li>
+  <li><strong>No Data Monetization or Sales:</strong> We do not sell, rent, monetize, or trade uploaded files or user personal information to third parties, data brokers, or advertising networks.</li>
+  <li><strong>No Cross-Site Tracking:</strong> We do not use third-party advertising cookies, fingerprinting libraries, or cross-site behavioral tracking.</li>
+</ul>
+
+<h2>Infrastructure &amp; Service Processors</h2>
+<p>FleetLink infrastructure is built upon trusted cloud and distribution providers:</p>
+<ul>
+  <li><strong>Cloudflare:</strong> Cloudflare Workers (edge compute), Cloudflare R2 (object storage), and Cloudflare D1 (database).  Cloudflare processes network requests and provides privacy-preserving Cloudflare Web Analytics (RUM) measuring Core Web Vitals and performance without tracking cookies.</li>
+  <li><strong>Apple:</strong> Distributes the native iOS app and embedded App Clip via App Store Connect and Apple Content Delivery Networks.</li>
+</ul>
+
+<h2>Your Choices &amp; Immediate Deletion</h2>
+<ul>
+  <li><strong>Self-Serve Deletion:</strong> You do not need to wait for expiration to remove data.  You can permanently delete any active share immediately via the web portal at <code>/portal</code>, through the developer CLI (<code>fleet-share --delete &lt;slug&gt;</code>), the MCP tool (<code>fleetlink_delete_share</code>), or by issuing an authenticated <code>DELETE /api/shares/:slug</code> HTTP request.</li>
+  <li><strong>Session Sign-Out:</strong> You can terminate authenticated web sessions at any time by clicking &ldquo;Sign out&rdquo;, which invalidates session cookies immediately.</li>
+</ul>
+
+<h2>Contact &amp; Publisher Information</h2>
+<p>FleetLink is developed as part of the <strong>Simple With Us</strong> catalog of focused utilities.  If you have questions about this privacy policy, data practices, or need assistance removing an artifact, contact us at:</p>
+<p><strong>Email:</strong> <a href="mailto:support@fleetlink.online">support@fleetlink.online</a> or <a href="mailto:feedback@simplewithus.com">feedback@simplewithus.com</a></p>
+<p><strong>Catalog Directory:</strong> <a href="https://simplewithus.com/fleetlink/" target="_blank" rel="noopener">Simple With Us — FleetLink</a></p>
+<p><strong>Source Repository:</strong> <a href="https://github.com/Simple-With-Us/FleetLink" target="_blank" rel="noopener">GitHub: Simple-With-Us/FleetLink</a></p>
+<hr style="margin:2rem 0;border:0;border-top:1px solid #e5e5e5">
+<p style="font-size:0.85rem;color:#777">&copy; 2026 FleetLink &middot; Simple With Us.  All rights reserved.</p>
+`;
+  return page(content, 200, { 'Cache-Control': 'public, max-age=3600', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'" }, 'Privacy Policy — FleetLink');
+};
 const homePage = (env: Env, user: User | null) => {
   const signedIn = user !== null;
   const userIsAdmin = user?.role === 'admin';
@@ -624,7 +686,7 @@ if(fToken)fToken.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fTo
 const fQuota=document.querySelector('#f_quota');
 if(fQuota)fQuota.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fQuota);const r=await fetch('/api/user/agent-quota-request',{method:'POST',body:fd});const d=await r.json();if(d.success){alert('Quota request submitted successfully!');fQuota.reset()}else alert(d.error||'Failed')};
 document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}result.textContent='Uploading...';try{const init={method:'POST',body:d};const tokInput=document.querySelector('#token');if(tokInput&&tokInput.value.trim())init.headers={Authorization:'Bearer '+tokInput.value.trim()};const r=await fetch('/api/shares',init);const data=await r.json();result.textContent='';if(data.url){const a=document.createElement('a');a.href=data.url;a.textContent=data.url;result.append(a,' ',copyButton(data.url))}else result.textContent=data.error||'Failed';refresh()}catch(err){result.textContent=String(err)}};
-refresh();if(signedIn&&!userIsGuest){refreshTokens();refreshTeams();}</script>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
+refresh();if(signedIn&&!userIsGuest){refreshTokens();refreshTeams();}</script><footer style="margin-top:3rem;padding-top:1.5rem;border-top:1px solid #eee;font-size:0.9rem;color:#666"><a href="/privacy">Privacy Policy</a> &nbsp;&middot;&nbsp; <a href="/portal">Portal</a> &nbsp;&middot;&nbsp; <a href="https://simplewithus.com/fleetlink/" target="_blank" rel="noopener">Simple With Us</a> &nbsp;&middot;&nbsp; <a href="https://github.com/Simple-With-Us/FleetLink" target="_blank" rel="noopener">GitHub</a></footer>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
 };
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -635,6 +697,9 @@ export default {
     if (isAdminHost || isShareHost) {
       if ((url.pathname === '/' || url.pathname === '/portal' || url.pathname === '/portal/' || url.pathname === '/admin' || url.pathname === '/admin/') && request.method === 'GET') {
         return homePage(env, request.headers.get('cookie')?.includes(`${SESSION_COOKIE}=`) ? await sessionUser(request, env) : null);
+      }
+      if ((url.pathname === '/privacy' || url.pathname === '/privacy/' || url.pathname === '/privacy-policy' || url.pathname === '/privacy.html') && request.method === 'GET') {
+        return privacyPage(env);
       }
       if (url.pathname === '/api/shares' && request.method === 'POST') return createShare(request, env);
       if (url.pathname === '/api/shares' && request.method === 'GET') return listShares(request, env);

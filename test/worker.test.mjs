@@ -76,4 +76,16 @@ test('serves apple-app-site-association for app clips', async () => {
   assert.ok(data.appclips.apps.includes('CC8UTF7ATG.online.fleetlink.Clip'));
   assert.ok(data.applinks.details[0].appIDs.includes('CC8UTF7ATG.online.fleetlink'));
 });
+test('serves privacy policy page at /privacy, /privacy-policy, and /privacy.html', async () => {
+  const { env } = environment();
+  for (const path of ['/privacy', '/privacy-policy', '/privacy.html']) {
+    const res = await worker.fetch(new Request('https://fleetlink.online' + path), env);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') || '', /text\/html/);
+    const html = await res.text();
+    assert.match(html, /FleetLink Privacy Policy/);
+    assert.match(html, /Ephemeral Storage/);
+    assert.match(html, /Simple With Us/);
+  }
+});
 
