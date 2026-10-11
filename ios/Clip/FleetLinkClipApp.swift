@@ -2,6 +2,10 @@ import SwiftUI
 
 @main
 struct FleetLinkClipApp: App {
+    init() {
+        SentryTelemetry.start(surface: "ios-clip")
+    }
+
     @StateObject private var loader = ArtifactLoader()
 
     var body: some Scene {

@@ -2,6 +2,10 @@ import SwiftUI
 
 @main
 struct FleetLinkApp: App {
+    init() {
+        SentryTelemetry.start(surface: "ios-app")
+    }
+
     @StateObject private var loader = ArtifactLoader()
     @StateObject private var portalManager = PortalManager()
     @StateObject private var session = SessionManager()
