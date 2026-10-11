@@ -1,10 +1,12 @@
+import { withSentry } from '@sentry/cloudflare';
 import { cleanPath, contentType, escapeHtml, sha256Hex, slugPattern } from './pure';
 import { type AuthEnv, type User, configuredProviders, finishLogin, isProvider, loginWithCredentials, logout, purgeExpiredSessions, sameOrigin, sessionUser, SESSION_COOKIE, startLogin } from './auth';
 import { createAgentToken, listAgentTokens, revokeAgentToken, requestAgentQuotaIncrease, approveAgentQuotaRequest, rejectAgentQuotaRequest } from './tokens';
 import { createTeam, listUserTeams, addTeamMember, removeTeamMember, revertTeamShares, cleanupExpiredTeamTrials } from './teams';
 import { dashboardBody, DASHBOARD_CSP } from './dashboard';
+import { sentryOptions, type SentryEnv } from './sentry';
 
-interface Env extends AuthEnv {
+interface Env extends AuthEnv, SentryEnv {
   FILES: R2Bucket;
   ADMIN_TOKEN: string;
   SHARE_HOSTS: string;
@@ -613,6 +615,7 @@ const privacyPage = (env: Env) => {
 <p>FleetLink infrastructure is built upon trusted cloud and distribution providers:</p>
 <ul>
   <li><strong>Cloudflare:</strong> Cloudflare Workers (edge compute), Cloudflare R2 (object storage), and Cloudflare D1 (database).  Cloudflare processes network requests and provides privacy-preserving Cloudflare Web Analytics (RUM) measuring Core Web Vitals and performance without tracking cookies.</li>
+  <li><strong>Sentry:</strong> Receives privacy-bounded crash, performance, and diagnostic logs from the Worker and native iOS clients so we can keep the service reliable.  Share contents, passwords, auth headers, and artifact names are stripped before send.</li>
   <li><strong>Apple:</strong> Distributes the native iOS app and embedded App Clip via App Store Connect and Apple Content Delivery Networks.</li>
 </ul>
 
@@ -762,7 +765,7 @@ if(fQuota)fQuota.onsubmit=async e=>{e.preventDefault();const fd=new FormData(fQu
 document.querySelector('#f').onsubmit=async e=>{e.preventDefault();const f=e.target,d=new FormData(f);for(const input of [document.querySelector('#files'),document.querySelector('#folder')])for(const file of input.files){d.append('file',file);d.append('path',file.webkitRelativePath||file.name)}result.textContent='Uploading...';try{const init={method:'POST',body:d};const tokInput=document.querySelector('#token');if(tokInput&&tokInput.value.trim())init.headers={Authorization:'Bearer '+tokInput.value.trim()};const r=await fetch('/api/shares',init);const data=await r.json();result.textContent='';if(data.url){const a=document.createElement('a');a.href=data.url;a.textContent=data.url;result.append(a,' ',copyButton(data.url))}else result.textContent=data.error||'Failed';refresh()}catch(err){result.textContent=String(err)}};
 refresh();if(signedIn&&!userIsGuest){refreshTokens();refreshTeams();}</script><footer style="margin-top:3rem;padding-top:1.5rem;border-top:1px solid #eee;font-size:0.9rem;color:#666"><a href="/login">Sign In</a> &nbsp;&middot;&nbsp; <a href="/privacy">Privacy Policy</a> &nbsp;&middot;&nbsp; <a href="/portal">Portal</a> &nbsp;&middot;&nbsp; <a href="https://simplewithus.com/fleetlink/" target="_blank" rel="noopener">Simple With Us</a> &nbsp;&middot;&nbsp; <a href="https://github.com/Simple-With-Us/FleetLink" target="_blank" rel="noopener">GitHub</a></footer>`, 200, { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'" });
 };
-export default {
+const handler = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url), host = url.hostname.toLowerCase();
     const isAdminHost = host === env.ADMIN_HOST.toLowerCase();
@@ -1053,5 +1056,7 @@ export default {
     await cleanupExpiredTeamTrials(env);
   }
 } satisfies ExportedHandler<Env>;
+
+export default withSentry((env: Env) => sentryOptions(env), handler);
 
 

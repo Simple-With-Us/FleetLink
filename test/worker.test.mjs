@@ -1,9 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { build } from 'esbuild';
-const compiled = await build({ entryPoints: ['src/index.ts'], bundle: true, platform: 'browser', format: 'esm', write: false });
-const mod = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'));
-const worker = mod.default;
+import { loadWorker } from './load-worker.mjs';
+const worker = (await loadWorker()).default;
 function environment() {
   const rows = new Map(), objects = new Map();
   const DB = { prepare(query) { let args; return { bind(...x) { args = x; return this; }, async first() { return rows.get(args[0]) || null; }, async run() { if (query.startsWith('INSERT')) rows.set(args[0], { slug: args[0], mode: args[1], expires_at: args[2], password_salt: args[3], password_hash: args[4], objects_json: args[5], created_at: args[6] }); return {}; } }; } };
@@ -85,6 +83,7 @@ test('serves privacy policy page at /privacy, /privacy-policy, and /privacy.html
     const html = await res.text();
     assert.match(html, /FleetLink Privacy Policy/);
     assert.match(html, /Ephemeral Storage/);
+    assert.match(html, /Sentry/);
     assert.match(html, /Simple With Us/);
   }
 });

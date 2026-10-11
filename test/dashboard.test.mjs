@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { build } from 'esbuild';
 import initSqlJs from 'sql.js';
+import { loadWorker } from './load-worker.mjs';
 
-const compiled = await build({ entryPoints: ['src/index.ts'], bundle: true, platform: 'browser', format: 'esm', write: false });
-const worker = (await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64'))).default;
+const worker = (await loadWorker()).default;
 const SQL = await initSqlJs();
 const ORIGIN = 'https://admin.test';
 const b64u = (x) => Buffer.from(x).toString('base64url');
