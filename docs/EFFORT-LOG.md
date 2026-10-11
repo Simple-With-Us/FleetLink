@@ -1,5 +1,8 @@
 # FleetLink Effort Log
 
+> **ARCHIVED Sun, Oct 11, 2026.**  Linear is the system of record: team AFC, https://linear.app/simple-with-us/team/AFC.
+> This file is read-only history.  Do not edit it or add rows.  See EFFORT-LOG-PROTOCOL.md.
+
 Per-app effort board.  Canonical protocol: `/Users/jay/apps/EFFORT-LOG-PROTOCOL.md`.
 Live board: `/Users/jay/apps/FLEETLINK-EFFORT-LOG.md`.
 Two-space sentence gaps required in every human-facing prose block.
