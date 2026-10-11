@@ -17,7 +17,11 @@ function d1() {
   const db = new SQL.Database();
   for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql', '0004_renewals.sql', '0005_agent_tokens_and_teams.sql', '0006_cost_guards.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
   const exec = (sql, args) => { const st = db.prepare(sql); st.bind(args); const rows = []; while (st.step()) rows.push(st.getAsObject()); st.free(); return rows; };
-  const stmt = (sql) => { let args = []; const s = { bind(...a) { args = a; return s; }, async first() { return exec(sql, args)[0] ?? null; }, async all() { return { results: exec(sql, args) }; }, async run() { exec(sql, args); return {}; }, _run: () => exec(sql, args) }; return s; };
+  // D1 rejects any query binding more than 100 parameters.  Plain SQLite does not,
+  // so without this the harness would happily run statements that fail in
+  // production.  Keep it: a query that only breaks on D1 is a query that ships broken.
+  const D1_MAX_PARAMS = 100;
+  const stmt = (sql) => { let args = []; const s = { bind(...a) { if (a.length > D1_MAX_PARAMS) throw new Error(`D1 rejects ${a.length} bound parameters (max ${D1_MAX_PARAMS}) in: ${sql.replace(/\s+/g, ' ').slice(0, 90)}`); args = a; return s; }, async first() { return exec(sql, args)[0] ?? null; }, async all() { return { results: exec(sql, args) }; }, async run() { exec(sql, args); return {}; }, _run: () => exec(sql, args) }; return s; };
   return { prepare: stmt, async batch(list) { return list.map(s => ({ results: s._run() })); }, raw: exec };
 }
 function environment(extra = {}) {
@@ -896,6 +900,24 @@ test('the cron reclaims abandoned guest accounts and never real ones', async () 
   await worker.scheduled({}, env);
 
   assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE email IS NULL')[0].n, 0, 'abandoned guest account is reclaimed');
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE id IN (SELECT user_id FROM identities)')[0].n, 1, 'the signed-in user survives');
+});
+
+test('the guest reap clears a backlog larger than the D1 bound-parameter limit', async () => {
+  const { env, DB } = environment();
+
+  // 150 abandoned accounts, more than the 100 bound parameters D1 allows per query.
+  // Binding one placeholder per id fails here, and because the caller swallows the
+  // error the reap would silently stop reclaiming anything at all.
+  for (let i = 0; i < 150; i++) DB.raw('INSERT INTO users (id,role,display_name,email,disabled,created_at) VALUES (?,?,?,NULL,0,?)', [`guest_${i}`, 'user', 'Guest User', 1]);
+
+  // A real signed-in user must still survive the sweep.
+  await githubLogin(env, { id: 42 });
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE email IS NULL')[0].n, 150);
+
+  await worker.scheduled({}, env);
+
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE email IS NULL')[0].n, 0, 'the whole backlog is reclaimed in one pass');
   assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE id IN (SELECT user_id FROM identities)')[0].n, 1, 'the signed-in user survives');
 });
 

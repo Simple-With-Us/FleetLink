@@ -439,19 +439,21 @@ async function cleanup(env: Env) {
 async function reapGuestUsers(env: Env) {
   const now = Math.floor(Date.now() / 1000);
   try {
-    const rows = await env.DB.prepare(
-      `SELECT id FROM users
-        WHERE email IS NULL
-          AND id NOT IN (SELECT user_id FROM identities)
-          AND id NOT IN (SELECT user_id FROM agent_tokens)
-          AND id NOT IN (SELECT user_id FROM sessions WHERE expires_at > ?)
-          AND id NOT IN (SELECT owner_id FROM shares WHERE owner_id IS NOT NULL)
-        LIMIT ?`
-    ).bind(now, GUEST_REAP_BATCH).all<{ id: string }>();
-    const ids = rows.results.map(r => r.id);
-    if (!ids.length) return;
-    const holes = ids.map(() => '?').join(',');
-    await env.DB.prepare(`DELETE FROM users WHERE id IN (${holes})`).bind(...ids).run();
+    // The delete reuses the predicate as a subquery rather than binding one
+    // placeholder per id.  D1 allows at most 100 bound parameters per query, so an
+    // IN-list of batched ids fails precisely when the sweep is largest, and the
+    // failure is swallowed here, which silently halts reclamation for good.
+    await env.DB.prepare(
+      `DELETE FROM users WHERE id IN (
+         SELECT id FROM users
+          WHERE email IS NULL
+            AND id NOT IN (SELECT user_id FROM identities)
+            AND id NOT IN (SELECT user_id FROM agent_tokens)
+            AND id NOT IN (SELECT user_id FROM sessions WHERE expires_at > ?)
+            AND id NOT IN (SELECT owner_id FROM shares WHERE owner_id IS NOT NULL)
+          LIMIT ?
+       )`
+    ).bind(now, GUEST_REAP_BATCH).run();
   } catch (e) { console.error('Guest reap failed', e); }
 }
 async function listShares(request: Request, env: Env): Promise<Response> {
