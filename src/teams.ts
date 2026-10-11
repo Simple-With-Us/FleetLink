@@ -20,6 +20,15 @@ export interface TeamMemberPublic {
   created_at: string;
 }
 
+/** Row shape for team_members joined to users, before dates are serialised. */
+type MemberRow = {
+  user_id: string;
+  role: 'organizer' | 'admin' | 'member';
+  created_at: number;
+  display_name: string | null;
+  email: string | null;
+};
+
 export interface TeamPublic {
   id: string;
   name: string;
@@ -94,6 +103,26 @@ export async function listUserTeams(env: AuthEnv, userId: string): Promise<TeamP
     'SELECT t.*, tm.role AS my_role FROM teams t JOIN team_members tm ON tm.team_id = t.id WHERE tm.user_id = ? ORDER BY t.created_at DESC'
   ).bind(userId).all<TeamRow & { my_role: 'organizer' | 'admin' | 'member' }>();
 
+  // Fetch every member row for every team this user belongs to in one query rather
+  // than one query per team.  The subquery resolves through the team_members_user
+  // index and binds a single parameter, so it stays far below D1's 100-parameter
+  // ceiling no matter how many teams the user is in.
+  const membersByTeam = new Map<string, MemberRow[]>();
+  if (rows.results.length) {
+    const allMembers = await env.DB.prepare(
+      `SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.display_name, u.email
+         FROM team_members tm
+         JOIN users u ON u.id = tm.user_id
+        WHERE tm.team_id IN (SELECT team_id FROM team_members WHERE user_id = ?)
+        ORDER BY tm.created_at ASC`
+    ).bind(userId).all<MemberRow & { team_id: string }>();
+    for (const m of allMembers.results) {
+      const list = membersByTeam.get(m.team_id);
+      if (list) list.push(m);
+      else membersByTeam.set(m.team_id, [m]);
+    }
+  }
+
   const teams: TeamPublic[] = [];
   for (const t of rows.results) {
     let plan = t.plan;
@@ -102,10 +131,6 @@ export async function listUserTeams(env: AuthEnv, userId: string): Promise<TeamP
       await revertTeamShares(env, t.id);
       plan = 'expired';
     }
-
-    const membersResult = await env.DB.prepare(
-      'SELECT tm.user_id, tm.role, tm.created_at, u.display_name, u.email FROM team_members tm JOIN users u ON u.id = tm.user_id WHERE tm.team_id = ? ORDER BY tm.created_at ASC'
-    ).bind(t.id).all<{ user_id: string; role: 'organizer' | 'admin' | 'member'; created_at: number; display_name: string | null; email: string | null }>();
 
     const daysRemaining = Math.max(0, Math.ceil((t.trial_ends_at - now) / 86400));
     teams.push({
@@ -117,7 +142,7 @@ export async function listUserTeams(env: AuthEnv, userId: string): Promise<TeamP
       trial_days_remaining: plan === 'expired' ? 0 : daysRemaining,
       is_trial_active: plan === 'trial' && now <= t.trial_ends_at,
       my_role: t.my_role,
-      members: membersResult.results.map(m => ({
+      members: (membersByTeam.get(t.id) ?? []).map(m => ({
         user_id: m.user_id,
         display_name: m.display_name,
         email: m.email,
