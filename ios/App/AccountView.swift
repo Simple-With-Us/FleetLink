@@ -11,6 +11,12 @@ struct AccountView: View {
 
     @State private var isSigningIn = false
 
+    /// True while any provider flow is still on screen.  `webAuth.signIn(with:)`
+    /// returns as soon as it starts polling, so the busy state has to follow the
+    /// coordinator rather than the tap, or a second flow could be started on top
+    /// of the first.
+    private var isBusy: Bool { isSigningIn || webAuth.isPresenting || apple.isPresenting }
+
     var body: some View {
         Section("Account") {
             if let user = session.user {
@@ -73,7 +79,7 @@ struct AccountView: View {
                 Text("Sign Out")
             }
         }
-        .disabled(isSigningIn)
+        .disabled(isBusy)
         .accessibilityIdentifier("signOutButton")
     }
 
@@ -96,7 +102,7 @@ struct AccountView: View {
         .signInWithAppleButtonStyle(.black)
         .frame(height: 44)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .disabled(isSigningIn)
+        .disabled(isBusy)
         .accessibilityIdentifier("signInWithAppleButton")
 
         ForEach(WebAuthSession.Provider.allCases, id: \.self) { provider in
@@ -113,7 +119,7 @@ struct AccountView: View {
                 }
             } label: {
                 HStack {
-                    if isSigningIn {
+                    if isBusy {
                         ProgressView().controlSize(.small)
                     }
                     Text("Continue With \(provider.displayName)")
@@ -121,7 +127,7 @@ struct AccountView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(isSigningIn)
+            .disabled(isBusy)
             .accessibilityIdentifier("signInWith\(provider.rawValue.capitalized)")
         }
     }
