@@ -4,7 +4,7 @@ public struct CreateSlugView: View {
     @ObservedObject var portalManager: PortalManager
     var onSelectArtifact: (URL) -> Void
 
-    @AppStorage("fleetlink_auth_token") private var authToken: String = ""
+    @EnvironmentObject private var session: SessionManager
     @AppStorage("fleetlink_server_host") private var serverHost: String = "https://fleetlink.online"
 
     @State private var creationMode: CreationMode = .redirect
@@ -165,7 +165,7 @@ public struct CreateSlugView: View {
                 }
 
                 Section("Options") {
-                    if creationMode == .redirect || !authToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if creationMode == .redirect || !session.bearerSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         TextField("Custom Slug (optional)", text: $customSlug)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
@@ -241,7 +241,7 @@ public struct CreateSlugView: View {
                     password: passToUse,
                     domain: selectedDomain,
                     host: serverHost,
-                    token: authToken
+                    token: session.bearerSecret
                 )
                 switch res {
                 case .success(let url):
@@ -265,7 +265,7 @@ public struct CreateSlugView: View {
                     password: passToUse,
                     domain: selectedDomain,
                     host: serverHost,
-                    token: authToken
+                    token: session.bearerSecret
                 )
                 switch res {
                 case .success(let url):

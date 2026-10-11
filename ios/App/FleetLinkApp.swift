@@ -4,6 +4,7 @@ import SwiftUI
 struct FleetLinkApp: App {
     @StateObject private var loader = ArtifactLoader()
     @StateObject private var portalManager = PortalManager()
+    @StateObject private var session = SessionManager()
     @State private var inputURLString = "https://fleetlink.online"
     @State private var selectedTab = 0
 
@@ -76,12 +77,13 @@ struct FleetLinkApp: App {
                 .tag(2)
 
                 // Tab 3: Settings & Info
-                SettingsView()
+                SettingsView(session: session)
                     .tabItem {
                         Label("Settings", systemImage: "gearshape")
                     }
                     .tag(3)
             }
+            .environmentObject(session)
             .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
                 guard let incomingURL = userActivity.webpageURL else { return }
                 inputURLString = incomingURL.absoluteString

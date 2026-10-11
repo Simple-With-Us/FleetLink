@@ -114,7 +114,7 @@ public final class PortalManager: ObservableObject {
 
     public init() {}
 
-    public func fetchShares(host: String = "https://fleetlink.online", token: String = "") async {
+    public func fetchShares(host: String = "https://fleetlink.online", token: String = "", sessionCookie: String? = nil) async {
         isLoading = true
         errorMessage = nil
 
@@ -130,6 +130,8 @@ public final class PortalManager: ObservableObject {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         if !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             request.setValue("Bearer \(token.trimmingCharacters(in: .whitespacesAndNewlines))", forHTTPHeaderField: "Authorization")
+        } else if let sessionCookie, !sessionCookie.isEmpty {
+            request.setValue(sessionCookie, forHTTPHeaderField: "Cookie")
         }
 
         do {
