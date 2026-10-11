@@ -1,24 +1,37 @@
 import SwiftUI
 
 public struct SettingsView: View {
-    @AppStorage("fleetlink_auth_token") private var authToken: String = ""
+    @ObservedObject var session: SessionManager
+    @ObservedObject private var apple: AppleSignInCoordinator
+    @ObservedObject private var webAuth: WebAuthSession
+
     @AppStorage("fleetlink_server_host") private var serverHost: String = "https://fleetlink.online"
 
-    @State private var showTokenSavedAlert: Bool = false
-
-    public init() {}
+    public init(session: SessionManager) {
+        self.session = session
+        self.apple = AppleSignInCoordinator(owner: session)
+        self.webAuth = WebAuthSession(owner: session)
+    }
 
     public var body: some View {
         NavigationStack {
             Form {
-                Section("Authentication") {
-                    SecureField("Admin / Agent Secret Token", text: $authToken)
+                AccountView(session: session, webAuth: webAuth, apple: apple)
+
+                Section {
+                    SecureField("Admin / Agent Secret Token", text: $session.bearerSecret)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+                        .accessibilityIdentifier("bearerTokenField")
 
-                    Text("Provide an Admin Secret or Agent Secret token to view authenticated shares and create custom slugs.")
+                    Text("For Bots And Automation Only.  A Bearer Secret Is Sent As An Authorization Header, Which Is Separate From Your Account Session.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                } header: {
+                    Text("Admin / Agent Token")
+                } footer: {
+                    Text("The Fleet MCP Server And Agent Seats Sign In With A Bearer Secret.  Keep Using Them Here If You Automate FleetLink.")
+                        .font(.caption)
                 }
 
                 Section("Server Endpoint") {
