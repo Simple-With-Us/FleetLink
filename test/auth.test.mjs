@@ -922,3 +922,29 @@ test('the guest reap clears a backlog larger than the D1 bound-parameter limit',
 });
 
 
+test('listing teams fetches membership once, not once per team', async () => {
+  const { env, DB } = environment();
+  const cookie = cookiesOf(await githubLogin(env, { id: 77 }));
+  const userId = DB.raw('SELECT id FROM users LIMIT 1')[0].id;
+
+  // Seed three teams this user belongs to directly: an organizer may create only one
+  // team, and this test is about read cost rather than the team-creation rule.
+  for (let i = 1; i <= 3; i++) {
+    DB.raw("INSERT INTO teams (id,name,organizer_id,plan,trial_ends_at,created_at) VALUES (?,?,?,'trial',?,?)", [`t${i}`, `Team ${i}`, userId, 99999999999, 1]);
+    DB.raw("INSERT INTO team_members (team_id,user_id,role,created_at) VALUES (?,?,'organizer',?)", [`t${i}`, userId, 1]);
+  }
+
+  // Count exactly the team-membership query: the one joining team_members to users.
+  // The session lookup also selects u.display_name, so matching on that alone is not
+  // specific enough to distinguish the two.
+  let membershipReads = 0;
+  const realPrepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => { if (/FROM team_members tm\s+JOIN users u/.test(sql)) membershipReads++; return realPrepare(sql); };
+
+  const { teams } = await (await worker.fetch(new Request(`${ORIGIN}/api/teams`, { headers: { Cookie: cookie } }), env)).json();
+  env.DB.prepare = realPrepare;
+
+  assert.equal(teams.length, 3);
+  for (const t of teams) assert.equal(t.members.length, 1, 'each team reports its own member');
+  assert.equal(membershipReads, 1, 'membership is fetched in one query regardless of team count');
+});
