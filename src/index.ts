@@ -2,6 +2,7 @@ import { cleanPath, contentType, escapeHtml, sha256Hex, slugPattern } from './pu
 import { type AuthEnv, type User, configuredProviders, finishLogin, isProvider, loginWithCredentials, logout, purgeExpiredSessions, sameOrigin, sessionUser, SESSION_COOKIE, startLogin } from './auth';
 import { createAgentToken, listAgentTokens, revokeAgentToken, requestAgentQuotaIncrease, approveAgentQuotaRequest, rejectAgentQuotaRequest } from './tokens';
 import { createTeam, listUserTeams, addTeamMember, removeTeamMember, revertTeamShares, cleanupExpiredTeamTrials } from './teams';
+import { dashboardBody, DASHBOARD_CSP } from './dashboard';
 
 interface Env extends AuthEnv {
   FILES: R2Bucket;
@@ -633,7 +634,7 @@ const homePage = (env: Env, user: User | null) => {
   const userCanCustomSlug = userIsAdmin || (signedIn && !userIsGuest);
   const providers = configuredProviders(env);
   const head = signedIn
-    ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}).  <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
+    ? `<p>Signed in as ${escapeHtml(user.display_name || user.email || 'user')} (${user.role}).  <a href="/dashboard" style="font-weight:600">Dashboard</a> &nbsp;&middot;&nbsp; <a href="/login">Sign In</a> &nbsp;&middot;&nbsp; <form action="/logout" method="post" style="display:inline"><button>Sign out</button></form></p>`
     : `<p>Upload files or create redirect URLs. <a href="/login" style="font-weight:600">Sign in</a>. Admin token optional.</p>${providers.length ? `<p>Or sign in: ${providers.map(p => `<a href="/auth/${p}/start">${providerNames[p]}</a>`).join(' | ')}</p>` : ''}`;
   const tokenField = signedIn ? '' : '<label>Admin token (optional) <input id="token" type="password" autocomplete="off"></label><br>';
   const slugField = `<label id="l_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">Slug (optional) <input name="slug" pattern="[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]|[a-zA-Z0-9]"></label><br id="b_slug" style="display:${userCanCustomSlug ? 'inline' : 'none'}">`;
@@ -789,6 +790,12 @@ export default {
       }
       if ((url.pathname === '/privacy' || url.pathname === '/privacy/' || url.pathname === '/privacy-policy' || url.pathname === '/privacy.html') && request.method === 'GET') {
         return privacyPage(env);
+      }
+      if ((url.pathname === '/dashboard' || url.pathname === '/dashboard/') && request.method === 'GET') {
+        // No data for a signed-out caller: the body renders the sign-in shell and the
+        // status stays 401 so the route cannot be mistaken for a working empty account.
+        const user = await sessionUser(request, env);
+        return page(dashboardBody(user), user ? 200 : 401, { 'Content-Security-Policy': DASHBOARD_CSP }, 'Dashboard — FleetLink');
       }
       if (url.pathname === '/api/shares' && request.method === 'POST') return createShare(request, env);
       if (url.pathname === '/api/shares' && request.method === 'GET') return listShares(request, env);
