@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-// TypeScript's pure module is transpiled by the installed TypeScript compiler in test.
-import ts from 'typescript';
+import { stripTypeScriptTypes } from 'node:module';
+// src/pure.ts is type-stripped with Node's built-in transform so tests do not
+// depend on the TypeScript compiler API (removed from the 'typescript' entrypoint in v7).
 const source = readFileSync(new URL('../src/pure.ts', import.meta.url), 'utf8');
-const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
-const exports = {};
-new Function('exports', js)(exports);
-const { cleanPath, escapeHtml, slugPattern, contentType } = exports;
+const js = stripTypeScriptTypes(source, { mode: 'strip' });
+const { cleanPath, escapeHtml, slugPattern, contentType } = await import(
+  `data:text/javascript,${encodeURIComponent(js)}`
+);
 test('reject traversal and ambiguous paths', () => {
   for (const path of ['../secret','a/../secret','a//b','/a','a\\b','a/./b','']) assert.equal(cleanPath(path), null);
   assert.equal(cleanPath('folder/nested/file.txt'), 'folder/nested/file.txt');
