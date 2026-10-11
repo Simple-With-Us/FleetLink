@@ -248,12 +248,11 @@ export async function loginWithCredentials(env: AuthEnv, username: string, passw
     role = 'user';
     displayName = 'Agent';
     if (!email) email = 'agent@fleetlink.online';
-  } else if (cleanUser && cleanPass) {
-    // Legit user / bot account: email or username with password
-    const isAdmin = email && adminEmails(env).has(email);
-    role = isAdmin ? 'admin' : 'user';
-    displayName = cleanUser.split('@')[0];
   } else {
+    // Accounts are created by the OAuth callback, or claimed by the admin and agent
+    // secrets above.  An unmatched username/password pair must never mint a session:
+    // doing so lets anyone self-register by posting any two strings to /login.  Rejecting
+    // here also keeps failed logups off D1 entirely, so they cost no rows read or written.
     return null;
   }
 

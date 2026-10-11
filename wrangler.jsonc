@@ -1,13 +1,21 @@
 {
-  "name": "fleetlink",
+  // This file targets PRODUCTION.  `npm run deploy` is guarded by scripts/deploy-guard.mjs
+  // and refuses to run unless FLEETLINK_DEPLOY=1 is set, because this configuration
+  // overwrites the live fleet-share-api worker that fleetlink.online and fleetlink.app serve.
+  // For local development use `npm run dev`, which never uploads.
+  "name": "fleet-share-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-28",
-  "r2_buckets": [{ "binding": "FILES", "bucket_name": "fleetlink-files" }],
-  "d1_databases": [{ "binding": "DB", "database_name": "fleetlink", "database_id": "REPLACE_WITH_D1_DATABASE_ID", "migrations_dir": "migrations" }],
+  // Binding name must stay FILES: src/*.ts reads env.FILES.  Only the bucket changes.
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "fleet-shares" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "fleetlink", "database_id": "2b9fad94-94ed-4a6f-b1d9-695a306dad43", "migrations_dir": "migrations" }],
   "triggers": { "crons": ["0 * * * *"] },
   "vars": {
+    // Owner email goes here so a provider-verified sign-in becomes role=admin.
     "ADMIN_EMAILS": "",
-    "ADMIN_HOST": "admin.example.invalid",
+    // Origin for OAuth callbacks and for same-origin cookie writes.  Kept separate from
+    // fleetlink.online so hosted user HTML can never reach a session cookie.
+    "ADMIN_HOST": "fleetlink.app",
     "SHARE_HOSTS": "fleetlink.online,fleetlink.app",
     "DEFAULT_SHARE_HOST": "fleetlink.online"
   }
