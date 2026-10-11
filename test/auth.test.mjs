@@ -15,7 +15,7 @@ const ORIGIN = 'https://admin.test';
 // A real SQLite database behind the D1 calls the worker uses.
 function d1() {
   const db = new SQL.Database();
-  for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql', '0004_renewals.sql', '0005_agent_tokens_and_teams.sql', '0006_cost_guards.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
+  for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql', '0004_renewals.sql', '0005_agent_tokens_and_teams.sql', '0006_cost_guards.sql', '0007_reap_indexes.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
   const exec = (sql, args) => { const st = db.prepare(sql); st.bind(args); const rows = []; while (st.step()) rows.push(st.getAsObject()); st.free(); return rows; };
   // D1 rejects any query binding more than 100 parameters.  Plain SQLite does not,
   // so without this the harness would happily run statements that fail in
