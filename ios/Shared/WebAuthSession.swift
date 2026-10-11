@@ -66,8 +66,9 @@ public final class WebAuthSession: NSObject, ObservableObject {
         guard let start = URL(string: "https://fleetlink.app/auth/\(provider.rawValue)/start") else {
             throw Failure.providerError("The Sign-In Address Is Not Valid.")
         }
-        // A fresh ephemeral web session so a stale provider cookie cannot
-        // silently re-sign-in a different account.
+        // The callback finishes with a 303 to `/`, which is not a custom scheme,
+        // so the completion handler below is not the success signal; the cookie
+        // poll is.  The handler still catches cancellation and hard failures.
         let session = ASWebAuthenticationSession(url: start, callbackURLScheme: nil) { [weak self] url, error in
             Task { @MainActor in
                 guard let self else { return }
