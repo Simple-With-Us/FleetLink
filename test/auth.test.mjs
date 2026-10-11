@@ -97,6 +97,31 @@ test('GitHub sign-in creates a user, a session, and a portal that lists only the
   assert.doesNotMatch(anon, /\/auth\/apple\/start/);
 });
 
+test('POST /login never mints a session from unmatched credentials', async () => {
+  const { env, DB } = environment();
+
+  // Form login with two strings that are neither the admin nor the agent secret.
+  const form = new FormData();
+  form.set('username', 'attacker');
+  form.set('password', 'hunter2');
+  const formRes = await worker.fetch(new Request(`${ORIGIN}/login`, { method: 'POST', headers: { Accept: 'application/json' }, body: form }), env);
+  assert.equal(formRes.status, 401);
+
+  // JSON login, the shape an attacker would actually script.
+  const jsonRes = await worker.fetch(new Request(`${ORIGIN}/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ username: 'attacker2', email: 'attacker@example.com', password: 'anything' })
+  }), env);
+  assert.equal(jsonRes.status, 401);
+
+  // Neither attempt may leave a usable session behind, and neither may create an account.
+  assert.ok(!formRes.headers.getSetCookie().some(c => c.startsWith('fl_session=')), 'no session cookie on the form attempt');
+  assert.ok(!jsonRes.headers.getSetCookie().some(c => c.startsWith('fl_session=')), 'no session cookie on the JSON attempt');
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users')[0].n, 0, 'no account is created');
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM sessions')[0].n, 0, 'no session row is written');
+});
+
 test('the portal shows each share as a full public link with a copy button', async () => {
   const { env } = environment();
   const cookie = cookiesOf(await githubLogin(env));

@@ -7,7 +7,7 @@
     "dev": "wrangler dev",
     "check": "tsc --noEmit",
     "test": "node --test test/*.test.mjs",
-    "deploy": "wrangler deploy"
+    "deploy": "node scripts/deploy-guard.mjs && wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260929.1",
