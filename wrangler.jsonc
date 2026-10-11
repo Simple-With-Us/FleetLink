@@ -7,6 +7,35 @@
   "name": "fleet-share-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-28",
+  // These two flags are load-bearing security posture, not preferences.
+  // The live worker has had workers.dev and preview URLs off since the Oct 8 P0
+  // auth hotfix.  wrangler defaults both to true, so a deploy from this file
+  // without them would publish a second, un-proxied origin for a service whose
+  // only WAF rule is attached to the fleetlink.online and fleetlink.app zones.
+  // A share password or agent header in a URL is then visible on an origin that
+  // has no rule at all.  Verified off on the live worker by the hotfix probes.
+  "workers_dev": false,
+  "preview_urls": false,
+  // Same reasoning for Workers Logs.  A share password travels in the request
+  // URL, so turning observability on would write share passwords into Cloudflare
+  // Logs.  Legacy kept this off and the live worker still has it off; Sentry is
+  // the intended destination and src/sentry.ts scrubs those headers there.
+  "observability": { "enabled": false },
+  // Preserve plain-text vars set on the live worker (PRIVATE_PREFIXES,
+  // PROTECTED_PREFIXES) across a deploy.  Secrets already survive; without this
+  // a deploy silently drops the dashboard vars it does not declare.
+  "keep_vars": true,
+  // Routes must be declared HERE, not in the dashboard.  Until this commit they
+  // existed only on the live worker, managed out of band, so this repo was not a
+  // complete description of what it serves.  Keep the four patterns in lockstep
+  // with the live zones fleetlink.online (cef9faa94d06f48af95d82a39824603a) and
+  // fleetlink.app (a1873254203e58e194403d2b224b8ae8).
+  "routes": [
+    { "pattern": "fleetlink.online/*", "zone_name": "fleetlink.online" },
+    { "pattern": "*.fleetlink.online/*", "zone_name": "fleetlink.online" },
+    { "pattern": "fleetlink.app/*", "zone_name": "fleetlink.app" },
+    { "pattern": "*.fleetlink.app/*", "zone_name": "fleetlink.app" }
+  ],
   // Binding name must stay FILES: src/*.ts reads env.FILES.  Only the bucket changes.
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "fleet-shares" }],
   "d1_databases": [{ "binding": "DB", "database_name": "fleetlink", "database_id": "2b9fad94-94ed-4a6f-b1d9-695a306dad43", "migrations_dir": "migrations" }],
