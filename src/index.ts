@@ -31,6 +31,10 @@ const GUEST_REDIRECT_MAX_TTL = 24 * 3600; // 24 hours
 const REDIRECT_MAX_TTL_USER = 180 * 24 * 3600; // 6 months (180 days) for normal users and agents
 const REDIRECT_DEFAULT_TTL = 180 * 24 * 3600;
 const MAX_LEASE_RENEWALS = 3;
+// Cost guards.  D1 bills nothing on the free plan, but hitting the daily row caps
+// makes every query fail for the rest of the UTC day, so growth is bounded here.
+const LAST_USED_TOUCH_SECONDS = 300;
+const GUEST_REAP_BATCH = 200;
 const RESERVED_SLUGS = new Set([
   'api', 's', 'auth', 'login', 'logout', 'portal', 'admin', 'instructions',
   'apple-app-site-association', 'robots.txt', 'favicon.ico', 'billing', 'support',
@@ -134,6 +138,7 @@ async function principal(request: Request, env: Env): Promise<Principal | null> 
       name: string;
       user_id: string;
       team_id: string | null;
+      last_used_at: number | null;
       max_file_bytes: number | null;
       max_total_bytes: number | null;
       max_files: number | null;
@@ -144,8 +149,15 @@ async function principal(request: Request, env: Env): Promise<Principal | null> 
     }>();
 
     if (agentRow && agentRow.disabled === 0) {
-      env.DB.prepare('UPDATE agent_tokens SET last_used_at = ? WHERE id = ?')
-        .bind(Math.floor(Date.now() / 1000), agentRow.id).run().catch(() => {});
+      // Touch last_used_at at most once every LAST_USED_TOUCH_SECONDS.  Writing it on
+      // every authenticated request costs one D1 row write per API call, which is the
+      // single easiest way for normal agent traffic to exhaust the free daily write
+      // budget.  The freshness this loses is minutes, and it is display-only.
+      const now = Math.floor(Date.now() / 1000);
+      if (agentRow.last_used_at === null || now - agentRow.last_used_at > LAST_USED_TOUCH_SECONDS) {
+        env.DB.prepare('UPDATE agent_tokens SET last_used_at = ? WHERE id = ?')
+          .bind(now, agentRow.id).run().catch(() => {});
+      }
       return {
         role: agentRow.role,
         userId: agentRow.user_id,
@@ -418,6 +430,32 @@ async function cleanup(env: Env) {
       await env.DB.prepare('DELETE FROM shares WHERE slug = ? AND expires_at <= ?').bind(share.slug, Math.floor(Date.now() / 1000)).run();
     } catch (e) { console.error('Cleanup failed', share.slug, e); }
   }
+}
+/**
+ * Anonymous uploads mint a throwaway user plus a session row on every call, and
+ * nothing ever removed them, so anonymous traffic grew the table forever.  Reclaim
+ * only accounts that are provably abandoned: no provider identity, no agent token,
+ * no live session and no share.  Bounded per pass so the sweep itself stays cheap.
+ */
+async function reapGuestUsers(env: Env) {
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    // The delete reuses the predicate as a subquery rather than binding one
+    // placeholder per id.  D1 allows at most 100 bound parameters per query, so an
+    // IN-list of batched ids fails precisely when the sweep is largest, and the
+    // failure is swallowed here, which silently halts reclamation for good.
+    await env.DB.prepare(
+      `DELETE FROM users WHERE id IN (
+         SELECT id FROM users
+          WHERE email IS NULL
+            AND id NOT IN (SELECT user_id FROM identities)
+            AND id NOT IN (SELECT user_id FROM agent_tokens)
+            AND id NOT IN (SELECT user_id FROM sessions WHERE expires_at > ?)
+            AND id NOT IN (SELECT owner_id FROM shares WHERE owner_id IS NOT NULL)
+          LIMIT ?
+       )`
+    ).bind(now, GUEST_REAP_BATCH).run();
+  } catch (e) { console.error('Guest reap failed', e); }
 }
 async function listShares(request: Request, env: Env): Promise<Response> {
   const who = await principal(request, env);
@@ -1011,6 +1049,7 @@ export default {
   async scheduled(_event: ScheduledController, env: Env): Promise<void> {
     await cleanup(env);
     await purgeExpiredSessions(env);
+    await reapGuestUsers(env);
     await cleanupExpiredTeamTrials(env);
   }
 } satisfies ExportedHandler<Env>;

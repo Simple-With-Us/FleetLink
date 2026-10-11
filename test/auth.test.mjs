@@ -15,9 +15,13 @@ const ORIGIN = 'https://admin.test';
 // A real SQLite database behind the D1 calls the worker uses.
 function d1() {
   const db = new SQL.Database();
-  for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql', '0004_renewals.sql', '0005_agent_tokens_and_teams.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
+  for (const f of ['0001_shares.sql', '0002_users.sql', '0003_redirects.sql', '0004_renewals.sql', '0005_agent_tokens_and_teams.sql', '0006_cost_guards.sql']) db.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
   const exec = (sql, args) => { const st = db.prepare(sql); st.bind(args); const rows = []; while (st.step()) rows.push(st.getAsObject()); st.free(); return rows; };
-  const stmt = (sql) => { let args = []; const s = { bind(...a) { args = a; return s; }, async first() { return exec(sql, args)[0] ?? null; }, async all() { return { results: exec(sql, args) }; }, async run() { exec(sql, args); return {}; }, _run: () => exec(sql, args) }; return s; };
+  // D1 rejects any query binding more than 100 parameters.  Plain SQLite does not,
+  // so without this the harness would happily run statements that fail in
+  // production.  Keep it: a query that only breaks on D1 is a query that ships broken.
+  const D1_MAX_PARAMS = 100;
+  const stmt = (sql) => { let args = []; const s = { bind(...a) { if (a.length > D1_MAX_PARAMS) throw new Error(`D1 rejects ${a.length} bound parameters (max ${D1_MAX_PARAMS}) in: ${sql.replace(/\s+/g, ' ').slice(0, 90)}`); args = a; return s; }, async first() { return exec(sql, args)[0] ?? null; }, async all() { return { results: exec(sql, args) }; }, async run() { exec(sql, args); return {}; }, _run: () => exec(sql, args) }; return s; };
   return { prepare: stmt, async batch(list) { return list.map(s => ({ results: s._run() })); }, raw: exec };
 }
 function environment(extra = {}) {
@@ -847,6 +851,74 @@ test('team workspaces with 7-day trials allow shared shares, and expired trials 
   }), env);
   assert.equal(newTeamUpload.status, 403);
   assert.match((await newTeamUpload.json()).error, /Team trial has expired/);
+});
+
+test('agent token last_used_at is throttled so traffic does not write a row per request', async () => {
+  const { env, DB } = environment();
+  const cookie = cookiesOf(await githubLogin(env, { id: 7 }));
+  const created = await (await worker.fetch(new Request(`${ORIGIN}/api/user/agent-tokens`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Throttle Probe' })
+  }), env)).json();
+  const bearer = { Authorization: `Bearer ${created.token}` };
+  const readUsed = () => DB.raw('SELECT last_used_at FROM agent_tokens WHERE id = ?', [created.agentToken.id])[0].last_used_at;
+
+  // First authenticated request records the touch.
+  assert.equal((await worker.fetch(new Request(`${ORIGIN}/api/shares`, { headers: bearer }), env)).status, 200);
+  const first = readUsed();
+  assert.ok(first > 0, 'first use records last_used_at');
+
+  // A repeat request inside the window must not write again: this is the whole point.
+  await new Promise(r => setTimeout(r, 1100));
+  assert.equal((await worker.fetch(new Request(`${ORIGIN}/api/shares`, { headers: bearer }), env)).status, 200);
+  assert.equal(readUsed(), first, 'a repeat request inside the window does not rewrite last_used_at');
+
+  // Once the row is stale it refreshes again, so the column still means something.
+  DB.raw('UPDATE agent_tokens SET last_used_at = 1 WHERE id = ?', [created.agentToken.id]);
+  await worker.fetch(new Request(`${ORIGIN}/api/shares`, { headers: bearer }), env);
+  assert.ok(readUsed() > 1, 'a stale token refreshes last_used_at on its next use');
+});
+
+test('the cron reclaims abandoned guest accounts and never real ones', async () => {
+  const { env, DB } = environment();
+
+  // An anonymous upload on the share host mints a guest user and a session.
+  const form = new FormData();
+  form.set('mode', 'directory'); form.set('ttl_seconds', '3600');
+  form.append('path', 'a.txt'); form.append('file', new File(['hi'], 'a.txt'));
+  assert.equal((await worker.fetch(new Request('https://share.test/api/shares', { method: 'POST', body: form }), env)).status, 201);
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE email IS NULL')[0].n, 1);
+
+  // A real signed-in user with a provider identity must never be reaped.
+  await githubLogin(env, { id: 9 });
+
+  // Age the guest out: its share expires and cleanup removes it, its session lapses.
+  DB.raw('UPDATE shares SET expires_at = 1');
+  DB.raw('UPDATE sessions SET expires_at = 1');
+
+  await worker.scheduled({}, env);
+
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE email IS NULL')[0].n, 0, 'abandoned guest account is reclaimed');
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE id IN (SELECT user_id FROM identities)')[0].n, 1, 'the signed-in user survives');
+});
+
+test('the guest reap clears a backlog larger than the D1 bound-parameter limit', async () => {
+  const { env, DB } = environment();
+
+  // 150 abandoned accounts, more than the 100 bound parameters D1 allows per query.
+  // Binding one placeholder per id fails here, and because the caller swallows the
+  // error the reap would silently stop reclaiming anything at all.
+  for (let i = 0; i < 150; i++) DB.raw('INSERT INTO users (id,role,display_name,email,disabled,created_at) VALUES (?,?,?,NULL,0,?)', [`guest_${i}`, 'user', 'Guest User', 1]);
+
+  // A real signed-in user must still survive the sweep.
+  await githubLogin(env, { id: 42 });
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE email IS NULL')[0].n, 150);
+
+  await worker.scheduled({}, env);
+
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE email IS NULL')[0].n, 0, 'the whole backlog is reclaimed in one pass');
+  assert.equal(DB.raw('SELECT COUNT(*) n FROM users WHERE id IN (SELECT user_id FROM identities)')[0].n, 1, 'the signed-in user survives');
 });
 
 
