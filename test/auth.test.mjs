@@ -168,6 +168,35 @@ test('non-admins get no custom slug, a share cap, and cross-origin writes are re
   assert.equal((await upload(env, u)).status, 429);
 });
 
+test('session renewShare requires sameOrigin; admin Bearer renew works without Origin', async () => {
+  const { env } = environment();
+  const cookie = cookiesOf(await githubLogin(env));
+  const created = await upload(env, cookie);
+  assert.equal(created.status, 201);
+  const slug = (await created.json()).slug;
+
+  const noOriginRenew = await worker.fetch(new Request(`${ORIGIN}/api/shares/${slug}/renew`, {
+    method: 'POST',
+    headers: { Cookie: cookie }
+  }), env);
+  assert.equal(noOriginRenew.status, 403);
+  assert.match((await noOriginRenew.json()).error, /Cross-origin request/);
+
+  const withOriginRenew = await worker.fetch(new Request(`${ORIGIN}/api/shares/${slug}/renew`, {
+    method: 'POST',
+    headers: { Cookie: cookie, Origin: ORIGIN }
+  }), env);
+  assert.equal(withOriginRenew.status, 200);
+
+  const adminSlug = (await (await upload(env, 'admin', { slug: 'renew-bearer' })).json()).slug;
+  const bearerRenew = await worker.fetch(new Request(`${ORIGIN}/api/shares/${adminSlug}/renew`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer operator-secret' }
+  }), env);
+  assert.equal(bearerRenew.status, 200);
+  assert.equal((await bearerRenew.json()).success, true);
+});
+
 test('admin Bearer token still works with no session and sees every share', async () => {
   const { env } = environment();
   const u = cookiesOf(await githubLogin(env));

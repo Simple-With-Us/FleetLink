@@ -509,6 +509,7 @@ async function listShares(request: Request, env: Env): Promise<Response> {
 async function renewShare(request: Request, env: Env, rawSlug: string): Promise<Response> {
   const slug = rawSlug.toLowerCase();
   const who = await principal(request, env);
+  if (who?.viaSession && !sameOrigin(request, env)) return err('Cross-origin request.', 403);
   const share = await env.DB.prepare('SELECT * FROM shares WHERE slug = ?').bind(slug).first<Share>();
   const now = Math.floor(Date.now() / 1000);
   if (!share || share.expires_at <= now) return err('Share expired or not found.', 404);
@@ -826,6 +827,9 @@ const handler = {
           return logout(request, env);
         }
       }
+      // Ungated: native iOS sign-out sends fl_session with no Origin header (see PR #59).
+      // POST /logout remains sameOrigin-gated for browser CSRF; this alias must stay open
+      // so SessionManager can revoke the server session from ASWebAuthenticationSession flows.
       if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
         return logout(request, env);
       }
