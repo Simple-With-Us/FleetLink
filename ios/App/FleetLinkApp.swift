@@ -28,7 +28,7 @@ struct FleetLinkApp: App {
                 }
                 .tag(0)
 
-                // Tab 1: Make Slug / Upload
+                // Tab 1: New link
                 CreateSlugView(portalManager: portalManager) { targetURL in
                     inputURLString = targetURL.absoluteString
                     selectedTab = 2
@@ -41,7 +41,7 @@ struct FleetLinkApp: App {
                 }
                 .tag(1)
 
-                // Tab 2: Artifact Viewer
+                // Tab 2: View
                 NavigationStack {
                     VStack(spacing: 0) {
                         // Quick input bar

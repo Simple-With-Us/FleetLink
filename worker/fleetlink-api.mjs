@@ -1080,7 +1080,14 @@ function renderHomeHtml(origin) {
     }
     .upload-form-group { margin-bottom: 1rem; }
     .upload-form-group label { display: block; font-size: 0.88rem; font-weight: 600; color: #374151; margin-bottom: 0.3rem; }
-    .upload-form-group input[type="text"], .upload-form-group input[type="password"], .upload-form-group select { width: 100%; box-sizing: border-box; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.92rem; }
+    .upload-form-group input[type="text"], .upload-form-group input[type="password"], .upload-form-group select, .upload-form-group textarea { width: 100%; box-sizing: border-box; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.92rem; }
+    .upload-form-group textarea { min-height: 160px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+    .viewer-actions { display: flex; gap: 0.5rem; margin: 0.75rem 0; flex-wrap: wrap; }
+    .viewer-frame { width: 100%; min-height: 480px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; }
+    .viewer-image { max-width: 100%; border-radius: 8px; cursor: zoom-in; background: #ffffff; }
+    .viewer-image.zoomed { cursor: zoom-out; max-width: none; }
+    .viewer-code { margin: 0; padding: 1rem; overflow: auto; max-height: 520px; background: #0d1117; color: #e6edf3; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; white-space: pre; }
+    #link-viewer { background: #f8fafc; border: 1px solid #e2e8f0; }
     .drop-zone { border: 2px dashed #93c5fd; background: #ffffff; border-radius: 8px; padding: 1.5rem; text-align: center; cursor: pointer; transition: border-color 0.2s; }
     .drop-zone:hover { border-color: var(--primary); }
     .file-input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; display: block; }
@@ -1167,6 +1174,7 @@ function renderHomeHtml(origin) {
 
       <div role="tablist" aria-label="What to share" style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem;">
         <button type="button" id="tab-files" role="tab" aria-selected="true" aria-controls="wizard-file-group" class="nav-link-btn" style="background: #2563eb; color: #ffffff; border-color: #2563eb; padding: 0.45rem 0.9rem; font-size: 0.88rem;" onclick="switchWizardMode('files')">Files</button>
+        <button type="button" id="tab-note" role="tab" aria-selected="false" aria-controls="wizard-note-group" class="nav-link-btn" style="background: #ffffff; color: #374151; border-color: #d1d5db; padding: 0.45rem 0.9rem; font-size: 0.88rem;" onclick="switchWizardMode('note')">Text file</button>
         <button type="button" id="tab-redirect" role="tab" aria-selected="false" aria-controls="wizard-target-url-group" class="nav-link-btn" style="background: #ffffff; color: #374151; border-color: #d1d5db; padding: 0.45rem 0.9rem; font-size: 0.88rem;" onclick="switchWizardMode('redirect')">Short link</button>
       </div>
 
@@ -1186,6 +1194,14 @@ function renderHomeHtml(origin) {
             <span id="drop-text" style="font-size: 0.95rem; color: #374151;">Choose files</span>
           </label>
           <div id="file-count-label" style="font-size: 0.8rem; color: #6b7280; margin-top: 0.3rem;"></div>
+        </div>
+
+        <div id="wizard-note-group" class="upload-form-group" role="tabpanel" aria-labelledby="tab-note" style="display: none;">
+          <label for="wizard-note-name">File name</label>
+          <input type="text" id="wizard-note-name" value="notes.md" placeholder="notes.md" style="margin-bottom: 0.6rem;">
+          <label for="wizard-note">Note</label>
+          <textarea id="wizard-note" placeholder="Write the note you want to share."></textarea>
+          <div style="font-size: 0.78rem; color: #4b5563; margin-top: 0.35rem;">A markdown name such as notes.md opens as a formatted page.&nbsp; A sign-in code is required to publish.</div>
         </div>
 
         <!-- Target URL Group (Shown in Redirect mode) -->
@@ -1225,6 +1241,11 @@ function renderHomeHtml(origin) {
         </div>
 
         <div class="upload-form-group">
+          <label for="wizard-description">Description (optional)</label>
+          <input type="text" id="wizard-description" placeholder="A short line people see when this link is shared">
+        </div>
+
+        <div class="upload-form-group">
           <label for="wizard-preview">Picture for the link preview (optional, up to 5 MB)</label>
           <input type="file" id="wizard-preview" accept="image/png,image/jpeg,image/webp,image/gif" style="font-size: 0.85rem;">
         </div>
@@ -1239,6 +1260,20 @@ function renderHomeHtml(origin) {
       </form>
 
       <div class="upload-result" id="wizard-result" role="status"></div>
+    </div>
+
+    <div id="link-viewer" class="card">
+      <h3 style="margin-top: 0;">Open a link</h3>
+      <p style="font-size: 0.92rem; color: #475569; margin-top: 0;">Paste a FleetLink address to preview it here.  Images can be enlarged.  Pages that were uploaded as HTML download instead of opening inside this site.</p>
+      <form id="viewer-form" onsubmit="loadViewer(event)">
+        <div class="upload-form-group">
+          <label for="viewer-url">FleetLink link</label>
+          <input type="url" id="viewer-url" placeholder="https://fleetlink.online/your-link">
+        </div>
+        <button type="submit" class="btn-upload">Preview</button>
+      </form>
+      <p id="viewer-note" style="font-size: 0.88rem; color: #64748b;"></p>
+      <div id="viewer-stage"></div>
     </div>
 
     <!-- Apple Shortcut for iOS Share Sheet (Prominent Top Feature) -->
@@ -1621,11 +1656,20 @@ function renderHomeHtml(origin) {
         box.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }
 
+      function paintWizardTab(el, active) {
+        if (!el) return;
+        el.style.background = active ? "#2563eb" : "#ffffff";
+        el.style.color = active ? "#ffffff" : "#374151";
+        el.style.borderColor = active ? "#2563eb" : "#d1d5db";
+      }
+
       function switchWizardMode(mode) {
         wizardMode = mode;
         var tabFiles = document.getElementById("tab-files");
+        var tabNote = document.getElementById("tab-note");
         var tabRedirect = document.getElementById("tab-redirect");
         var fileGroup = document.getElementById("wizard-file-group");
+        var noteGroup = document.getElementById("wizard-note-group");
         var targetUrlGroup = document.getElementById("wizard-target-url-group");
         var slugLabel = document.getElementById("wizard-slug-label");
         var slugInput = document.getElementById("wizard-slug");
@@ -1634,23 +1678,21 @@ function renderHomeHtml(origin) {
 
         var isAdminUser = currentUser && currentUser.role === "admin";
         var foreverOpt = '<option value="forever" id="ttl-forever-opt"' + (isAdminUser ? "" : " disabled") + ">Until you delete it</option>";
+        paintWizardTab(tabFiles, mode === "files");
+        paintWizardTab(tabNote, mode === "note");
+        paintWizardTab(tabRedirect, mode === "redirect");
         if (tabFiles) tabFiles.setAttribute("aria-selected", mode === "files" ? "true" : "false");
+        if (tabNote) tabNote.setAttribute("aria-selected", mode === "note" ? "true" : "false");
         if (tabRedirect) tabRedirect.setAttribute("aria-selected", mode === "redirect" ? "true" : "false");
 
-        if (mode === "redirect") {
-          tabRedirect.style.background = "#2563eb";
-          tabRedirect.style.color = "#ffffff";
-          tabRedirect.style.borderColor = "#2563eb";
-          tabFiles.style.background = "#ffffff";
-          tabFiles.style.color = "#374151";
-          tabFiles.style.borderColor = "#d1d5db";
+        if (fileGroup) fileGroup.style.display = mode === "files" ? "block" : "none";
+        if (noteGroup) noteGroup.style.display = mode === "note" ? "block" : "none";
+        if (targetUrlGroup) targetUrlGroup.style.display = mode === "redirect" ? "block" : "none";
 
-          if (fileGroup) fileGroup.style.display = "none";
-          if (targetUrlGroup) targetUrlGroup.style.display = "block";
+        if (mode === "redirect") {
           if (slugLabel) slugLabel.innerText = "Link name (optional)";
           if (slugInput) slugInput.disabled = false;
           if (submitBtn) submitBtn.innerText = "Create short link";
-
           if (ttlSelect) {
             ttlSelect.innerHTML = '<option value="1">1 day</option>' +
                                   '<option value="7">7 days</option>' +
@@ -1658,31 +1700,22 @@ function renderHomeHtml(origin) {
                                   '<option value="180" selected>6 months</option>' +
                                   foreverOpt;
           }
-        } else {
-          tabFiles.style.background = "#2563eb";
-          tabFiles.style.color = "#ffffff";
-          tabFiles.style.borderColor = "#2563eb";
-          tabRedirect.style.background = "#ffffff";
-          tabRedirect.style.color = "#374151";
-          tabRedirect.style.borderColor = "#d1d5db";
+          return;
+        }
 
-          if (fileGroup) fileGroup.style.display = "block";
-          if (targetUrlGroup) targetUrlGroup.style.display = "none";
-          if (slugLabel) slugLabel.innerText = isAdminUser ? "Link name (optional)" : "Link name is chosen for you";
-          if (slugInput) {
-            slugInput.disabled = !isAdminUser;
-            if (!isAdminUser) slugInput.value = "";
-          }
-          if (submitBtn) submitBtn.innerText = "Share";
-
-          if (ttlSelect) {
-            ttlSelect.innerHTML = '<option value="0.0416">1 hour</option>' +
-                                  '<option value="0.25">6 hours</option>' +
-                                  '<option value="1">1 day</option>' +
-                                  '<option value="3" selected>3 days</option>' +
-                                  '<option value="7">7 days</option>' +
-                                  foreverOpt;
-          }
+        if (slugLabel) slugLabel.innerText = isAdminUser ? "Link name (optional)" : "Link name is chosen for you";
+        if (slugInput) {
+          slugInput.disabled = !isAdminUser;
+          if (!isAdminUser) slugInput.value = "";
+        }
+        if (submitBtn) submitBtn.innerText = mode === "note" ? "Share file" : "Share";
+        if (ttlSelect) {
+          ttlSelect.innerHTML = '<option value="0.0416">1 hour</option>' +
+                                '<option value="0.25">6 hours</option>' +
+                                '<option value="1">1 day</option>' +
+                                '<option value="3" selected>3 days</option>' +
+                                '<option value="7">7 days</option>' +
+                                foreverOpt;
         }
       }
 
@@ -1726,6 +1759,7 @@ function renderHomeHtml(origin) {
           var slug = document.getElementById("wizard-slug").value.trim();
           var ttl = document.getElementById("wizard-ttl").value;
           var title = document.getElementById("wizard-title").value.trim();
+          var description = (document.getElementById("wizard-description").value || "").trim();
           var password = document.getElementById("wizard-password").value.trim();
 
           if (!hasSignIn()) {
@@ -1738,7 +1772,7 @@ function renderHomeHtml(origin) {
           var progressFill = document.getElementById("upload-progress-fill");
           var resultDiv = document.getElementById("wizard-result");
 
-          if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = "Creating Redirect..."; }
+          if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = "Creating short link…"; }
           if (progressBar) progressBar.style.display = "block";
           if (progressFill) progressFill.style.width = "50%";
           if (resultDiv) resultDiv.style.display = "none";
@@ -1751,6 +1785,7 @@ function renderHomeHtml(origin) {
               slug: slug,
               days: ttl,
               title: title,
+              description: description,
               password: password,
               secret: secret
             })
@@ -1769,6 +1804,9 @@ function renderHomeHtml(origin) {
                 mode: "redirect",
                 target_url: result.data.target_url || targetUrl,
                 files_count: 1,
+                bytes: 0,
+                password_protected: !!password,
+                title: title,
                 created_at: Date.now(),
                 expires: result.data.expires,
                 expire_at: result.data.expire_at
@@ -1841,11 +1879,33 @@ function renderHomeHtml(origin) {
           return;
         }
 
+        var noteFile = null;
+        if (wizardMode === "note") {
+          var noteEl = document.getElementById("wizard-note");
+          var noteNameEl = document.getElementById("wizard-note-name");
+          var noteText = noteEl ? noteEl.value : "";
+          var noteName = (noteNameEl && noteNameEl.value.trim()) || "notes.md";
+          if (!noteText.trim()) {
+            showWizardNotice("Write a note before sharing it.", true);
+            return;
+          }
+          var noteType = "application/octet-stream";
+          var lowerName = noteName.toLowerCase();
+          if (lowerName.endsWith(".md") || lowerName.endsWith(".markdown")) noteType = "text/markdown";
+          else if (lowerName.endsWith(".txt") || lowerName.endsWith(".log")) noteType = "text/plain";
+          else if (lowerName.endsWith(".json")) noteType = "application/json";
+          else if (lowerName.endsWith(".html") || lowerName.endsWith(".htm")) noteType = "text/html";
+          noteFile = new File([noteText], noteName, { type: noteType });
+        }
+
         var fileInput = document.getElementById("wizard-files");
-        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        var picked = noteFile ? [noteFile] : (fileInput && fileInput.files ? Array.prototype.slice.call(fileInput.files) : []);
+        if (!picked.length) {
           showWizardNotice("Choose at least one file.", true);
           return;
         }
+        var uploadBytes = 0;
+        for (var bi = 0; bi < picked.length; bi++) uploadBytes += (picked[bi].size || 0);
 
         var secretInput = document.getElementById("wizard-secret-input");
         var secret = secretInput ? secretInput.value.trim() : "";
@@ -1867,8 +1927,8 @@ function renderHomeHtml(origin) {
         }
 
         var formData = new FormData();
-        for (var i = 0; i < fileInput.files.length; i++) {
-          formData.append("files", fileInput.files[i]);
+        for (var i = 0; i < picked.length; i++) {
+          formData.append("files", picked[i]);
         }
 
         if (secret) {
@@ -1883,6 +1943,9 @@ function renderHomeHtml(origin) {
         var title = document.getElementById("wizard-title").value.trim();
         if (title) formData.append("title", title);
 
+        var description = (document.getElementById("wizard-description").value || "").trim();
+        if (description) formData.append("description", description);
+
         var password = document.getElementById("wizard-password").value.trim();
         if (password) formData.append("password", password);
 
@@ -1895,7 +1958,7 @@ function renderHomeHtml(origin) {
         var progressFill = document.getElementById("upload-progress-fill");
         var resultDiv = document.getElementById("wizard-result");
 
-        if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = "Uploading..."; }
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.innerText = "Sharing…"; }
         if (progressBar) progressBar.style.display = "block";
         if (progressFill) progressFill.style.width = "45%";
         if (resultDiv) resultDiv.style.display = "none";
@@ -1917,7 +1980,10 @@ function renderHomeHtml(origin) {
               url: result.data.url,
               mode: "files",
               target_url: null,
-              files_count: result.data.count || 1,
+              files_count: result.data.count || picked.length || 1,
+              bytes: uploadBytes,
+              password_protected: !!password,
+              title: title,
               created_at: Date.now(),
               expires: result.data.expires,
               expire_at: result.data.expire_at
@@ -1955,6 +2021,22 @@ function renderHomeHtml(origin) {
               };
               resultDiv.appendChild(cBtn);
 
+              var viewB = document.createElement("button");
+              viewB.type = "button";
+              viewB.className = "copy-btn";
+              viewB.style.marginLeft = "0.5rem";
+              viewB.style.background = "#ffffff";
+              viewB.style.color = "#1d4ed8";
+              viewB.innerText = "Preview";
+              viewB.onclick = function() {
+                var input = document.getElementById("viewer-url");
+                if (input) input.value = result.data.url;
+                loadViewer();
+                var card = document.getElementById("link-viewer");
+                if (card && card.scrollIntoView) card.scrollIntoView({ behavior: "smooth", block: "start" });
+              };
+              resultDiv.appendChild(viewB);
+
               var pPortal = document.createElement("p");
               pPortal.style.margin = "0.6rem 0 0 0";
               pPortal.innerHTML = '<a href="/portal" style="color: #1d4ed8; text-decoration: underline; font-weight: 600; font-size: 0.88rem;">See it in Your links</a>';
@@ -1970,7 +2052,7 @@ function renderHomeHtml(origin) {
           showWizardNotice("The network request failed.  Check your connection and try again.", true);
         })
         .finally(function() {
-          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = "Share"; }
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = wizardMode === "note" ? "Share file" : wizardMode === "redirect" ? "Create short link" : "Share"; }
           setTimeout(function() {
             if (progressBar) progressBar.style.display = "none";
             if (progressFill) progressFill.style.width = "0%";
@@ -1978,7 +2060,174 @@ function renderHomeHtml(origin) {
         });
       }
 
+      function fleetHostOk(hostname) {
+        var host = (hostname || "").toLowerCase();
+        return host === "fleetlink.online" || host === "fleetlink.app" || host === window.location.hostname;
+      }
+
+      function viewerActions(href) {
+        var bar = document.createElement("div");
+        bar.className = "viewer-actions";
+        var openA = document.createElement("a");
+        openA.href = href;
+        openA.target = "_blank";
+        openA.rel = "noopener";
+        openA.className = "nav-link-btn";
+        openA.textContent = "Open";
+        bar.appendChild(openA);
+        var copyB = document.createElement("button");
+        copyB.type = "button";
+        copyB.className = "nav-link-btn";
+        copyB.textContent = "Copy Link";
+        copyB.onclick = function() {
+          var done = function() {
+            copyB.textContent = "Copied";
+            setTimeout(function() { copyB.textContent = "Copy Link"; }, 1500);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(href).then(done).catch(function() { prompt("Copy link:", href); });
+          } else {
+            prompt("Copy link:", href);
+          }
+        };
+        bar.appendChild(copyB);
+        if (navigator.share) {
+          var shareB = document.createElement("button");
+          shareB.type = "button";
+          shareB.className = "nav-link-btn";
+          shareB.textContent = "Share";
+          shareB.onclick = function() { navigator.share({ url: href }).catch(function() {}); };
+          bar.appendChild(shareB);
+        }
+        return bar;
+      }
+
+      function showViewerFrame(stage, href) {
+        var noteEl = document.getElementById("viewer-note");
+        fetch(href, { credentials: "same-origin", redirect: "manual" }).then(function(res) {
+          if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
+            if (noteEl) noteEl.textContent = "This link sends people to another site.  Open it in a new tab.";
+            var openA = document.createElement("a");
+            openA.href = href;
+            openA.target = "_blank";
+            openA.rel = "noopener";
+            openA.className = "nav-link-btn";
+            openA.textContent = "Open destination";
+            stage.appendChild(openA);
+            return;
+          }
+          var frame = document.createElement("iframe");
+          frame.className = "viewer-frame";
+          frame.src = href;
+          frame.title = "Share preview";
+          stage.appendChild(frame);
+        }).catch(function() {
+          if (noteEl) noteEl.textContent = "This preview could not be loaded.  Open the link instead.";
+        });
+      }
+
+      function loadViewer(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        var input = document.getElementById("viewer-url");
+        var stage = document.getElementById("viewer-stage");
+        var note = document.getElementById("viewer-note");
+        if (!input || !stage || !note) return;
+        var raw = (input.value || "").trim();
+        stage.innerHTML = "";
+        if (!raw) {
+          note.textContent = "Paste a FleetLink link to preview it here.";
+          return;
+        }
+        var parsed;
+        try { parsed = new URL(raw, window.location.origin); }
+        catch (err) {
+          note.textContent = "That link could not be read.  Use a full https address.";
+          return;
+        }
+        if (!fleetHostOk(parsed.hostname)) {
+          note.textContent = "Previews stay on FleetLink.  Open other sites in a new tab.";
+          var ext = document.createElement("a");
+          ext.href = parsed.href;
+          ext.target = "_blank";
+          ext.rel = "noopener";
+          ext.className = "nav-link-btn";
+          ext.textContent = "Open link";
+          stage.appendChild(ext);
+          return;
+        }
+        var path = parsed.pathname.toLowerCase();
+        if (path.endsWith(".html") || path.endsWith(".htm")) {
+          note.textContent = "Web pages are offered as a download so they do not open inside this site.";
+          var dl = document.createElement("a");
+          dl.href = parsed.href;
+          dl.className = "nav-link-btn";
+          dl.textContent = "Download file";
+          stage.appendChild(dl);
+          return;
+        }
+        note.textContent = "";
+        stage.appendChild(viewerActions(parsed.href));
+        var imageExt = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"];
+        var isImage = false;
+        for (var ii = 0; ii < imageExt.length; ii++) {
+          if (path.endsWith(imageExt[ii])) isImage = true;
+        }
+        if (isImage) {
+          var img = document.createElement("img");
+          img.src = parsed.href;
+          img.alt = "Shared image";
+          img.className = "viewer-image";
+          img.onclick = function() { img.classList.toggle("zoomed"); };
+          stage.appendChild(img);
+          return;
+        }
+        var codeExt = [".txt", ".log", ".json", ".js", ".css", ".xml", ".yaml", ".yml", ".csv", ".swift", ".py", ".sh", ".toml"];
+        var isCode = false;
+        for (var ci = 0; ci < codeExt.length; ci++) {
+          if (path.endsWith(codeExt[ci])) isCode = true;
+        }
+        if (isCode && parsed.origin === window.location.origin) {
+          note.textContent = "Loading...";
+          fetch(parsed.href, { credentials: "same-origin" }).then(function(res) {
+            var type = ((res.headers && res.headers.get("content-type")) || "").toLowerCase();
+            if (!res.ok || type.indexOf("text/html") !== -1) {
+              return null;
+            }
+            return res.text();
+          }).then(function(text) {
+            if (text == null) {
+              note.textContent = "";
+              showViewerFrame(stage, parsed.href);
+              return;
+            }
+            note.textContent = "";
+            var pre = document.createElement("pre");
+            pre.className = "viewer-code";
+            pre.textContent = text;
+            stage.appendChild(pre);
+          }).catch(function() {
+            note.textContent = "";
+            showViewerFrame(stage, parsed.href);
+          });
+          return;
+        }
+        showViewerFrame(stage, parsed.href);
+      }
+
+      function bootViewerFromQuery() {
+        var params = new URLSearchParams(window.location.search);
+        var view = params.get("view");
+        if (!view) return;
+        var input = document.getElementById("viewer-url");
+        if (!input) return;
+        input.value = view;
+        var card = document.getElementById("link-viewer");
+        if (card && card.scrollIntoView) card.scrollIntoView();
+        loadViewer();
+      }
+
       checkAuthStatus();
+      bootViewerFromQuery();
     <\/script>
   </body></html>`;
 }
@@ -2464,7 +2713,7 @@ function renderUserPortalHtml(origin) {
         <span class="portal-pill">Your links</span>
       </a>
       <div class="nav-actions">
-        <a href="/#upload-wizard" class="btn btn-primary">New share</a>
+        <a href="/#upload-wizard" class="btn btn-primary">New link</a>
         <a href="/instructions/" class="btn">Instructions</a>
         <a href="/" class="btn">Home</a>
         <button type="button" class="btn" onclick="openAdminModal()">Account owner sign-in</button>
@@ -2500,6 +2749,11 @@ function renderUserPortalHtml(origin) {
         <div class="metric-val" id="user-total-files">0</div>
         <div class="metric-sub">Up to 7 days when signed in</div>
       </div>
+      <div class="metric-card">
+        <div class="metric-label">Storage On This Device</div>
+        <div class="metric-val" id="user-total-bytes">0 B</div>
+        <div class="metric-sub">From shares saved in this browser</div>
+      </div>
     </div>
 
     <!-- Toolbar -->
@@ -2512,6 +2766,8 @@ function renderUserPortalHtml(origin) {
         <button type="button" class="filter-pill active" data-filter="all" aria-pressed="true" onclick="setUserFilter('all')">All</button>
         <button type="button" class="filter-pill" data-filter="redirect" aria-pressed="false" onclick="setUserFilter('redirect')">Short links</button>
         <button type="button" class="filter-pill" data-filter="files" aria-pressed="false" onclick="setUserFilter('files')">Files</button>
+        <button type="button" class="filter-pill" data-filter="soon" aria-pressed="false" onclick="setUserFilter('soon')">Expiring soon</button>
+        <button type="button" class="filter-pill" data-filter="locked" aria-pressed="false" onclick="setUserFilter('locked')">Locked</button>
       </div>
     </div>
 
@@ -2622,10 +2878,18 @@ function renderUserPortalHtml(origin) {
         document.getElementById("user-total-shares").innerText = shares.length;
         document.getElementById("user-total-redirects").innerText = totalRedirects;
         document.getElementById("user-total-files").innerText = totalFiles;
+        var bytesEl = document.getElementById("user-total-bytes");
+        if (bytesEl) {
+          var totalBytes = 0;
+          for (var b = 0; b < shares.length; b++) totalBytes += Number(shares[b].bytes) || 0;
+          bytesEl.innerText = formatUserBytes(totalBytes);
+        }
 
         var filtered = shares.filter(function(s) {
           if (currentFilter === "redirect" && s.mode !== "redirect") return false;
           if (currentFilter === "files" && s.mode === "redirect") return false;
+          if (currentFilter === "soon" && !shareDueSoon(s)) return false;
+          if (currentFilter === "locked" && !s.password_protected) return false;
           if (search) {
             var matchSlug = s.slug && s.slug.toLowerCase().includes(search);
             var matchUrl = s.url && s.url.toLowerCase().includes(search);
@@ -2683,11 +2947,18 @@ function renderUserPortalHtml(origin) {
             typeBadge.className = "badge " + (item.mode === "redirect" ? "badge-redirect" : "badge-files");
             typeBadge.innerText = item.mode === "redirect" ? "Short link" : "Files";
             tdType.appendChild(typeBadge);
+            if (item.password_protected) {
+              var lockBadge = document.createElement("span");
+              lockBadge.className = "badge badge-expired";
+              lockBadge.style.marginLeft = "0.35rem";
+              lockBadge.innerText = "\u{1F512} Locked";
+              tdType.appendChild(lockBadge);
+            }
             tr.appendChild(tdType);
 
             // Col 3: Expiration
             var tdExp = document.createElement("td");
-            var expText = item.expires || "Time not recorded";
+            var expText = shareTimeLeft(item);
             var isExpired = item.expire_at && Date.now() > item.expire_at;
             var expBadge = document.createElement("span");
             expBadge.className = "badge " + (isExpired ? "badge-expired" : "badge-active");
@@ -2704,6 +2975,15 @@ function renderUserPortalHtml(origin) {
             // Col 4: Actions
             var tdAct = document.createElement("td");
             tdAct.style.textAlign = "right";
+
+            var viewBtn = document.createElement("button");
+            viewBtn.type = "button";
+            viewBtn.className = "action-btn";
+            viewBtn.innerText = "View";
+            viewBtn.onclick = (function(url) {
+              return function() { window.location.href = "/?view=" + encodeURIComponent(url); };
+            })(item.url);
+            tdAct.appendChild(viewBtn);
 
             var copyBtn = document.createElement("button");
             copyBtn.type = "button";
@@ -2798,6 +3078,38 @@ function renderUserPortalHtml(origin) {
 
       function filterUserShares() {
         renderUserShares();
+      }
+
+      function formatUserBytes(bytes) {
+        var n = Number(bytes) || 0;
+        if (n < 1024) return n + " B";
+        var units = ["KB", "MB", "GB"];
+        var value = n / 1024;
+        var unit = units[0];
+        for (var i = 0; i < units.length; i++) {
+          unit = units[i];
+          if (value < 1024 || i === units.length - 1) break;
+          value = value / 1024;
+        }
+        return value.toFixed(value >= 10 ? 0 : 1) + " " + unit;
+      }
+
+      function shareTimeLeft(item) {
+        if (!item.expire_at) return item.expires || "Until you delete it";
+        var left = item.expire_at - Date.now();
+        if (left <= 0) return "Expired";
+        var days = Math.floor(left / 86400000);
+        var hours = Math.floor((left % 86400000) / 3600000);
+        if (days > 0) return days + (days === 1 ? " day, " : " days, ") + hours + (hours === 1 ? " hour" : " hours");
+        var mins = Math.floor((left % 3600000) / 60000);
+        if (hours > 0) return hours + (hours === 1 ? " hour, " : " hours, ") + mins + (mins === 1 ? " minute" : " minutes");
+        return mins + (mins === 1 ? " minute" : " minutes");
+      }
+
+      function shareDueSoon(item) {
+        if (!item.expire_at) return false;
+        var left = item.expire_at - Date.now();
+        return left > 0 && left < 86400000;
       }
 
       async function deleteUserShare(slug) {
@@ -3082,6 +3394,8 @@ function renderPortalHtml(overview, origin) {
         <button type="button" class="filter-pill active" data-filter="all" aria-pressed="true" onclick="setFilter('all')">All (<span id="pill-all-count">${overview.userSlugCount}</span>)</button>
         <button type="button" class="filter-pill" data-filter="perm" aria-pressed="false" onclick="setFilter('perm')">Kept (<span id="pill-perm-count">${overview.permanentCount}</span>)</button>
         <button type="button" class="filter-pill" data-filter="expiring" aria-pressed="false" onclick="setFilter('expiring')">Expiring (<span id="pill-expiring-count">${overview.expiringCount}</span>)</button>
+        <button type="button" class="filter-pill" data-filter="soon" aria-pressed="false" onclick="setFilter('soon')">Due in 24h</button>
+        <button type="button" class="filter-pill" data-filter="files" aria-pressed="false" onclick="setFilter('files')">Files</button>
         <button type="button" class="filter-pill" data-filter="redirect" aria-pressed="false" onclick="setFilter('redirect')">Short links (<span id="pill-redirect-count">${overview.redirectCount || 0}</span>)</button>
         ${overview.expiredCount > 0 ? `<button type="button" class="filter-pill" data-filter="expired" aria-pressed="false" onclick="setFilter('expired')">Expired (<span id="pill-expired-count">${overview.expiredCount}</span>)</button>` : ""}
         <button type="button" class="filter-pill" data-filter="large" aria-pressed="false" onclick="setFilter('large')">Over 50 MB</button>
@@ -3300,6 +3614,8 @@ function renderPortalHtml(overview, origin) {
           if (currentFilter === "perm" && s.category !== "perm") return false;
           if (currentFilter === "expiring" && s.category !== "expiring") return false;
           if (currentFilter === "expired" && s.category !== "expired") return false;
+          if (currentFilter === "soon" && !(s.expireAt && s.expireAt > Date.now() && (s.expireAt - Date.now()) < 86400000)) return false;
+          if (currentFilter === "files" && s.isRedirect) return false;
           if (currentFilter === "redirect" && !s.isRedirect) return false;
           if (currentFilter === "large" && s.totalBytes < 50 * 1024 * 1024) return false;
           if (search) {
@@ -3453,6 +3769,21 @@ function renderPortalHtml(overview, origin) {
             btnOpen.onclick = function() { window.open(shareUrl, "_blank"); };
             tdAct.appendChild(btnOpen);
 
+            var btnView = document.createElement("button");
+            btnView.className = "action-btn";
+            btnView.title = "Preview on the home page";
+            btnView.innerText = "View";
+            btnView.onclick = function() { window.location.href = "/?view=" + encodeURIComponent(shareUrl); };
+            tdAct.appendChild(btnView);
+
+            var btnRenew = document.createElement("button");
+            btnRenew.className = "action-btn";
+            btnRenew.title = "Extend this share";
+            var usedRenewals = s.renewals_used || s.renewals_count || 0;
+            btnRenew.innerText = usedRenewals ? ("Renew (" + usedRenewals + "/3)") : "Renew";
+            btnRenew.onclick = function() { renewAdminShare(s, btnRenew); };
+            tdAct.appendChild(btnRenew);
+
             var btnCopy = document.createElement("button");
             btnCopy.className = "action-btn";
             btnCopy.title = "Copy link";
@@ -3566,6 +3897,46 @@ function renderPortalHtml(overview, origin) {
         }
 
         updateBatchBar();
+      }
+
+      function renewAdminShare(share, btn) {
+        var previous = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = "Renewing...";
+        fetch("/api/portal/renew", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug: share.slug })
+        }).then(function(res) {
+          return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+        }).then(function(result) {
+          if (result.ok && result.data && result.data.success) {
+            share.expireAt = result.data.expire_at;
+            share.renewals_used = result.data.renewals_used || share.renewals_used;
+            share.renewals_count = share.renewals_used;
+            if (result.data.unchanged) {
+              share.status = "Permanent";
+              share.statusClass = "badge-perm";
+              if (!share.isRedirect) share.category = "perm";
+            } else if (result.data.expire_at) {
+              var left = result.data.expire_at - Date.now();
+              var daysLeft = Math.floor(left / 86400000);
+              var hoursLeft = Math.floor((left % 86400000) / 3600000);
+              share.status = daysLeft > 0 ? (daysLeft + "d " + hoursLeft + "h") : (hoursLeft + "h left");
+              share.statusClass = "badge-expiring";
+              if (!share.isRedirect) share.category = "expiring";
+            }
+            renderTable();
+          } else {
+            alert("Renewal failed: " + ((result.data && result.data.error) ? result.data.error : "Server error"));
+            btn.disabled = false;
+            btn.innerText = previous;
+          }
+        }).catch(function(err) {
+          alert("Renewal error: " + (err && err.message ? err.message : "Network error"));
+          btn.disabled = false;
+          btn.innerText = previous;
+        });
       }
 
       function setFilter(filt) {
@@ -4590,6 +4961,7 @@ async function handleRequest(request, env, ctx) {
           passwordHash = await sha256(password);
         }
         const title = formData.get("title") ? String(formData.get("title")).trim() : "";
+        const description = formData.get("description") ? String(formData.get("description")).trim() : "";
         const previewFile = formData.get("preview_image");
         let previewFilename = null;
         if (previewFile && previewFile instanceof File && previewFile.size > 0) {
@@ -4615,6 +4987,7 @@ async function handleRequest(request, env, ctx) {
               ...expireAt ? { expire_at: expireAt.toString() } : {},
               ...passwordHash ? { password_hash: passwordHash } : {},
               ...title ? { og_title: title } : {},
+              ...description ? { og_description: description } : {},
               ...previewFilename ? { preview_image: previewFilename } : {}
             };
             let fType = f.type || "application/octet-stream";
@@ -4748,12 +5121,13 @@ async function handleRequest(request, env, ctx) {
             a:hover { text-decoration: underline; }
             :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
             .back { color: #1f2937; font-size: 0.95rem; }
+            .file-size { color: #374151; font-weight: 500; font-size: 0.9rem; margin-left: 0.4rem; }
           </style></head><body><main>`;
           html += `<p class="back"><a href="/">FleetLink</a></p><h1>Files in /${escapeHtml(listPrefix)}</h1><ul>`;
           for (const obj of listed.objects) {
             const name = obj.key.replace(listPrefix, "");
             if (name) {
-              const size = obj.size != null ? ` <span style="color:#374151;font-weight:500;">(${formatBytes(obj.size)})</span>` : "";
+              const size = obj.size != null ? ` <span class="file-size">${formatBytes(obj.size)}</span>` : "";
               html += `<li><a class="file-link" href="/${encodeURI(obj.key)}">${escapeHtml(name)}${size}</a></li>`;
             }
           }
@@ -4941,7 +5315,9 @@ async function handleRequest(request, env, ctx) {
         else if (object.key.endsWith(".mobileprovision")) contentType = "application/x-apple-aspen-provision";
         if (contentType) headers.set("content-type", contentType);
       }
-      if (contentType && contentType.includes("text/markdown")) {
+      // raw=1 returns the stored note for the native viewer.  It does not skip the
+      // password gate above, and it does not change the .html/.htm attachment rule.
+      if (contentType && contentType.includes("text/markdown") && url.searchParams.get("raw") !== "1") {
         const rawMarkdown = await object.text();
         const html = `<!DOCTYPE html>
 <html lang="en">

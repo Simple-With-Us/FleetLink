@@ -41,6 +41,21 @@ public struct SettingsView: View {
                     Text("fleetlink.app")
                 }
 
+                Section("On the web") {
+                    Link(destination: URL(string: "\(serverHost)/instructions/")!) {
+                        Label("Instructions", systemImage: "book")
+                    }
+                    Link(destination: URL(string: "\(serverHost)/privacy")!) {
+                        Label("Privacy", systemImage: "hand.raised")
+                    }
+                    Link(destination: URL(string: "\(serverHost)/api/shortcut/download")!) {
+                        Label("Share-sheet shortcut", systemImage: "square.and.arrow.up")
+                    }
+                    Link(destination: URL(string: serverHost)!) {
+                        Label("Preview on the website", systemImage: "safari")
+                    }
+                }
+
                 Section("About") {
                     HStack {
                         Text("Version")

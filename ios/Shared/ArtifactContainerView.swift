@@ -6,6 +6,7 @@ public struct ArtifactContainerView: View {
     @State private var showingShareSheet = false
     @State private var linkCopied = false
     @State private var viewMode: ViewMode = .content
+    @State private var unlockPassword = ""
 
     enum ViewMode {
         case content
@@ -26,6 +27,10 @@ public struct ArtifactContainerView: View {
                 loadingView
             case .loaded(let artifact):
                 loadedView(artifact)
+            case .locked(let url):
+                lockedView(url)
+            case .redirect(let source, let target):
+                redirectView(source: source, target: target)
             case .expired:
                 expiredView
             case .notFound:
@@ -70,6 +75,68 @@ public struct ArtifactContainerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
+    }
+
+    private func lockedView(_ url: URL) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "lock.fill")
+                .font(.largeTitle)
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text("This link is locked")
+                .font(.title2.bold())
+            Text("Enter the password to open it.")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            SecureField("Password", text: $unlockPassword)
+                .textFieldStyle(.roundedBorder)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(.horizontal, 32)
+                .accessibilityIdentifier("sharePasswordField")
+            if let message = loader.lockMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+            Button("Unlock") {
+                let password = unlockPassword
+                Task { await loader.load(url: url, password: password) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(unlockPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func redirectView(source: URL, target: URL) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                .font(.largeTitle)
+                .foregroundStyle(.green)
+                .accessibilityHidden(true)
+            Text("Short link")
+                .font(.title2.bold())
+            Text(target.absoluteString)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .padding(.horizontal, 32)
+            Button("Open the web address") {
+                UIApplication.shared.open(target)
+            }
+            .buttonStyle(.borderedProminent)
+            Button("Copy short link") {
+                UIPasteboard.general.url = source
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var expiredView: some View {
@@ -246,18 +313,34 @@ public struct ArtifactContainerView: View {
             switch currentItem.kind {
             case .markdown:
                 if let content = loader.itemContent ?? artifact.rawContent {
-                    MarkdownView(content: content)
+                    if Self.looksLikeHTMLDocument(content) {
+                        WebArtifactView(url: Self.strippingRawQuery(currentItem.url))
+                    } else {
+                        MarkdownView(content: content)
+                    }
                 } else {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             case .image:
-                if let data = loader.itemData ?? artifact.rawData {
+                if currentItem.url.pathExtension.lowercased() == "svg" {
+                    WebArtifactView(url: currentItem.url)
+                } else if let data = loader.itemData ?? artifact.rawData {
                     ImageView(data: data)
                 } else {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             case .html:
-                WebArtifactView(url: currentItem.url)
+                downloadCard(
+                    name: currentItem.name,
+                    message: "This page is offered as a download so it does not open inside the app.",
+                    url: currentItem.url
+                )
+            case .pdf:
+                if let data = loader.itemData ?? artifact.rawData {
+                    PDFArtifactView(data: data)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             case .code, .text:
                 if let content = loader.itemContent ?? artifact.rawContent {
                     CodeView(content: content, language: currentItem.url.pathExtension)
@@ -273,22 +356,14 @@ public struct ArtifactContainerView: View {
                     }
                 )
             default:
-                if let content = loader.itemContent ?? artifact.rawContent {
+                if let content = loader.itemContent ?? artifact.rawContent, !content.isEmpty {
                     CodeView(content: content)
                 } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "doc.fill")
-                            .font(.largeTitle)
-                            .foregroundColor(.secondary)
-                            .accessibilityHidden(true)
-                        Text(currentItem.name)
-                            .font(.headline)
-                        Button("Open in Safari") {
-                            UIApplication.shared.open(currentItem.url)
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    downloadCard(
+                        name: currentItem.name,
+                        message: "Open this file in Safari to save or view it.",
+                        url: currentItem.url
+                    )
                 }
             }
         } else if let content = artifact.rawContent {
@@ -296,6 +371,43 @@ public struct ArtifactContainerView: View {
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private func downloadCard(name: String, message: String, url: URL) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "arrow.down.doc.fill")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(name)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button("Open in Safari") {
+                UIApplication.shared.open(url)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private static func looksLikeHTMLDocument(_ content: String) -> Bool {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.hasPrefix("<!doctype html") || trimmed.hasPrefix("<html")
+    }
+
+    private static func strippingRawQuery(_ url: URL) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        components.queryItems = components.queryItems?.filter { $0.name != "raw" }
+        if components.queryItems?.isEmpty == true {
+            components.queryItems = nil
+        }
+        return components.url ?? url
     }
 
     private var appClipFooter: some View {

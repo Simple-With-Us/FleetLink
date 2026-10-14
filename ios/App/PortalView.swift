@@ -13,12 +13,23 @@ public struct PortalView: View {
     @State private var showDeleteConfirmation: Bool = false
     @State private var isRenewing: [String: Bool] = [:]
     @State private var copiedSlug: String? = nil
+    @State private var sortMode: ShareSort = .newest
 
     enum ShareFilter: String, CaseIterable, Identifiable {
         case all = "All"
         case redirects = "Short links"
         case files = "Files"
         case expiring = "Expiring soon"
+        case locked = "Locked"
+
+        var id: String { rawValue }
+    }
+
+    enum ShareSort: String, CaseIterable, Identifiable {
+        case newest = "Newest"
+        case expiring = "Expiring first"
+        case name = "Name"
+        case largest = "Largest"
 
         var id: String { rawValue }
     }
@@ -29,7 +40,7 @@ public struct PortalView: View {
     }
 
     var filteredShares: [PortalShare] {
-        portalManager.shares.filter { share in
+        let rows = portalManager.shares.filter { share in
             let matchesSearch = searchText.isEmpty ||
                 share.slug.localizedCaseInsensitiveContains(searchText) ||
                 (share.target_url?.localizedCaseInsensitiveContains(searchText) ?? false)
@@ -45,13 +56,37 @@ public struct PortalView: View {
                 return !share.isRedirect
             case .expiring:
                 return share.isExpiringSoon
+            case .locked:
+                return share.password_protected
             }
+        }
+        switch sortMode {
+        case .newest:
+            return rows.sorted { ($0.createdDate ?? .distantPast) > ($1.createdDate ?? .distantPast) }
+        case .expiring:
+            return rows.sorted { ($0.expiresDate ?? .distantFuture) < ($1.expiresDate ?? .distantFuture) }
+        case .name:
+            return rows.sorted { $0.slug.localizedCaseInsensitiveCompare($1.slug) == .orderedAscending }
+        case .largest:
+            return rows.sorted { $0.bytes > $1.bytes }
         }
     }
 
     public var body: some View {
         NavigationStack {
             List {
+                if let message = portalManager.errorMessage, !message.isEmpty {
+                    Section {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text(message)
+                                .font(.subheadline)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                }
+
                 // Analytics Dashboard Section
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
@@ -200,6 +235,17 @@ public struct PortalView: View {
             .navigationTitle("Links")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Picker("Sort", selection: $sortMode) {
+                            ForEach(ShareSort.allCases) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         Task {
                             await portalManager.fetchShares(host: serverHost, token: session.bearerSecret, sessionCookie: session.sessionCookieHeader)
@@ -218,7 +264,7 @@ public struct PortalView: View {
             ) { share in
                 Button("Delete '\(share.slug)'", role: .destructive) {
                     Task {
-                        _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: session.bearerSecret)
+                        _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: session.bearerSecret, sessionCookie: session.sessionCookieHeader)
                     }
                 }
                 Button("Cancel", role: .cancel) {}
@@ -261,7 +307,7 @@ public struct PortalView: View {
     private func renewShare(_ share: PortalShare) {
         isRenewing[share.slug] = true
         Task {
-            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: session.bearerSecret)
+            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: session.bearerSecret, sessionCookie: session.sessionCookieHeader)
             isRenewing[share.slug] = false
         }
     }
