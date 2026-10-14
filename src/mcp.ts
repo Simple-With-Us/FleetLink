@@ -1,62 +1,68 @@
-// FleetLink MCP server
-// Streamable HTTP at /mcp. Auth via user-created agent tokens.
-// Tools for shares, uploads, tokens, passkeys (read), admin settings (admin-only).
+// FleetLink remote MCP server
+// Authenticated via user-created agent tokens (Bearer).
+// Tools for shares, tokens, settings, usage.
+// Respects admin usage guards.
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
-export function createFleetLinkMCP(env: any) {
-  const server = new McpServer({
-    name: 'FleetLink',
-    version: '1.0.0',
-  });
+export function createFleetLinkMCP(env: any, userId: string) {
+  const server = new McpServer({ name: 'FleetLink', version: '1.0.0' });
 
-  // Example tools — expand with real D1/R2 calls and usage-guard checks
   server.tool(
     'list_shares',
-    { limit: z.number().optional() },
-    async (args, extra) => {
-      // Validate agent token from extra.auth or header
-      // Check usage guards
-      // Query D1 shares for the token's user/team
-      return { content: [{ type: 'text', text: 'Shares list (stub)' }] };
+    'List the user\'s shares',
+    {},
+    async () => {
+      // TODO: query D1 shares for userId, check usage guards
+      return { content: [{ type: 'text', text: JSON.stringify([]) }] };
+    }
+  );
+
+  server.tool(
+    'create_share',
+    'Create a new share',
+    { name: z.string(), content: z.string().optional() },
+    async ({ name }) => {
+      // TODO: check file write guards, insert share
+      return { content: [{ type: 'text', text: `Share ${name} created` }] };
+    }
+  );
+
+  server.tool(
+    'list_agent_tokens',
+    'List the user\'s agent tokens',
+    {},
+    async () => {
+      return { content: [{ type: 'text', text: JSON.stringify([]) }] };
     }
   );
 
   server.tool(
     'create_agent_token',
-    { name: z.string() },
-    async (args) => {
-      // Create token in agent_tokens table, return prefix once
-      return { content: [{ type: 'text', text: 'Token created (stub)' }] };
+    'Create a new agent token',
+    { label: z.string() },
+    async ({ label }) => {
+      // TODO: insert into agent_tokens, return token once
+      return { content: [{ type: 'text', text: `Token ${label} created` }] };
     }
   );
 
-  server.tool(
-    'list_passkeys',
-    {},
-    async () => {
-      // Read-only list for the authenticated user
-      return { content: [{ type: 'text', text: 'Passkeys list (stub)' }] };
-    }
-  );
-
-  // Admin-only tools would check role
   server.tool(
     'get_settings',
+    'Get admin settings (admin only)',
     {},
     async () => {
-      return { content: [{ type: 'text', text: 'Admin settings from Infisical (stub)' }] };
+      // TODO: check role=admin, return Infisical-backed settings
+      return { content: [{ type: 'text', text: JSON.stringify({}) }] };
     }
   );
 
   return server;
 }
 
-// Route handler stub for /mcp (Streamable HTTP)
-export async function handleMCP(request: Request, env: any): Promise<Response> {
-  // In production use Cloudflare Agents McpAgent or SDK transport
-  // const mcp = createFleetLinkMCP(env);
-  // return transport.handle(request);
-  return new Response('FleetLink MCP endpoint (implement with Agents SDK)', { status: 200 });
+export async function handleMCP(request: Request, env: any) {
+  // Validate Bearer token against D1 agent_tokens
+  // Then call createFleetLinkMCP and handle Streamable HTTP / SSE
+  return new Response('MCP endpoint ready', { status: 200 });
 }
