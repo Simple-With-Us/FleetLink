@@ -74,14 +74,26 @@ export async function sessionUser(request, env) {
   return row || null;
 }
 
-export async function createSession(env, userId, client) {
+/** Build a session row without writing it, so registration can commit it with the user. */
+export async function prepareSession(env, userId, client) {
   const token = randomHex(32);
   const now = Math.floor(Date.now() / 1000);
   const hash = await hashSessionToken(token, env.SESSION_SECRET);
-  await env.DB.prepare(
-    "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, client) VALUES (?, ?, ?, ?, ?)"
-  ).bind(hash, userId, now, now + SESSION_TTL_SECONDS, client === "ios" ? "ios" : "web").run();
-  return { token, maxAge: SESSION_TTL_SECONDS, expiresAt: now + SESSION_TTL_SECONDS };
+  const expiresAt = now + SESSION_TTL_SECONDS;
+  return {
+    token,
+    maxAge: SESSION_TTL_SECONDS,
+    expiresAt,
+    statement: env.DB.prepare(
+      "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, client) VALUES (?, ?, ?, ?, ?)"
+    ).bind(hash, userId, now, expiresAt, client === "ios" ? "ios" : "web")
+  };
+}
+
+export async function createSession(env, userId, client) {
+  const session = await prepareSession(env, userId, client);
+  await session.statement.run();
+  return { token: session.token, maxAge: session.maxAge, expiresAt: session.expiresAt };
 }
 
 export async function deleteSession(request, env) {

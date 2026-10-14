@@ -9,7 +9,8 @@
     "bundle": "node scripts/bundle-worker.mjs"
   },
   "dependencies": {
-    "@simplewebauthn/server": "13.2.2"
+    "@simplewebauthn/server": "13.2.2",
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

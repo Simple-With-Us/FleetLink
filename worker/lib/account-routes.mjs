@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { b64urlToBytes, bytesToB64url, json, randomId } from "./bytes.mjs";
 import { counterAccepts, reapCostGuards } from "./cost-guards.mjs";
 import { dashboardResponse } from "./dashboard.mjs";
@@ -9,6 +10,7 @@ import {
   createSession,
   deleteSession,
   noSession,
+  prepareSession,
   rejectUnmatchedCredential,
   sessionCookieHeader,
   sessionUser,
@@ -18,6 +20,85 @@ import {
 import { addTeamMember, createTeam, listUserTeams, removeTeamMember } from "./teams.mjs";
 import { createAgentToken, listAgentTokens, requestAgentQuota, revokeAgentToken } from "./tokens.mjs";
 import * as webauthnLib from "./webauthn.mjs";
+
+const optionalText = z.string().optional();
+const credentialSchema = z.object({
+  id: z.string().optional(),
+  rawId: z.string().optional(),
+  type: z.string().optional(),
+  response: z.record(z.unknown()).optional(),
+  authenticatorAttachment: z.string().optional(),
+  clientExtensionResults: z.record(z.unknown()).optional()
+}).passthrough();
+const optionalLimit = z.union([
+  z.number().finite(),
+  z.string().regex(/^\d+(\.\d+)?$/),
+  z.null()
+]).optional();
+
+const BeginRegistrationSchema = z.object({
+  displayName: optionalText,
+  display_name: optionalText,
+  name: optionalText,
+  email: optionalText
+});
+const FinishRegistrationSchema = z.object({
+  challengeId: optionalText,
+  credential: credentialSchema.optional()
+});
+const BeginAuthenticationSchema = z.object({
+  email: optionalText
+});
+const FinishAuthenticationSchema = z.object({
+  challengeId: optionalText,
+  credential: credentialSchema.optional()
+});
+const CreateTeamSchema = z.object({
+  name: optionalText
+});
+const AddMemberSchema = z.object({
+  email: optionalText,
+  role: optionalText
+});
+const AgentTokenBodySchema = z.object({
+  name: optionalText,
+  max_file_bytes: optionalLimit,
+  max_file_mb: optionalLimit,
+  max_total_bytes: optionalLimit,
+  max_batch_mb: optionalLimit,
+  max_files: optionalLimit,
+  max_ttl_seconds: optionalLimit,
+  allow_redirects: z.union([z.boolean(), z.enum(["true", "false"])]).optional(),
+  team_id: z.union([z.string(), z.null()]).optional()
+});
+const QuotaRequestSchema = z.object({
+  requested_count: z.union([z.number(), z.string().regex(/^\d+$/)]).optional(),
+  reason: optionalText
+});
+
+function parsePayload(schema, raw) {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { error: "Malformed request." };
+  }
+  const parsed = schema.strict().safeParse(raw);
+  if (!parsed.success) {
+    const message = parsed.error.issues.map((issue) => issue.message).join(" ");
+    return { error: message || "Invalid request." };
+  }
+  return { data: parsed.data };
+}
+
+function limitNumber(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function allowRedirectsFlag(value) {
+  if (value === false || value === "false") return false;
+  if (value === true || value === "true") return true;
+  return undefined;
+}
 
 const CHALLENGE_TTL_SECONDS = 5 * 60;
 
@@ -103,9 +184,10 @@ async function passkeyCount(env, userId) {
 export async function beginRegistration(request, env, webauthn) {
   const config = webauthnLib.webauthnConfig(env);
   if (!env.DB || !config) return json({ error: "Passkey sign-in is not configured." }, 503);
-  if (!expectedOk(request, config)) return json({ error: "This origin is not allowed to create a passkey." }, 403);
-  const body = await readBody(request);
-  if (body == null) return json({ error: "Malformed request." }, 400);
+  if (!await originsForCeremony(request, env, config)) return json({ error: "This origin is not allowed to create a passkey." }, 403);
+  const parsed = parsePayload(BeginRegistrationSchema, await readBody(request));
+  if (parsed.error) return json({ error: parsed.error }, 400);
+  const body = parsed.data;
   const displayName = cleanName(body.displayName || body.display_name || body.name);
   if (!displayName) return json({ error: "Display name must be 1 to 64 characters." }, 400);
   const email = body.email ? cleanEmail(body.email) : null;
@@ -129,11 +211,13 @@ export async function beginRegistration(request, env, webauthn) {
 export async function finishRegistration(request, env, webauthn) {
   const config = webauthnLib.webauthnConfig(env);
   if (!env.DB || !config) return json({ error: "Passkey sign-in is not configured." }, 503);
-  const origins = webauthnLib.expectedOrigins(request, config);
+  const origins = await originsForCeremony(request, env, config);
   if (!origins) return json({ error: "This origin is not allowed to create a passkey." }, 403);
-  const body = await readBody(request);
-  const challengeId = String(body?.challengeId || "");
-  const credential = body?.credential;
+  const parsed = parsePayload(FinishRegistrationSchema, await readBody(request));
+  if (parsed.error) return json({ error: parsed.error }, 400);
+  const body = parsed.data;
+  const challengeId = String(body.challengeId || "");
+  const credential = body.credential;
   if (!challengeId || !credential || typeof credential !== "object") {
     return noSession("Missing passkey response.");
   }
@@ -150,40 +234,65 @@ export async function finishRegistration(request, env, webauthn) {
     return noSession("Passkey registration could not be verified.");
   }
   const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(
-    "INSERT INTO users (id, role, display_name, email, disabled, agent_token_quota, created_at) VALUES (?, 'user', ?, ?, 0, 3, ?)"
-  ).bind(row.user_id, row.display_name, row.email, now).run();
-  await env.DB.prepare(
-    `INSERT INTO passkey_credentials
-       (credential_id, user_id, public_key, counter, transports, device_type, backed_up, aaguid, created_at, last_used_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
-  ).bind(
-    verified.credentialId,
-    row.user_id,
-    verified.publicKeyB64,
-    verified.counter ?? 0,
-    JSON.stringify(verified.transports || []),
-    verified.deviceType || null,
-    verified.backedUp ? 1 : 0,
-    verified.aaguid || null,
-    now
-  ).run();
+  const session = await prepareSession(env, row.user_id, clientKind(request));
+  let results;
+  try {
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO users (id, role, display_name, email, disabled, agent_token_quota, created_at) VALUES (?, 'user', ?, ?, 0, 3, ?)"
+      ).bind(row.user_id, row.display_name, row.email, now),
+      env.DB.prepare(
+        `INSERT INTO passkey_credentials
+           (credential_id, user_id, public_key, counter, transports, device_type, backed_up, aaguid, created_at, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+      ).bind(
+        verified.credentialId,
+        row.user_id,
+        verified.publicKeyB64,
+        verified.counter ?? 0,
+        JSON.stringify(verified.transports || []),
+        verified.deviceType || null,
+        verified.backedUp ? 1 : 0,
+        verified.aaguid || null,
+        now
+      ),
+      session.statement
+    ]);
+  } catch (err) {
+    await env.DB.prepare("UPDATE webauthn_challenges SET consumed_at = NULL WHERE id = ?").bind(row.id).run().catch(() => {});
+    throw err;
+  }
+  if (!results.every((result) => result && result.success !== false)) {
+    await env.DB.prepare("UPDATE webauthn_challenges SET consumed_at = NULL WHERE id = ?").bind(row.id).run().catch(() => {});
+    throw new Error("Registration writes failed.");
+  }
   const user = await env.DB.prepare(
     "SELECT id, role, display_name, email, agent_token_quota FROM users WHERE id = ?"
   ).bind(row.user_id).first();
-  const session = await createSession(env, user.id, clientKind(request));
   return authSuccess(request, user, session);
 }
 
-function expectedOk(request, config) {
-  return webauthnLib.expectedOrigins(request, config) != null;
+async function originsForCeremony(request, env, config) {
+  const origins = webauthnLib.expectedOrigins(request, config);
+  if (!origins) return null;
+  const client = (request.headers.get("x-fleet-client") || "").toLowerCase();
+  const origin = request.headers.get("origin");
+  const originOk = Boolean(origin && config.origins.includes(origin));
+  // The bearer bypass skips Origin.  A shaped-but-unknown token must not write a challenge.
+  if (client === "bearer" && !originOk) {
+    const user = await sessionUser(request, env);
+    if (!user) return null;
+  }
+  return origins;
 }
 
 export async function beginAuthentication(request, env, webauthn) {
   const config = webauthnLib.webauthnConfig(env);
   if (!env.DB || !config) return json({ error: "Passkey sign-in is not configured." }, 503);
-  if (!expectedOk(request, config)) return json({ error: "This origin is not allowed to sign in." }, 403);
-  const body = await readBody(request) || {};
+  if (!await originsForCeremony(request, env, config)) return json({ error: "This origin is not allowed to sign in." }, 403);
+  const parsed = parsePayload(BeginAuthenticationSchema, await readBody(request));
+  if (parsed.error) return json({ error: parsed.error }, 400);
+  const body = parsed.data;
   let allow = [];
   const email = body.email ? cleanEmail(body.email) : null;
   if (body.email && !email) return json({ error: "Email is not valid." }, 400);
@@ -224,11 +333,13 @@ function parseTransports(value) {
 export async function finishAuthentication(request, env, webauthn) {
   const config = webauthnLib.webauthnConfig(env);
   if (!env.DB || !config) return json({ error: "Passkey sign-in is not configured." }, 503);
-  const origins = webauthnLib.expectedOrigins(request, config);
+  const origins = await originsForCeremony(request, env, config);
   if (!origins) return json({ error: "This origin is not allowed to sign in." }, 403);
-  const body = await readBody(request);
-  const challengeId = String(body?.challengeId || "");
-  const credential = body?.credential;
+  const parsed = parsePayload(FinishAuthenticationSchema, await readBody(request));
+  if (parsed.error) return json({ error: parsed.error }, 400);
+  const body = parsed.data;
+  const challengeId = String(body.challengeId || "");
+  const credential = body.credential;
   if (!challengeId || !credential?.id) return noSession("Missing passkey response.");
   const row = await consumeChallenge(env, challengeId);
   if (!row || row.kind !== "authentication") {
@@ -320,16 +431,16 @@ export async function handleAccountRoutes(request, env, ctx, deps = {}) {
       return logoutResponse(request);
     }
     if (path === "/api/auth/passkey/register/options" && request.method === "POST") {
-      return beginRegistration(request, env, webauthn);
+      return await beginRegistration(request, env, webauthn);
     }
     if (path === "/api/auth/passkey/register/verify" && request.method === "POST") {
-      return finishRegistration(request, env, webauthn);
+      return await finishRegistration(request, env, webauthn);
     }
     if (path === "/api/auth/passkey/authenticate/options" && request.method === "POST") {
-      return beginAuthentication(request, env, webauthn);
+      return await beginAuthentication(request, env, webauthn);
     }
     if (path === "/api/auth/passkey/authenticate/verify" && request.method === "POST") {
-      return finishAuthentication(request, env, webauthn);
+      return await finishAuthentication(request, env, webauthn);
     }
     if (path === "/dashboard" && request.method === "GET") {
       const user = await sessionUser(request, env);
@@ -359,17 +470,25 @@ export async function handleAccountRoutes(request, env, ctx, deps = {}) {
       const gate = await requireUser(request, env);
       if (gate.response) return gate.response;
       if (!mutationAllowed(request, env)) return json({ error: "Cross-origin request." }, 403);
-      const body = await readBody(request) || {};
-      const team = await createTeam(env, gate.user.id, body.name);
+      const parsed = parsePayload(CreateTeamSchema, await readBody(request));
+      if (parsed.error) return json({ error: parsed.error }, 400);
+      const team = await createTeam(env, gate.user.id, parsed.data.name);
       return json({ team }, 201);
+    }
+    const teamGet = /^\/api\/teams\/([A-Za-z0-9_-]+)$/.exec(path);
+    if (teamGet && request.method === "GET") {
+      const gate = await requireUser(request, env);
+      if (gate.response) return gate.response;
+      return json({ error: "Team detail endpoint is not implemented yet." }, 404);
     }
     const members = /^\/api\/teams\/([A-Za-z0-9_-]+)\/members$/.exec(path);
     if (members && request.method === "POST") {
       const gate = await requireUser(request, env);
       if (gate.response) return gate.response;
       if (!mutationAllowed(request, env)) return json({ error: "Cross-origin request." }, 403);
-      const body = await readBody(request) || {};
-      const member = await addTeamMember(env, members[1], gate.user.id, body.email, body.role);
+      const parsed = parsePayload(AddMemberSchema, await readBody(request));
+      if (parsed.error) return json({ error: parsed.error }, 400);
+      const member = await addTeamMember(env, members[1], gate.user.id, parsed.data.email, parsed.data.role);
       return json({ member }, 201);
     }
     const memberDel = /^\/api\/teams\/([A-Za-z0-9_-]+)\/members\/([A-Za-z0-9_-]+)$/.exec(path);
@@ -389,15 +508,17 @@ export async function handleAccountRoutes(request, env, ctx, deps = {}) {
       const gate = await requireUser(request, env);
       if (gate.response) return gate.response;
       if (!mutationAllowed(request, env)) return json({ error: "Cross-origin request." }, 403);
-      const body = await readBody(request) || {};
+      const parsed = parsePayload(AgentTokenBodySchema, await readBody(request));
+      if (parsed.error) return json({ error: parsed.error }, 400);
+      const body = parsed.data;
       const created = await createAgentToken(env, gate.user.id, {
         name: body.name,
-        max_file_bytes: body.max_file_bytes ?? mbToBytes(body.max_file_mb),
-        max_total_bytes: body.max_total_bytes ?? mbToBytes(body.max_batch_mb),
-        max_files: body.max_files,
-        max_ttl_seconds: body.max_ttl_seconds,
-        allow_redirects: body.allow_redirects,
-        team_id: body.team_id
+        max_file_bytes: limitNumber(body.max_file_bytes) ?? mbToBytes(body.max_file_mb),
+        max_total_bytes: limitNumber(body.max_total_bytes) ?? mbToBytes(body.max_batch_mb),
+        max_files: limitNumber(body.max_files),
+        max_ttl_seconds: limitNumber(body.max_ttl_seconds),
+        allow_redirects: allowRedirectsFlag(body.allow_redirects),
+        team_id: body.team_id ?? null
       });
       return json(created, 201);
     }
@@ -414,8 +535,9 @@ export async function handleAccountRoutes(request, env, ctx, deps = {}) {
       const gate = await requireUser(request, env);
       if (gate.response) return gate.response;
       if (!mutationAllowed(request, env)) return json({ error: "Cross-origin request." }, 403);
-      const body = await readBody(request) || {};
-      const created = await requestAgentQuota(env, gate.user.id, body.requested_count, body.reason);
+      const parsed = parsePayload(QuotaRequestSchema, await readBody(request));
+      if (parsed.error) return json({ error: parsed.error }, 400);
+      const created = await requestAgentQuota(env, gate.user.id, parsed.data.requested_count, parsed.data.reason);
       return json(created, 201);
     }
     if (path === "/api/auth" && request.method === "GET" && accountTokenFromRequest(request)) {
@@ -426,7 +548,11 @@ export async function handleAccountRoutes(request, env, ctx, deps = {}) {
     return null;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Request failed.";
-    const status = /unauthorized|not a member|cannot remove/i.test(message) ? 403 : 400;
+    const status = /already a member|already organized/i.test(message)
+      ? 409
+      : /unauthorized|not a member|cannot remove/i.test(message)
+        ? 403
+        : 400;
     return json({ error: message }, status);
   }
 }

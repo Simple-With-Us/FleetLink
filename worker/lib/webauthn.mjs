@@ -23,7 +23,13 @@ export function webauthnConfig(env) {
  */
 export function expectedOrigins(request, config) {
   const client = (request.headers.get("x-fleet-client") || "").toLowerCase();
-  if (client === "ios" || client === "bearer") return config.origins;
+  const bearer = (request.headers.get("authorization") || "").match(/^Bearer\s+(\S+)/i)?.[1] || "";
+  const hasSession = /^[0-9a-f]{64}$/.test(bearer);
+  // iOS AuthenticationServices sends no Origin and no session on the first ceremony.
+  if (client === "ios") return config.origins;
+  // A bearer client may omit Origin only when it already presents a session token.
+  // Callers still have to confirm that token against the session table before writing.
+  if (client === "bearer" && hasSession) return config.origins;
   const origin = request.headers.get("origin");
   if (!origin || !config.origins.includes(origin)) return null;
   return [origin];

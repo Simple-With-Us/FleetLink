@@ -8,6 +8,7 @@ import {
   handleAccountRoutes
 } from "../worker/lib/account-routes.mjs";
 import { hashSessionToken } from "../worker/lib/sessions.mjs";
+import { expectedOrigins } from "../worker/lib/webauthn.mjs";
 import { accountEnv, countRows, jsonRequest, openAccountDb } from "./d1-memory.mjs";
 
 function mockWebauthn(state) {
@@ -211,4 +212,61 @@ test("dashboard is 401 until a passkey session exists", async () => {
   assert.match(html, /Ada/);
   assert.match(html, /Agent Tokens/);
   assert.match(html, /Teams/);
+});
+
+test("registration rejects unknown fields and a bearer client without a real session", async () => {
+  const db = await openAccountDb();
+  const env = accountEnv(db);
+  const webauthn = mockWebauthn({});
+  const extra = await beginRegistration(jsonRequest("/api/auth/passkey/register/options", { displayName: "Ada", extra: true }), env, webauthn);
+  assert.equal(extra.status, 400);
+  assert.equal(await countRows(db, "webauthn_challenges"), 0);
+  const fakeBearer = "ab".repeat(32);
+  const bypass = await beginRegistration(new Request("https://fleetlink.app/api/auth/passkey/register/options", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-fleet-client": "bearer",
+      authorization: `Bearer ${fakeBearer}`
+    },
+    body: JSON.stringify({ displayName: "Ada" })
+  }), env, webauthn);
+  assert.equal(bypass.status, 403);
+  assert.equal(await countRows(db, "webauthn_challenges"), 0);
+  const config = { origins: ["https://fleetlink.app"] };
+  assert.equal(expectedOrigins(new Request("https://fleetlink.app/x", { headers: { "x-fleet-client": "bearer" } }), config), null);
+  assert.deepEqual(expectedOrigins(new Request("https://fleetlink.app/x", { headers: { "x-fleet-client": "ios" } }), config), config.origins);
+});
+
+test("a failed registration write rolls back the user and restores the challenge", async () => {
+  const db = await openAccountDb();
+  const env = accountEnv(db);
+  const webauthn = mockWebauthn({});
+  await register(env, webauthn);
+  const started = await beginRegistration(jsonRequest("/api/auth/passkey/register/options", { displayName: "Bea", email: "bea@example.com" }), env, webauthn);
+  const body = await started.json();
+  const finished = await handleAccountRoutes(jsonRequest("/api/auth/passkey/register/verify", {
+    challengeId: body.challengeId,
+    credential: { id: "cred-1", response: {} }
+  }), env, {}, { webauthn });
+  assert.equal(finished.status, 400);
+  assert.equal(await countRows(db, "users"), 1);
+  assert.equal(await countRows(db, "passkey_credentials"), 1);
+  assert.equal(await countRows(db, "sessions"), 1);
+  const challenge = await db.prepare("SELECT consumed_at FROM webauthn_challenges WHERE id = ?").bind(body.challengeId).first();
+  assert.equal(challenge.consumed_at, null);
+});
+
+test("GET /api/teams/:id is an explicit 404 for a signed-in user", async () => {
+  const db = await openAccountDb();
+  const env = accountEnv(db);
+  const webauthn = mockWebauthn({});
+  const { finished } = await register(env, webauthn);
+  const token = finished.headers.get("set-cookie").match(/fl_session=([0-9a-f]{64})/)[1];
+  const detail = await handleAccountRoutes(new Request("https://fleetlink.app/api/teams/team_missing", {
+    headers: { cookie: `fl_session=${token}`, accept: "application/json" }
+  }), env);
+  assert.equal(detail.status, 404);
+  const payload = await detail.json();
+  assert.match(payload.error, /not implemented yet/);
 });

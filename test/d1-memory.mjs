@@ -43,9 +43,16 @@ function wrap(db) {
       };
     },
     async batch(statements) {
+      db.run("BEGIN");
       const out = [];
-      for (const statement of statements) out.push(await statement.run());
-      return out;
+      try {
+        for (const statement of statements) out.push(await statement.run());
+        db.run("COMMIT");
+        return out;
+      } catch (err) {
+        try { db.run("ROLLBACK"); } catch { /* the failed statement already ended the transaction */ }
+        throw err;
+      }
     }
   };
 }

@@ -1,5 +1,42 @@
+import { z } from "zod";
 import { randomHex, sha256Hex } from "./bytes.mjs";
 import { DEFAULT_AGENT_QUOTA, shouldTouchLastUsed } from "./cost-guards.mjs";
+
+const optionalLimit = z.number().finite().nullable().optional();
+
+export const CreateTokenOptions = z.object({
+  name: z.string().trim().min(1).max(64),
+  max_file_bytes: optionalLimit,
+  max_total_bytes: optionalLimit,
+  max_files: optionalLimit,
+  max_ttl_seconds: optionalLimit,
+  allow_redirects: z.boolean().optional(),
+  team_id: z.string().nullable().optional()
+}).strict();
+
+/** Lower a tier cap to a dashboard grant.  A missing grant leaves the tier cap alone. */
+export function tighterCap(current, cap) {
+  if (cap == null || cap === "") return current;
+  const n = Number(cap);
+  if (!Number.isFinite(n) || n < 0) return current;
+  return Math.min(current, n);
+}
+
+/**
+ * Apply maxTtlSeconds to a day count.  An omitted request is clamped to the grant.
+ * An explicit request past the grant is rejected.
+ */
+export function applyGrantTtl(rawDays, parsedDays, grant) {
+  if (!grant?.maxTtlSeconds || !(Number(grant.maxTtlSeconds) > 0)) return { days: parsedDays };
+  const capDays = Number(grant.maxTtlSeconds) / 86400;
+  const omitted = rawDays == null || String(rawDays).trim() === "";
+  if (omitted) return { days: Math.min(parsedDays, capDays) };
+  if (parsedDays > capDays + 1e-6) {
+    const shown = Number.isInteger(capDays) ? String(capDays) : capDays.toFixed(2);
+    return { error: `Upload rejected: Requested TTL (${parsedDays} days) exceeds this agent token's limit of ${shown} days.` };
+  }
+  return { days: parsedDays };
+}
 
 export const USER_TIER = {
   fileBytes: 100 * 1024 * 1024,
@@ -42,8 +79,13 @@ export async function listAgentTokens(env, userId) {
 }
 
 export async function createAgentToken(env, userId, options) {
-  const name = String(options.name || "").trim();
-  if (!name || name.length > 64) throw new Error("Token name must be between 1 and 64 characters.");
+  const parsed = CreateTokenOptions.safeParse(options ?? {});
+  if (!parsed.success) {
+    const nameIssue = parsed.error.issues.some((issue) => issue.path[0] === "name");
+    if (nameIssue) throw new Error("Token name must be between 1 and 64 characters.");
+    throw new Error("invalid token options");
+  }
+  const name = parsed.data.name;
   const existing = await listAgentTokens(env, userId);
   if (!existing.can_create) {
     throw new Error(`Token creation rejected: You have reached your quota of ${existing.quota} agent tokens.`);
@@ -59,12 +101,12 @@ export async function createAgentToken(env, userId, options) {
   const secret = `fla_${randomHex(32)}`;
   const tokenHash = await hashToken(secret, env.SESSION_SECRET);
   const prefix = secret.slice(0, 12);
-  const maxFile = clamp(options.max_file_bytes, USER_TIER.fileBytes);
-  const maxTotal = clamp(options.max_total_bytes, USER_TIER.totalBytes);
-  const maxFiles = clamp(options.max_files, USER_TIER.files);
-  const maxTtl = clamp(options.max_ttl_seconds, USER_TIER.maxTtl);
-  const allow = options.allow_redirects === false ? 0 : 1;
-  const teamId = options.team_id ? String(options.team_id) : null;
+  const maxFile = clamp(parsed.data.max_file_bytes, USER_TIER.fileBytes);
+  const maxTotal = clamp(parsed.data.max_total_bytes, USER_TIER.totalBytes);
+  const maxFiles = clamp(parsed.data.max_files, USER_TIER.files);
+  const maxTtl = clamp(parsed.data.max_ttl_seconds, USER_TIER.maxTtl);
+  const allow = parsed.data.allow_redirects === false ? 0 : 1;
+  const teamId = parsed.data.team_id ? String(parsed.data.team_id) : null;
   await env.DB.prepare(
     `INSERT INTO agent_tokens (
        id, token_hash, token_prefix, name, user_id, team_id,
