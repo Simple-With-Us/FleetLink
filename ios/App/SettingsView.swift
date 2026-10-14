@@ -86,6 +86,21 @@ public struct SettingsView: View {
                     }
                 }
 
+                Section("On The Web") {
+                    Link(destination: URL(string: "\(serverHost)/instructions/")!) {
+                        Label("Instructions", systemImage: "book")
+                    }
+                    Link(destination: URL(string: "\(serverHost)/privacy")!) {
+                        Label("Privacy", systemImage: "hand.raised")
+                    }
+                    Link(destination: URL(string: "\(serverHost)/api/shortcut/download")!) {
+                        Label("Share Sheet Shortcut", systemImage: "square.and.arrow.up")
+                    }
+                    Link(destination: URL(string: serverHost)!) {
+                        Label("Preview On The Website", systemImage: "safari")
+                    }
+                }
+
                 Section("About") {
                     HStack {
                         Text("Version")
