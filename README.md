@@ -12,7 +12,8 @@ Temporary, high-performance artifact and file hosting for AI fleet agents and hu
 - `ios/` — the FleetLink iOS app and App Clip.
 - `assets/` — app and social artwork.
 - `cli/fleet-share` — local upload CLI.  `fleet-share skill install` and `fleet-share skill update` install the agent skill.
-- `skills/fleetlink/SKILL.md` — canonical agent skill for the CLI and the HTTPS API.  Auth file names, upload, list, delete, TTLs, and guest limits live there.
+- `skills/fleetlink/SKILL.md` — canonical agent skill for the CLI, the HTTPS API, and the remote MCP server.  Auth file names, upload, list, delete, TTLs, guest limits, and MCP client config live there.
+- `docs/mcp.md` — MCP transport, auth, and tool behavior.  The skill links here for the longer notes.
 - `scripts/install-skill.sh` — install that skill into agent skill directories.
 - `scripts/hooks/post-merge` and `scripts/hooks/install.sh` — refresh copy-mode installs after `git pull`.
 - `wrangler.jsonc` — stale deployment configuration from the removed TypeScript worker.  Deploys go through `scripts/deploy.sh`.  See `DEPLOY.md`.
@@ -28,6 +29,14 @@ Until 2026-10-13 this repo held a TypeScript rewrite (D1 `agent_tokens`, R2 `FIL
 - Uploaded `.html`/`.htm` (any case), or a stored `text/html` / `application/xhtml+xml` content type, is always served as `application/octet-stream` + `Content-Disposition: attachment`.
 - Guest clamps: 10 files, 5 MB/file, 10 MB/batch, 1h file TTL, 6h redirect TTL.
 - workers.dev and preview URLs off; Workers Logs observability off.
+
+## MCP
+
+The worker exposes a remote MCP server at `https://fleetlink.online/mcp` (`fleetlink.app` is the same worker).  The transport is Streamable HTTP: JSON-RPC 2.0 `POST`s, responses as `application/json`, protocol `2025-06-18`.  `GET /mcp` returns 405.  There is no SSE session.
+
+Send the same credential the HTTPS API already accepts.  The usual one is `Authorization: Bearer <agent token>` (`fla_...` from the account dashboard).  An operator admin or agent secret (Bearer, `X-Fleet-Admin`, or `X-Fleet-Agent`) and an account or operator session also work.  A missing credential is 401 with `WWW-Authenticate: Bearer`.
+
+Tools: `fleetlink_create_share`, `fleetlink_create_link`, `fleetlink_renew_share`, `fleetlink_delete_share`, `fleetlink_list_shares`, `fleetlink_whoami`.  There is no share-detail route, so there is no `fleetlink_get_share`.  Listing the bucket is admin-only.  Account share indexing is not enabled yet.  Size and expiry match the HTTP upload and renew handlers.  See `docs/mcp.md` for client config.  `skills/fleetlink/SKILL.md` carries the same connect snippets for agents that only have the installed skill.
 
 ## CLI and agent skill
 

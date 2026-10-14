@@ -3,22 +3,99 @@ name: fleetlink
 description: >-
   Use when sharing a file or folder through FleetLink (fleetlink.online or
   fleetlink.app), uploading with fleet-share or curl, listing or deleting a
-  share, choosing how long a link lasts, or installing this skill into an
-  agent runtime.  FleetLink has no MCP server in this repo; reach it with
-  the fleet-share CLI and the HTTPS API.
+  share, choosing how long a link lasts, connecting to the FleetLink MCP
+  server at https://fleetlink.online/mcp, or installing this skill into an
+  agent runtime.  Reach FleetLink with that MCP server, the fleet-share CLI,
+  or the HTTPS API.
 ---
 
 # FleetLink
 
-FleetLink hosts a file or a folder at a short link on `https://fleetlink.online`.  `https://fleetlink.app` serves the same worker.  The canonical CLI in this repo is `cli/fleet-share`.  Share routes live in `worker/fleetlink-api.mjs`.  Passkey accounts, the dashboard, cost guards, and per-user agent tokens live in `worker/lib/` and stay off the live worker until `DEPLOY.md` is followed.
+FleetLink hosts a file or a folder at a short link on `https://fleetlink.online`.  `https://fleetlink.app` serves the same worker.  The canonical CLI in this repo is `cli/fleet-share`.  Share routes live in `worker/fleetlink-api.mjs`.  Passkey accounts, the dashboard, cost guards, per-user agent tokens, and the remote MCP route live in `worker/lib/` and stay off the live worker until `DEPLOY.md` is followed.
 
 ## MCP
 
-This repo does not ship a FleetLink MCP server.  The live worker has no `/mcp` route and no tool schema.  The sibling `fleetlink-legacy` tree does not either.  Its tests use the labels "MCP request shape", `share_file`, and `share_directory` for ordinary HTTP: `PUT` with `X-Fleet-Agent` or `X-Fleet-Admin`, and `POST /api/portal/delete` with those headers or `Authorization: Bearer`.
+The remote MCP server in this repo is `https://fleetlink.online/mcp`.  `https://fleetlink.app/mcp` is the same worker.  Send `POST`s.  The transport is Streamable HTTP: one JSON-RPC 2.0 message per request, response `Content-Type: application/json`, protocol `2025-06-18`.  `GET /mcp` returns 405.  There is no SSE session and no `Mcp-Session-Id`.  The longer transport notes are in `docs/mcp.md` (this checkout only; the installed skill directory is `SKILL.md` alone).
+
+Header:
+
+```http
+Authorization: Bearer <agent token>
+```
+
+An agent token is the `fla_...` value from the account dashboard.  That path is the D1 `agent_tokens` table in `worker/lib/tokens.mjs`, and it is live only after `DEPLOY.md`.  The same `Authorization: Bearer` header also accepts an operator admin or agent secret.  `X-Fleet-Admin` and `X-Fleet-Agent` work too.  An account or operator session cookie works.  A missing credential is 401 with `WWW-Authenticate: Bearer`.  Any non-empty `X-Fleet-Auth` header is still rejected.  The CLI does not speak MCP.  It keeps using the headers in the Auth section.
+
+Tools:
+
+| Tool | What it calls |
+| --- | --- |
+| `fleetlink_create_share` | `PUT /<slug>/<filename>` for a file, or a note from `text` or `markdown` |
+| `fleetlink_create_link` | `PUT /<slug>` with `X-Fleet-Redirect` |
+| `fleetlink_renew_share` | `POST /api/shares/renew` |
+| `fleetlink_delete_share` | `POST /api/portal/delete` |
+| `fleetlink_list_shares` | Admin: `GET /api/portal/data`.  Account session: `GET /api/shares` (empty until share indexing exists).  Agent credentials receive the admin-only 403. |
+| `fleetlink_whoami` | Identity and the limits that credential has.  No token or secret is returned. |
+
+There is no `fleetlink_get_share`.  The API has no share-detail route.  Size and expiry match the upload and renew sections below.  The slug `mcp` is reserved, so a share cannot take the MCP path.
 
 `~/.local/bin/botfleet-mcp`, when present, is a stdio bridge to BotFleet at `https://botfleetadmin.jays.services/mcp/sse`.  It reads `SEAT_MCP_TOKEN` from that bridge's own environment.  That bridge is not FleetLink.  Do not send FleetLink secrets to it.
 
-The website bullet "Full API, CLI, and MCP access" is page copy.  It does not correspond to an endpoint in the worker.  Use the CLI and the HTTPS API below.
+The account portal lists remote MCP at `/mcp`.  That bullet is this route.
+
+Connect.  Replace `<agent token>` with the token.  Prefer an environment variable in any file you might commit.
+
+Claude Code:
+
+```bash
+claude mcp add --transport http fleetlink https://fleetlink.online/mcp \
+  --header "Authorization: Bearer <agent token>"
+```
+
+Cursor, `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "fleetlink": {
+      "url": "https://fleetlink.online/mcp",
+      "headers": {
+        "Authorization": "Bearer <agent token>"
+      }
+    }
+  }
+}
+```
+
+Codex, `~/.codex/config.toml`.  `bearer_token_env_var` sends `Authorization: Bearer <agent token>` from the environment:
+
+```toml
+[mcp_servers.fleetlink]
+url = "https://fleetlink.online/mcp"
+bearer_token_env_var = "FLEETLINK_AGENT_TOKEN"
+```
+
+A static header, if you would rather write it out:
+
+```toml
+[mcp_servers.fleetlink]
+url = "https://fleetlink.online/mcp"
+
+[mcp_servers.fleetlink.http_headers]
+Authorization = "Bearer <agent token>"
+```
+
+Grok.  The CLI stores the header for you, or edit `~/.grok/config.toml`.  `${FLEETLINK_AGENT_TOKEN}` is expanded from the environment:
+
+```bash
+grok mcp add --transport http fleetlink https://fleetlink.online/mcp \
+  --header "Authorization: Bearer <agent token>"
+```
+
+```toml
+[mcp_servers.fleetlink]
+url = "https://fleetlink.online/mcp"
+headers = { "Authorization" = "Bearer ${FLEETLINK_AGENT_TOKEN}" }
+```
 
 ## Auth
 
@@ -85,7 +162,7 @@ The copy served by the website at `/instructions/fleet-share` is an object in st
 
 ## Upload and share
 
-Authenticated `PUT /<key>` stores one object.  Admin and agent may both choose the path.  The worker lowercases the slug.  These top-level names are reserved: `api`, `portal`, `admin`, `auth`, `instructions`, `help`, `intro`, `robots.txt`, `favicon.ico`, `apple-app-site-association`, `.well-known/apple-app-site-association`, `preview.png`, `preview-locked.png`, `preview.jpg`, `cover.png`, `og-image.png`, `Share-to-FleetLink.shortcut`, `billing`, `support`, `verify-account`, `password-reset`, `security`, `login`, `signin`, `logout`, `signout`, `signup`, `terms`, `privacy`, `status`, `dashboard`, `app`, `oauth`, `webhook`, `assets`.
+Authenticated `PUT /<key>` stores one object.  Admin and agent may both choose the path.  The worker lowercases the slug.  These top-level names are reserved: `api`, `mcp`, `portal`, `admin`, `auth`, `instructions`, `help`, `intro`, `robots.txt`, `favicon.ico`, `apple-app-site-association`, `.well-known/apple-app-site-association`, `preview.png`, `preview-locked.png`, `preview.jpg`, `cover.png`, `og-image.png`, `Share-to-FleetLink.shortcut`, `billing`, `support`, `verify-account`, `password-reset`, `security`, `login`, `signin`, `logout`, `signout`, `signup`, `terms`, `privacy`, `status`, `dashboard`, `app`, `oauth`, `webhook`, `assets`.
 
 A successful PUT body is plain text: `Successfully uploaded to <url>` and `(Expires: <ISO-8601 or Never>)`.
 
