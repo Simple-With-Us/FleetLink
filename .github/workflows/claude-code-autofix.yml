@@ -36,4 +36,4 @@ jobs:
         4. Run this repo's verify command (below) and make sure it passes before committing.  If you cannot make it pass, commit nothing.
         5. Commit with a subject starting "autofix:" and push to the PR branch.  Stop after one round.
         6. If a comment is not a real defect or is unclear, change nothing for it.
-        This repo's verify command: `npm run check && npm test`.
+        This repo's verify command: `node --check worker/fleetlink-api.mjs`.
