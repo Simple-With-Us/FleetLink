@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { listUserTeams, createTeam, addTeamMember } from "../worker/lib/teams.mjs";
 import { accountEnv, openAccountDb } from "./d1-memory.mjs";
 
@@ -32,4 +33,33 @@ test("team membership is loaded once for every team", async () => {
   assert.equal(alpha.members.length, 1);
   assert.equal(joined.my_role, "member");
   assert.equal(joined.members.length, 2);
+});
+
+test("one organizer cannot insert a second team", async () => {
+  const db = await openAccountDb();
+  const env = accountEnv(db);
+  await user(db, "user-a", "a@example.com");
+  await createTeam(env, "user-a", "Alpha");
+  await assert.rejects(() => createTeam(env, "user-a", "Beta"), /already organized a team/);
+  await assert.rejects(
+    () => db.prepare(
+      "INSERT INTO teams (id, name, organizer_id, plan, trial_ends_at, created_at) VALUES ('team_x', 'Gamma', 'user-a', 'trial', 10, 1)"
+    ).bind().run(),
+    /UNIQUE constraint/
+  );
+  const sql = readFileSync(new URL("../migrations/0001_users_passkeys.sql", import.meta.url), "utf8");
+  assert.match(sql, /organizer_id TEXT NOT NULL UNIQUE/);
+});
+
+test("a duplicate member insert becomes an already-a-member error", async () => {
+  const db = await openAccountDb();
+  const env = accountEnv(db);
+  await user(db, "user-a", "a@example.com");
+  await user(db, "user-b", "b@example.com");
+  const team = await createTeam(env, "user-a", "Alpha");
+  await addTeamMember(env, team.id, "user-a", "b@example.com");
+  await assert.rejects(
+    () => addTeamMember(env, team.id, "user-a", "b@example.com", "admin"),
+    /already a member of this team/
+  );
 });

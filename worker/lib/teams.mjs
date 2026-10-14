@@ -38,14 +38,21 @@ export async function createTeam(env, organizerId, name) {
   const now = Math.floor(Date.now() / 1000);
   const trialEnds = now + TEAM_TRIAL_SECONDS;
   const teamId = `team_${randomId(8)}`;
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO teams (id, name, organizer_id, plan, trial_ends_at, created_at) VALUES (?, ?, ?, 'trial', ?, ?)"
-    ).bind(teamId, cleanName, organizerId, trialEnds, now),
-    env.DB.prepare(
-      "INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, 'organizer', ?)"
-    ).bind(teamId, organizerId, now)
-  ]);
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO teams (id, name, organizer_id, plan, trial_ends_at, created_at) VALUES (?, ?, ?, 'trial', ?, ?)"
+      ).bind(teamId, cleanName, organizerId, trialEnds, now),
+      env.DB.prepare(
+        "INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, 'organizer', ?)"
+      ).bind(teamId, organizerId, now)
+    ]);
+  } catch (err) {
+    if (/UNIQUE\s*constraint/i.test(String(err?.message || err))) {
+      throw new Error("You have already organized a team.");
+    }
+    throw err;
+  }
   const organizer = await env.DB.prepare("SELECT id, display_name, email FROM users WHERE id = ?").bind(organizerId).first();
   return {
     id: teamId,
@@ -132,18 +139,22 @@ export async function addTeamMember(env, teamId, requesterUserId, email, role = 
   if (!target) {
     throw new Error(`User with email "${cleanEmail}" has not signed in to FleetLink yet.  Have them create a passkey first.`);
   }
-  const already = await env.DB.prepare(
-    "SELECT role FROM team_members WHERE team_id = ? AND user_id = ?"
-  ).bind(teamId, target.id).first();
-  if (already) throw new Error(`User with email "${cleanEmail}" is already a member of this team.`);
-  await env.DB.prepare(
-    "INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, ?, ?)"
-  ).bind(teamId, target.id, role === "admin" ? "admin" : "member", now).run();
+  const memberRole = role === "admin" ? "admin" : "member";
+  try {
+    await env.DB.prepare(
+      "INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, ?, ?)"
+    ).bind(teamId, target.id, memberRole, now).run();
+  } catch (err) {
+    if (/UNIQUE\s*constraint/i.test(String(err?.message || err))) {
+      throw new Error(`User with email "${cleanEmail}" is already a member of this team.`);
+    }
+    throw err;
+  }
   return publicMember({
     user_id: target.id,
     display_name: target.display_name,
     email: target.email,
-    role: role === "admin" ? "admin" : "member",
+    role: memberRole,
     created_at: now
   });
 }

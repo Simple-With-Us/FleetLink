@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS sessions_user_expires ON sessions(user_id, expires_at
 CREATE TABLE IF NOT EXISTS teams (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  organizer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  organizer_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
   plan TEXT NOT NULL DEFAULT 'trial' CHECK (plan IN ('trial', 'pro', 'expired')),
   trial_ends_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL
