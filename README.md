@@ -34,7 +34,7 @@ Until 2026-10-13 this repo held a TypeScript rewrite (D1 `agent_tokens`, R2 `FIL
 
 The worker exposes a remote MCP server at `https://fleetlink.online/mcp` (`fleetlink.app` is the same worker).  The transport is Streamable HTTP: JSON-RPC 2.0 `POST`s, responses as `application/json`, protocol `2025-06-18`.  `GET /mcp` returns 405.  There is no SSE session.
 
-Send the same credential the HTTPS API already accepts.  The usual one is `Authorization: Bearer <agent token>` (`fla_...` from the account dashboard).  An operator admin or agent secret (Bearer, `X-Fleet-Admin`, or `X-Fleet-Agent`) and an account or operator session also work.  A missing credential is 401 with `WWW-Authenticate: Bearer`.
+Send the same credential the HTTPS API already accepts.  The usual one is `Authorization: Bearer <agent token>` (`fla_...` from the account dashboard).  An operator admin or agent secret (Bearer, `X-Fleet-Admin`, or `X-Fleet-Agent`) and an account or operator session also work.  A missing credential is 401 with `WWW-Authenticate: Bearer` and `resource_metadata` pointing at `/.well-known/oauth-protected-resource`.
 
 Tools: `fleetlink_create_share`, `fleetlink_create_link`, `fleetlink_renew_share`, `fleetlink_delete_share`, `fleetlink_list_shares`, `fleetlink_whoami`.  There is no share-detail route, so there is no `fleetlink_get_share`.  Listing the bucket is admin-only.  Account share indexing is not enabled yet.  Size and expiry match the HTTP upload and renew handlers.  See `docs/mcp.md` for client config.  `skills/fleetlink/SKILL.md` carries the same connect snippets for agents that only have the installed skill.
 

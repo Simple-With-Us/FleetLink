@@ -2,7 +2,7 @@ import { appleAppSiteAssociation } from "./lib/aasa.mjs";
 import { handleAccountRoutes } from "./lib/account-routes.mjs";
 import { reapCostGuards } from "./lib/cost-guards.mjs";
 import { mustForceAttachment } from "./lib/html-safety.mjs";
-import { handleMcp } from "./lib/mcp.mjs";
+import { handleMcp, handleOAuthProtectedResource, mcpWwwAuthenticate } from "./lib/mcp.mjs";
 import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
 import { captureWorkerException } from "./lib/sentry-scrub.mjs";
 import { randomHex } from "./lib/bytes.mjs";
@@ -240,6 +240,45 @@ async function resolveR2Key(env, key) {
 }
 __name(resolveR2Key, "resolveR2Key");
 __name2(resolveR2Key, "resolveR2Key");
+const R2_DELETE_LIMIT = 1000;
+function shareSlugFromDeletePath(pathname) {
+  const path = String(pathname || "").replace(/\/+$/g, "") || "/";
+  const api = /^\/api\/shares\/([^/]+)$/i.exec(path);
+  return api ? api[1] : null;
+}
+__name(shareSlugFromDeletePath, "shareSlugFromDeletePath");
+__name2(shareSlugFromDeletePath, "shareSlugFromDeletePath");
+async function collectShareObjectKeys(env, slug) {
+  const keys = [];
+  let cursor;
+  for (;;) {
+    const listOpts = { prefix: `${slug}/`, limit: R2_DELETE_LIMIT };
+    if (cursor) listOpts.cursor = cursor;
+    const listRes = await env.FLEET_SHARES.list(listOpts);
+    for (const o of listRes.objects || []) {
+      if (o && o.key && !isSettingsStorageKey(o.key)) keys.push(o.key);
+    }
+    if (!listRes.truncated) break;
+    if (!listRes.cursor || listRes.cursor === cursor) break;
+    cursor = listRes.cursor;
+    if (keys.length > 2e4) break;
+  }
+  try {
+    const single = await env.FLEET_SHARES.head(slug);
+    if (single && !isSettingsStorageKey(slug)) keys.push(slug);
+  } catch (_) {
+  }
+  return keys;
+}
+__name(collectShareObjectKeys, "collectShareObjectKeys");
+__name2(collectShareObjectKeys, "collectShareObjectKeys");
+async function deleteObjectKeys(env, keys) {
+  for (let i = 0; i < keys.length; i += R2_DELETE_LIMIT) {
+    await env.FLEET_SHARES.delete(keys.slice(i, i + R2_DELETE_LIMIT));
+  }
+}
+__name(deleteObjectKeys, "deleteObjectKeys");
+__name2(deleteObjectKeys, "deleteObjectKeys");
 var GUEST_MAX_FILES = 10;
 var GUEST_MAX_FILE_BYTES = 5 * 1024 * 1024;
 var GUEST_MAX_BATCH_BYTES = 10 * 1024 * 1024;
@@ -5097,8 +5136,58 @@ function canonicalShareOrigin(requestUrl, state) {
 __name(canonicalShareOrigin, "canonicalShareOrigin");
 __name2(canonicalShareOrigin, "canonicalShareOrigin");
 
+async function probeStorage(env) {
+  try {
+    const ns = env && env.FLEET_SHARES;
+    if (!ns || typeof ns.list !== "function") return false;
+    await ns.list({ limit: 1 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+__name(probeStorage, "probeStorage");
+__name2(probeStorage, "probeStorage");
+async function probeDb(env) {
+  try {
+    const db = env && env.DB;
+    if (!db || typeof db.prepare !== "function") return false;
+    const stmt = db.prepare("select 1");
+    if (typeof stmt.first === "function") await stmt.first();
+    else await stmt.bind().first();
+    return true;
+  } catch {
+    return false;
+  }
+}
+__name(probeDb, "probeDb");
+__name2(probeDb, "probeDb");
+async function healthCheck(env) {
+  const storageOk = await probeStorage(env);
+  const dbOk = await probeDb(env);
+  const body = {
+    ok: storageOk && dbOk,
+    storage: storageOk ? "ok" : "error",
+    db: dbOk ? "ok" : "error"
+  };
+  return new Response(JSON.stringify(body), {
+    status: body.ok ? 200 : 503,
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "no-store"
+    }
+  });
+}
+__name(healthCheck, "healthCheck");
+__name2(healthCheck, "healthCheck");
 async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
+    if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/health/")) {
+      return healthCheck(env);
+    }
+    if ((request.method === "GET" || request.method === "HEAD") && (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/")) {
+      return handleOAuthProtectedResource(request);
+    }
     const hostname = url.hostname;
     let key = url.pathname.slice(1);
     const rawEnv = env;
@@ -5118,7 +5207,7 @@ async function handleRequest(request, env, ctx) {
     if (request.headers.get("X-Fleet-Auth")) {
       const legacyHeaders = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
       if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
-        legacyHeaders["WWW-Authenticate"] = 'Bearer realm="fleetlink"';
+        legacyHeaders["WWW-Authenticate"] = mcpWwwAuthenticate(request);
       }
       return new Response(JSON.stringify({
         error: "Upload rejected: Legacy 'X-Fleet-Auth' header is retired. Please authenticate using 'X-Fleet-Admin' (admin operations) or 'X-Fleet-Agent' (fleet agents)."
@@ -5518,33 +5607,9 @@ async function handleRequest(request, env, ctx) {
             return jsonResponse(400, { error: "That name is reserved." });
           }
           targetSlug = resolvedSlug;
-          let keysToDelete = [];
-          let truncated = true;
-          let cursor = void 0;
-          while (truncated) {
-            const listOpts = { prefix: `${targetSlug}/`, limit: 1e3 };
-            if (cursor) listOpts.cursor = cursor;
-            const listRes = await env.FLEET_SHARES.list(listOpts);
-            for (const o of listRes.objects) {
-              if (o && isSettingsStorageKey(o.key)) continue;
-              keysToDelete.push(o.key);
-            }
-            truncated = listRes.truncated;
-            cursor = listRes.cursor;
-            if (keysToDelete.length > 2e4) break;
-          }
-          try {
-            const single = await env.FLEET_SHARES.head(targetSlug);
-            if (single) {
-              keysToDelete.push(targetSlug);
-            }
-          } catch (_) {
-          }
+          const keysToDelete = await collectShareObjectKeys(env, targetSlug);
           if (keysToDelete.length > 0) {
-            for (let i = 0; i < keysToDelete.length; i += 1e3) {
-              const chunk = keysToDelete.slice(i, i + 1e3);
-              await env.FLEET_SHARES.delete(chunk);
-            }
+            await deleteObjectKeys(env, keysToDelete);
             totalDeleted += keysToDelete.length;
             deletedSlugs.push(targetSlug);
           }
@@ -6604,6 +6669,31 @@ async function handleRequest(request, env, ctx) {
       const deleteMethodAuth = await authenticate(request, secrets);
       if (!deleteMethodAuth.isAdmin) {
         return new Response("Delete rejected: Unauthorized. Provide a valid X-Fleet-Admin header with an Admin secret.", { status: 401 });
+      }
+      const apiSlug = shareSlugFromDeletePath(url.pathname);
+      const shareSlug = apiSlug || (key && !String(key).includes("/") ? key : null);
+      if (shareSlug) {
+        if (isSettingsStorageKey(shareSlug)) {
+          return new Response("Delete rejected: That name is reserved.", { status: 400 });
+        }
+        try {
+          const resolvedSlug = (await resolveR2Key(env, shareSlug)).split("/")[0];
+          if (!resolvedSlug) {
+            return new Response("Delete rejected: Missing target key in request URL.", { status: 400 });
+          }
+          if (isSettingsStorageKey(resolvedSlug)) {
+            return new Response("Delete rejected: That name is reserved.", { status: 400 });
+          }
+          const keysToDelete = await collectShareObjectKeys(env, resolvedSlug);
+          if (keysToDelete.length > 0) await deleteObjectKeys(env, keysToDelete);
+          return new Response(`Successfully deleted ${resolvedSlug}
+`, {
+            status: 200,
+            headers: { "content-type": "text/plain; charset=utf-8" }
+          });
+        } catch (err) {
+          return new Response(`Delete rejected: Storage error deleting from R2 - ${err.message || String(err)}`, { status: 500 });
+        }
       }
       if (isSettingsStorageKey(key)) {
         return new Response("Delete rejected: That name is reserved.", { status: 400 });

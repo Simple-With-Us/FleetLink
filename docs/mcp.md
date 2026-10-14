@@ -22,7 +22,9 @@ Authorization: Bearer <agent token>
 
 An agent token is the `fla_...` value returned once when you create a token on the account.  The worker also accepts an operator admin or agent secret as `Authorization: Bearer`, `X-Fleet-Admin`, or `X-Fleet-Agent`, an operator `fl_session` cookie, and an account session (64-hex bearer or `fl_session` cookie).
 
-A request with no accepted credential is `401` and includes `WWW-Authenticate: Bearer realm="fleetlink"`.  The body is `{"error":"Authentication required."}`.  It does not echo the header.  Any non-empty `X-Fleet-Auth` header is still rejected.
+A request with no accepted credential is `401` and includes `WWW-Authenticate: Bearer realm="fleetlink", resource_metadata="https://<host>/.well-known/oauth-protected-resource"`.  The body is `{"error":"Authentication required."}`.  It does not echo the header.  Any non-empty `X-Fleet-Auth` header is still rejected.
+
+`GET /.well-known/oauth-protected-resource` is RFC 9728 metadata for that resource: `resource` is `https://<host>/mcp`, `bearer_methods_supported` is `["header"]`, and `resource_name` is `FleetLink MCP`.  There is no OAuth authorization server in this worker, so `authorization_servers` is omitted.
 
 Per-user agent tokens can upload, create redirects, renew, and delete, with the same grant caps the upload routes already enforce (`max_file_bytes`, `max_total_bytes`, `max_files`, `max_ttl_seconds`, `allow_redirects`).  Renewals still follow `POST /api/shares/renew`: at most 3, admin adds 7 days, an agent adds 7 days for a file and 30 days for a redirect.  `DELETE /<key>` stays admin-only.  Agents delete through `POST /api/portal/delete`, which refuses reserved and system paths.
 
