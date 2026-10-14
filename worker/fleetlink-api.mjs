@@ -5136,8 +5136,55 @@ function canonicalShareOrigin(requestUrl, state) {
 __name(canonicalShareOrigin, "canonicalShareOrigin");
 __name2(canonicalShareOrigin, "canonicalShareOrigin");
 
+async function probeStorage(env) {
+  try {
+    const ns = env && env.FLEET_SHARES;
+    if (!ns || typeof ns.list !== "function") return false;
+    await ns.list({ limit: 1 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+__name(probeStorage, "probeStorage");
+__name2(probeStorage, "probeStorage");
+async function probeDb(env) {
+  try {
+    const db = env && env.DB;
+    if (!db || typeof db.prepare !== "function") return false;
+    const stmt = db.prepare("select 1");
+    if (typeof stmt.first === "function") await stmt.first();
+    else await stmt.bind().first();
+    return true;
+  } catch {
+    return false;
+  }
+}
+__name(probeDb, "probeDb");
+__name2(probeDb, "probeDb");
+async function healthCheck(env) {
+  const storageOk = await probeStorage(env);
+  const dbOk = await probeDb(env);
+  const body = {
+    ok: storageOk && dbOk,
+    storage: storageOk ? "ok" : "error",
+    db: dbOk ? "ok" : "error"
+  };
+  return new Response(JSON.stringify(body), {
+    status: body.ok ? 200 : 503,
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "no-store"
+    }
+  });
+}
+__name(healthCheck, "healthCheck");
+__name2(healthCheck, "healthCheck");
 async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
+    if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/health/")) {
+      return healthCheck(env);
+    }
     const hostname = url.hostname;
     let key = url.pathname.slice(1);
     const rawEnv = env;
