@@ -24,7 +24,7 @@ public final class SessionManager: ObservableObject {
            let url = URL(string: raw) {
             return url
         }
-        return URL(string: "https://fleetlink.app")!
+        return URL(string: "https://fleetlink.online")!
     }
 
     public static var portalOrigin: URL { accountOrigin }

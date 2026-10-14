@@ -115,9 +115,7 @@ public final class AppleSignInCoordinator: NSObject, ObservableObject {
     /// Apple's public keys and issues an `fl_session` cookie exactly as the web
     /// callback does.
     private func exchange(identityToken: String, userIdentifier: String) async throws {
-        guard let url = URL(string: "https://fleetlink.app/auth/apple/native") else {
-            throw Failure.notConfigured
-        }
+        let url = SessionManager.accountOrigin.appending(path: "auth/apple/native")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

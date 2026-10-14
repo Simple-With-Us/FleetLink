@@ -8,7 +8,7 @@ import WebKit
 /// Drives the browser sign-in for GitHub and Google, then lifts the `fl_session`
 /// cookie out of the web view's cookie store into the Keychain.
 ///
-/// The OAuth flow starts at `https://fleetlink.app/auth/<provider>/start`, which
+/// The OAuth flow starts at the account origin `/auth/<provider>/start`, which
 /// 302s to the provider and comes back to `/auth/<provider>/callback`.  On
 /// success the worker sets `fl_session` and 303s to `/`.  The cookie is
 /// `HttpOnly`, so page JavaScript cannot read it; we read it from
@@ -66,9 +66,7 @@ public final class WebAuthSession: NSObject, ObservableObject {
     }
 
     public func signIn(with provider: Provider) async throws {
-        guard let start = URL(string: "https://fleetlink.app/auth/\(provider.rawValue)/start") else {
-            throw Failure.providerError("The sign-in address is not valid.")
-        }
+        let start = SessionManager.accountOrigin.appending(path: "auth/\(provider.rawValue)/start")
         // The callback finishes with a 303 to `/`, which is not a custom scheme,
         // so the completion handler below is not the success signal; the cookie
         // poll is.  The handler still catches cancellation and hard failures.

@@ -1,0 +1,77 @@
+name: iOS TestFlight
+
+# Archive and upload on a GitHub-hosted macOS runner.  Fork PRs never run.
+# The machine identity stays in repository secrets:
+#   INFISICAL_UNIVERSAL_AUTH_CLIENT_ID / INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET
+#   (fallback INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET).
+# scripts/ios-load-signing.mjs then reads, and never prints:
+#   Fleet-OPS prod /asc: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8
+#   FleetLink prod /: IOS_DIST_P12_BASE64, IOS_DIST_P12_PASSWORD
+# Do not mint a new App Store Connect key or distribution certificate.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-testflight.yml"
+      - "scripts/ios-load-signing.mjs"
+      - "scripts/ios-prepare-signing.sh"
+      - "scripts/ios-install-profiles.mjs"
+      - "scripts/ios-ship-testflight.sh"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-testflight.yml"
+      - "scripts/ios-load-signing.mjs"
+      - "scripts/ios-prepare-signing.sh"
+      - "scripts/ios-install-profiles.mjs"
+      - "scripts/ios-ship-testflight.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-testflight-fleetlink
+  cancel-in-progress: false
+
+jobs:
+  ship:
+    name: TestFlight archive + upload
+    if: github.event.repository.fork == false
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      INFISICAL_PROJECT_ID: bb58ffb3-3861-463c-8e19-4fbffae39438
+      INFISICAL_ASC_PROJECT_ID: 8dae6d03-8f12-48b2-adf3-e5c1b881c8c5
+      INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_ID || secrets.INFISICAL_CLIENT_ID }}
+      INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET || secrets.INFISICAL_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Reject a beta Xcode
+        run: |
+          xcodebuild -version
+          if xcodebuild -version | grep -qi beta; then
+            echo "::error::xcodebuild reports a beta Xcode toolchain"
+            exit 1
+          fi
+
+      - name: Load signing material from Infisical
+        run: node scripts/ios-load-signing.mjs
+
+      - name: Import the distribution identity
+        run: bash scripts/ios-prepare-signing.sh
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Install App Store profiles
+        run: node scripts/ios-install-profiles.mjs install
+
+      - name: Archive and upload to TestFlight
+        run: bash scripts/ios-ship-testflight.sh
