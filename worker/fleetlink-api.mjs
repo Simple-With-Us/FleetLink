@@ -4,7 +4,7 @@ import { reapCostGuards } from "./lib/cost-guards.mjs";
 import { mustForceAttachment } from "./lib/html-safety.mjs";
 import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
 import { captureWorkerException } from "./lib/sentry-scrub.mjs";
-import { lookupAgentToken } from "./lib/tokens.mjs";
+import { applyGrantTtl, lookupAgentToken, tighterCap } from "./lib/tokens.mjs";
 
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
@@ -4364,6 +4364,11 @@ async function handleRequest(request, env, ctx) {
             }
           }
         }
+        let agentGrant = null;
+        if (!isAdmin && !isAgent) {
+          agentGrant = await lookupAgentToken(request, env);
+          if (agentGrant) isAgent = true;
+        }
         const isGuest = !isAdmin && !isAgent;
         if (isGuest) {
           return unauthorizedJson();
@@ -4371,6 +4376,9 @@ async function handleRequest(request, env, ctx) {
         const mode = (formData.get("mode") || "").toString().trim();
         const rawTargetUrl = (formData.get("target_url") || formData.get("redirect_url") || formData.get("url") || "").toString().trim();
         if (mode === "redirect" || rawTargetUrl) {
+          if (agentGrant && agentGrant.allowRedirects === false) {
+            return new Response(JSON.stringify({ error: "Upload rejected: This agent token is not permitted to create redirect URLs." }), { status: 403, headers: { "Content-Type": "application/json" } });
+          }
           if (request.headers.get("X-Fleet-Allow-Redirects") === "false" || formData.get("allow_redirects") === "false") {
             return new Response(JSON.stringify({ error: "Upload rejected: This agent token is not permitted to create redirect URLs." }), { status: 403, headers: { "Content-Type": "application/json" } });
           }
@@ -4427,6 +4435,11 @@ async function handleRequest(request, env, ctx) {
             if (parsed2 > 183) {
               return new Response(JSON.stringify({ error: `Requested TTL (${parsed2} days) exceeds the allowed maximum of 180 days (6 months) for redirect URLs.` }), { status: 403, headers: { "Content-Type": "application/json" } });
             }
+            const grantedRedirect = applyGrantTtl(formData.get("days"), parsed2, agentGrant);
+            if (grantedRedirect.error) {
+              return new Response(JSON.stringify({ error: grantedRedirect.error }), { status: 403, headers: { "Content-Type": "application/json" } });
+            }
+            parsed2 = grantedRedirect.days;
             expireAt2 = Date.now() + parsed2 * 24 * 60 * 60 * 1e3;
           }
           const password2 = (formData.get("password") || "").toString().trim();
@@ -4473,6 +4486,7 @@ async function handleRequest(request, env, ctx) {
           return new Response(JSON.stringify({ error: "No files uploaded." }), { status: 400, headers: { "Content-Type": "application/json" } });
         }
         let maxFiles = isAdmin ? 1e3 : isGuest ? GUEST_MAX_FILES : 50;
+        maxFiles = tighterCap(maxFiles, agentGrant?.maxFiles);
         const customMaxFiles = parseInt(request.headers.get("X-Fleet-Max-Files") || "");
         if (!isNaN(customMaxFiles) && customMaxFiles > 0) {
           maxFiles = Math.min(maxFiles, customMaxFiles);
@@ -4482,11 +4496,13 @@ async function handleRequest(request, env, ctx) {
           return new Response(JSON.stringify({ error: limitMsg }), { status: 400, headers: { "Content-Type": "application/json" } });
         }
         let maxFileBytes = isAdmin ? 300 * 1024 * 1024 : isGuest ? GUEST_MAX_FILE_BYTES : 100 * 1024 * 1024;
+        maxFileBytes = tighterCap(maxFileBytes, agentGrant?.maxFileBytes);
         const customMaxFileMb = parseFloat(request.headers.get("X-Fleet-Max-File-MB") || "");
         if (!isNaN(customMaxFileMb) && customMaxFileMb > 0) {
           maxFileBytes = Math.min(maxFileBytes, customMaxFileMb * 1024 * 1024);
         }
         let maxBatchBytes = isAdmin ? 1024 * 1024 * 1024 : isGuest ? GUEST_MAX_BATCH_BYTES : 500 * 1024 * 1024;
+        maxBatchBytes = tighterCap(maxBatchBytes, agentGrant?.maxTotalBytes);
         const customMaxBatchMb = parseFloat(request.headers.get("X-Fleet-Max-Batch-MB") || "");
         if (!isNaN(customMaxBatchMb) && customMaxBatchMb > 0) {
           maxBatchBytes = Math.min(maxBatchBytes, customMaxBatchMb * 1024 * 1024);
@@ -4558,6 +4574,11 @@ async function handleRequest(request, env, ctx) {
           }
           let numDays = parseFloat(days) || 3;
           if (numDays > 7) numDays = 7;
+          const grantedFiles = applyGrantTtl(formData.get("days"), numDays, agentGrant);
+          if (grantedFiles.error) {
+            return new Response(JSON.stringify({ error: grantedFiles.error }), { status: 403, headers: { "Content-Type": "application/json" } });
+          }
+          numDays = grantedFiles.days;
           expireAt = Date.now() + numDays * 24 * 60 * 60 * 1e3;
         }
         const password = formData.get("password") ? String(formData.get("password")).trim() : "";
@@ -4986,8 +5007,15 @@ async function handleRequest(request, env, ctx) {
           return new Response(`Upload rejected: Invalid redirect target URL "${redirectTarget}". Must begin with http:// or https://.`, { status: 400 });
         }
       }
+      if (!isRedirect && agentGrant && tighterCap(1, agentGrant.maxFiles) < 1) {
+        return new Response("Upload rejected: This agent token is not permitted to upload files.", {
+          status: 403,
+          headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }
+        });
+      }
       let maxFileBytes = isAdmin ? 300 * 1024 * 1024 : isGuest ? GUEST_MAX_FILE_BYTES : 100 * 1024 * 1024;
-      if (agentGrant?.maxFileBytes && agentGrant.maxFileBytes < maxFileBytes) maxFileBytes = agentGrant.maxFileBytes;
+      maxFileBytes = tighterCap(maxFileBytes, agentGrant?.maxFileBytes);
+      maxFileBytes = tighterCap(maxFileBytes, agentGrant?.maxTotalBytes);
       const customMaxFileMb = parseFloat(request.headers.get("X-Fleet-Max-File-MB") || "");
       if (!isNaN(customMaxFileMb) && customMaxFileMb > 0) {
         maxFileBytes = Math.min(maxFileBytes, customMaxFileMb * 1024 * 1024);
@@ -5038,6 +5066,9 @@ async function handleRequest(request, env, ctx) {
           if (!isNaN(customMaxDays) && customMaxDays > 0 && days > customMaxDays) {
             return new Response(`Upload rejected: Requested TTL (${days} days) exceeds custom agent token limit of ${customMaxDays} days.`, { status: 403 });
           }
+          const grantedRedirect = applyGrantTtl(requestedDays, days, agentGrant);
+          if (grantedRedirect.error) return new Response(grantedRedirect.error, { status: 403 });
+          days = grantedRedirect.days;
           expireAt = Date.now() + days * 24 * 60 * 60 * 1e3;
         }
       } else if (isLargeUpload) {
@@ -5082,6 +5113,9 @@ async function handleRequest(request, env, ctx) {
         if (!isNaN(customMaxDays) && customMaxDays > 0 && days > customMaxDays) {
           return new Response(`Upload rejected: Requested TTL (${days} days) exceeds custom agent token limit of ${customMaxDays} days.`, { status: 403 });
         }
+        const grantedFile = applyGrantTtl(requestedDays, days, agentGrant);
+        if (grantedFile.error) return new Response(grantedFile.error, { status: 403 });
+        days = grantedFile.days;
         expireAt = Date.now() + days * 24 * 60 * 60 * 1e3;
       }
       const customMetadata = {
