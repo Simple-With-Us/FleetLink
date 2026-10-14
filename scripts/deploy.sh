@@ -61,9 +61,10 @@ require_secret APPLE_BUNDLE_ID
 echo "Bundling worker"
 node "$ROOT/scripts/bundle-worker.mjs"
 
-python3 - "$WORKDIR/metadata.json" "$D1_DATABASE_ID" <<'PY'
+R2_BUCKET_NAME="${FLEETLINK_R2_BUCKET:-fleet-shares}"
+python3 - "$WORKDIR/metadata.json" "$D1_DATABASE_ID" "$R2_BUCKET_NAME" <<'PY'
 import json, sys
-path, database_id = sys.argv[1:]
+path, database_id, r2_bucket = sys.argv[1:]
 metadata = {
     "main_module": "fleetlink-api.mjs",
     "compatibility_date": "2026-09-28",
@@ -71,6 +72,7 @@ metadata = {
     "keep_bindings": ["r2_bucket", "secret_text", "plain_text", "kv_namespace"],
     "bindings": [
         {"type": "d1", "name": "DB", "id": database_id},
+        {"type": "r2_bucket", "name": "FLEET_SHARES", "bucket_name": r2_bucket},
         {"type": "plain_text", "name": "WEBAUTHN_RP_ID", "text": __import__("os").environ["WEBAUTHN_RP_ID"]},
         {"type": "plain_text", "name": "WEBAUTHN_ORIGINS", "text": __import__("os").environ["WEBAUTHN_ORIGINS"]},
         {"type": "plain_text", "name": "WEBAUTHN_RP_NAME", "text": __import__("os").environ.get("WEBAUTHN_RP_NAME", "FleetLink")},
@@ -83,7 +85,7 @@ metadata = {
     ],
 }
 # Drop an empty clip id rather than publishing a blank plain_text binding.
-metadata["bindings"] = [b for b in metadata["bindings"] if b.get("text", "x") != ""]
+metadata["bindings"] = [b for b in metadata["bindings"] if b.get("type") != "plain_text" or b.get("text", "") != ""]
 json.dump(metadata, open(path, "w"))
 PY
 

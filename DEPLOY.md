@@ -25,7 +25,7 @@ Associated Domains already include `webcredentials:fleetlink.online` and `webcre
 | Cloudflare API token | shell env `CLOUDFLARE_API_TOKEN` | script upload, D1 create, secret bindings.  Needs Workers Scripts edit and D1 edit on the account that owns `fleetlink-api`. |
 | Cloudflare account id | shell env `CLOUDFLARE_ACCOUNT_ID` | the dedicated FleetLink account, not Usage.Jays.Services.  Do not delete `fleet-share-api`. |
 | D1 database | `scripts/provision-d1.sh`, then `D1_DATABASE_ID` | new database.  The id in `wrangler.jsonc` is from the removed rewrite and must not be reused. |
-| R2 | dashboard, not this script | uploads stay blocked until R2 is enabled.  `deploy.sh` keeps the existing `FLEET_SHARES` binding.  Re-test the HTML attachment behavior on a real object after R2 is on. |
+| R2 bucket `fleet-shares` | dedicated FleetLink account, bound as `FLEET_SHARES` | `deploy.sh` declares the binding (override with `FLEETLINK_R2_BUCKET`).  Objects were copied from Usage.Jays.Services `fleet-shares`.  The old `fleet-share-api` worker still writes there until retired. |
 | `ADMIN_SECRET` | Infisical, published as a Worker secret | existing operator portal.  Also published as `FLEET_ADMIN_SECRET`. |
 | `AGENT_SECRET` | Infisical, published as a Worker secret | existing agent header.  Also published as `FLEET_AGENT_SECRET`. |
 | `SESSION_SECRET` | Infisical, published as a Worker secret | pepper for session and agent-token hashes.  Rotating it signs everyone out. |
