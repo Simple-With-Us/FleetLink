@@ -101,6 +101,26 @@ public struct PortalAnalytics: Sendable {
     }
 }
 
+public enum FleetLinkCopy {
+    public static func explain(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Something went wrong.\u{00A0} Try again." }
+        let lower = trimmed.lowercased()
+        if lower.contains("authentication required") || lower.contains("invalid secret") || lower.contains("unauthorized") {
+            return "Sign in before you continue.\u{00A0} Add your sign-in code in Settings."
+        }
+        if lower.contains("invalid url") || lower.contains("invalid endpoint") {
+            return "That web address is not valid."
+        }
+        return trimmed
+            .replacingOccurrences(of: "Cloudflare R2", with: "storage", options: .caseInsensitive)
+            .replacingOccurrences(of: "R2", with: "storage")
+            .replacingOccurrences(of: "system asset", with: "site file", options: .caseInsensitive)
+            .replacingOccurrences(of: "slug", with: "link name", options: .caseInsensitive)
+            .replacingOccurrences(of: "TTL", with: "time limit")
+    }
+}
+
 @MainActor
 public final class PortalManager: ObservableObject {
     @Published public private(set) var shares: [PortalShare] = []
@@ -235,26 +255,6 @@ public final class PortalManager: ObservableObject {
             return false
         }
     }
-
-public enum FleetLinkCopy {
-    public static func explain(_ message: String) -> String {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return "Something went wrong.\u{00A0} Try again." }
-        let lower = trimmed.lowercased()
-        if lower.contains("authentication required") || lower.contains("invalid secret") || lower.contains("unauthorized") {
-            return "Sign in before you continue.\u{00A0} Add your sign-in code in Settings."
-        }
-        if lower.contains("invalid url") || lower.contains("invalid endpoint") {
-            return "That web address is not valid."
-        }
-        return trimmed
-            .replacingOccurrences(of: "Cloudflare R2", with: "storage", options: .caseInsensitive)
-            .replacingOccurrences(of: "R2", with: "storage")
-            .replacingOccurrences(of: "system asset", with: "site file", options: .caseInsensitive)
-            .replacingOccurrences(of: "slug", with: "link name", options: .caseInsensitive)
-            .replacingOccurrences(of: "TTL", with: "time limit")
-    }
-}
 
 public enum PortalError: LocalizedError, Sendable {
     case invalidURL
