@@ -75,6 +75,14 @@ targets:
         embed: true
       - package: sentry-cocoa
         product: Sentry
+    entitlements:
+      path: App/FleetLink.entitlements
+      properties:
+        com.apple.developer.associated-domains:
+          - applinks:fleetlink.online
+          - applinks:fleetlink.app
+          - webcredentials:fleetlink.online
+          - webcredentials:fleetlink.app
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios
