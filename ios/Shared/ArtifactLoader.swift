@@ -44,9 +44,9 @@ public final class ArtifactLoader: ObservableObject {
     public func load(url: URL, password: String? = nil) async {
         let trimmedPassword = password?.trimmingCharacters(in: .whitespacesAndNewlines)
         let providedPassword = (trimmedPassword?.isEmpty == false) ? trimmedPassword : nil
-        if providedPassword != nil {
-            activePassword = providedPassword
-        }
+        // Every load replaces the stored share password.  A later fetch must not
+        // send the previous share's secret in X-Fleet-Password.
+        activePassword = providedPassword
         state = .loading(url)
         selectedItem = nil
         itemContent = nil
