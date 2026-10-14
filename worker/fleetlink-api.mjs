@@ -4,7 +4,12 @@ import { reapCostGuards } from "./lib/cost-guards.mjs";
 import { mustForceAttachment } from "./lib/html-safety.mjs";
 import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
 import { captureWorkerException } from "./lib/sentry-scrub.mjs";
+import { randomHex } from "./lib/bytes.mjs";
 import { applyGrantTtl, lookupAgentToken, tighterCap } from "./lib/tokens.mjs";
+
+function allocateShareId() {
+  return randomHex(16);
+}
 
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
@@ -1397,11 +1402,9 @@ function renderHomeHtml(origin) {
           <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
           <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
         </div>
-        <pre class="cmd-body">mkdir -p ~/.secrets
-cp ~/Downloads/fleetlink-auth.env ~/.secrets/fleetlink-auth.env
-chmod 600 ~/.secrets/fleetlink-auth.env
-ln -sf fleetlink-auth.env ~/.secrets/fleet-share-auth.env
-ln -sf fleetlink-auth.env ~/.secrets/fleet-link-auth.env</pre>
+        <pre class="cmd-body">export FLEET_ADMIN_SECRET='replace-with-your-admin-secret'
+# or point at a KEY=value file you choose:
+# export FLEETLINK_AUTH_FILE=/path/to/fleet-link-auth.env</pre>
       </div>
 
       <h4>2. Install the <code>fleet-share</code> CLI helper:</h4>
@@ -4013,8 +4016,7 @@ async function handleRequest(request, env, ctx) {
         return new Response(JSON.stringify({ error: "Upload rejected: Unauthenticated guests cannot choose custom slugs. Please sign in to choose vanity slugs." }), { status: 403, headers: { "Content-Type": "application/json" } });
       }
       if (!slug) {
-        const randHex = Array.from(crypto.getRandomValues(new Uint8Array(3))).map((b) => b.toString(16).padStart(2, "0")).join("");
-        slug = randHex;
+        slug = allocateShareId();
       }
       if (isProtectedKey(slug, role === "admin")) {
         return new Response(JSON.stringify({ error: `Slug "${slug}" is reserved for system assets and routing.` }), { status: 400, headers: { "Content-Type": "application/json" } });
@@ -4403,8 +4405,7 @@ async function handleRequest(request, env, ctx) {
             return new Response(JSON.stringify({ error: "Upload rejected: Unauthenticated guests cannot choose custom slugs. Please sign in or use an agent token." }), { status: 403, headers: { "Content-Type": "application/json" } });
           }
           if (!slug2) {
-            const randHex = Array.from(crypto.getRandomValues(new Uint8Array(3))).map((b) => b.toString(16).padStart(2, "0")).join("");
-            slug2 = randHex;
+            slug2 = allocateShareId();
           }
           if (isProtectedKey(slug2, isAdmin)) {
             return new Response(JSON.stringify({ error: `Slug "${slug2}" is reserved for system assets and routing.` }), { status: 400, headers: { "Content-Type": "application/json" } });
@@ -4535,8 +4536,7 @@ async function handleRequest(request, env, ctx) {
           return new Response(JSON.stringify({ error: "Upload rejected: Only admins can choose a custom slug." }), { status: 403, headers: { "Content-Type": "application/json" } });
         }
         if (!slug) {
-          const randHex = Array.from(crypto.getRandomValues(new Uint8Array(3))).map((b) => b.toString(16).padStart(2, "0")).join("");
-          slug = randHex;
+          slug = allocateShareId();
         }
         slug = slug.replace(/^\/+|\/+$/g, "").toLowerCase();
         if (slug) slugCaseCache.set(slug, slug);
