@@ -1,12 +1,12 @@
-# Passkeys as Default Login
+# Passkeys as Default Login + User Dashboard
 
-Implemented under branch grok/passkeys-multi-user.
+**Owner confirmation:** There should be a dashboard/portal for users too.
 
-- Sole login type for initial multi-user cutover.
-- WebAuthn with resident keys preferred.
-- Endpoints: /auth/passkey/{register,login}/{start,finish}
-- Session via existing fl_session cookie.
-- iOS can use native platform credentials or web flow.
-- No passwords. OAuth deferred.
+## Alignment
+- Web dashboard at /dashboard (from prior PR #60): Account, Shares, Agent Tokens, Teams.
+- iOS PortalView already exists for analytics and share management, session-aware.
+- Passkeys auth feeds into the existing session/user model so the dashboard/portal works for signed-in users.
 
-See src/passkeys.ts for stubs. Full verification requires @simplewebauthn/server dependency.
+Passkeys are the login method; the dashboard/portal is the management surface, matching the removed TS multi-user system and FL-1 plan.
+
+No deploy without cutover blockers addressed and owner go-ahead.
