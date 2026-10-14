@@ -1,3 +1,11 @@
+import { appleAppSiteAssociation } from "./lib/aasa.mjs";
+import { handleAccountRoutes } from "./lib/account-routes.mjs";
+import { reapCostGuards } from "./lib/cost-guards.mjs";
+import { mustForceAttachment } from "./lib/html-safety.mjs";
+import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
+import { captureWorkerException } from "./lib/sentry-scrub.mjs";
+import { lookupAgentToken } from "./lib/tokens.mjs";
+
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -923,10 +931,9 @@ function renderLoginHtml(origin, errorMsg, isLoggedOut) {
       <div style="font-size: 1.75rem;">\u26A1</div>
       <div style="font-weight: 800; font-size: 1.2rem; color: #0f172a;">Fleet<span style="color:var(--primary);">Link</span></div>
     </div>
-    <h1>Sign In</h1>
-    <p>Sign in with your username, email, account role, or secret token.</p>
     ${isLoggedOut ? `<div class="msg-box success-box"><strong>\u2713 Signed Out:</strong> You have been successfully signed out.</div>` : ""}
     ${errorMsg ? `<div class="msg-box error-box"><strong>Error:</strong> ${escapeHtml(errorMsg)}</div>` : ""}
+    ${passkeyLoginMarkup()}
     <form method="POST" action="/login" id="login-form">
       <div class="form-group">
         <label for="username">Username, Email, or Secret Token:</label>
@@ -941,9 +948,12 @@ function renderLoginHtml(origin, errorMsg, isLoggedOut) {
         <input type="checkbox" id="remember" name="remember" value="true" checked>
         <label for="remember" style="margin:0;font-weight:normal;cursor:pointer;">Keep me signed in (30 days)</label>
       </div>
-      <button type="submit" id="btn-login-submit">Sign In</button>
+      <button type="submit" id="btn-login-submit">Sign In With Operator Secret</button>
     </form>
+    </details>
+    ${passkeyLoginScript()}
     <div class="nav-links">
+      <a href="/dashboard">Dashboard</a>
       <a href="/">&larr; FleetLink Home</a>
       <a href="/portal">Admin Portal</a>
       <a href="/privacy">Privacy Policy</a>
@@ -3769,14 +3779,15 @@ function renderPortalHtml(overview, origin) {
 }
 __name(renderPortalHtml, "renderPortalHtml");
 __name2(renderPortalHtml, "renderPortalHtml");
-var index_default = {
-  async fetch(request, env) {
+async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
     const hostname = url.hostname;
     let key = url.pathname.slice(1);
     const adminSecret = (env.ADMIN_SECRET || env.FLEET_ADMIN_SECRET || "").trim();
     const agentSecret = (env.AGENT_SECRET || env.FLEET_AGENT_SECRET || "").trim();
     const secrets = { adminSecret, agentSecret };
+    const accountResponse = await handleAccountRoutes(request, env, ctx);
+    if (accountResponse) return accountResponse;
     if (request.headers.get("X-Fleet-Auth")) {
       return new Response(JSON.stringify({
         error: "Upload rejected: Legacy 'X-Fleet-Auth' header is retired. Please authenticate using 'X-Fleet-Admin' (admin operations) or 'X-Fleet-Agent' (fleet agents)."
@@ -4620,7 +4631,7 @@ var index_default = {
     }
     if (request.method === "GET" || request.method === "HEAD") {
       if (key === ".well-known/apple-app-site-association" || key === "apple-app-site-association") {
-        const aasa = {
+        const aasa = appleAppSiteAssociation(env) || {
           applinks: {
             apps: [],
             details: [
@@ -4871,9 +4882,10 @@ var index_default = {
         headers.set("content-type", "application/octet-stream");
         headers.set("content-disposition", `attachment; filename="${filename}"`);
         contentType = "application/octet-stream";
-      } else if (keyLc.endsWith(".html") || keyLc.endsWith(".htm")) {
-        // P0 hotfix 2026-10-13: uploaded HTML must never render inline, even when the
-        // R2 object carries a stored text/html content-type from the uploader.
+      } else if (mustForceAttachment(object.key, headers.get("content-type"))) {
+        // P0 hotfix 2026-10-13, extended for the #75 review: uploaded HTML must never
+        // render inline.  Match the key extension and the stored content type, so a
+        // text/html object named payload.html.bak or notes.xhtml still downloads.
         headers.set("content-type", "application/octet-stream");
         headers.set("content-disposition", `attachment; filename="${filename}"`);
         contentType = "application/octet-stream";
@@ -4926,7 +4938,7 @@ var index_default = {
         return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
       }
       const response = new Response(object.body, { headers });
-      if (contentType && contentType.includes("text/html")) {
+      if (contentType && contentType.includes("text/html") && !mustForceAttachment(object.key, headers.get("content-type"))) {
         return new HTMLRewriter().on("head", {
           element(e) {
             e.append('<meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.Clip, app-clip-display=card">', { html: true });
@@ -4940,8 +4952,10 @@ var index_default = {
     }
     if (request.method === "PUT") {
       const putAuth = await authenticate(request, secrets);
-      const isAdmin = putAuth.isAdmin;
-      const isAgent = putAuth.isAgent;
+      let isAdmin = putAuth.isAdmin;
+      let isAgent = putAuth.isAgent;
+      const agentGrant = !isAdmin && !isAgent ? await lookupAgentToken(request, env) : null;
+      if (agentGrant) isAgent = true;
       const isGuest = !isAdmin && !isAgent;
       if (isGuest) {
         return new Response("Upload rejected: Authentication required.  Provide a valid X-Fleet-Admin or X-Fleet-Agent header.", {
@@ -4962,6 +4976,9 @@ var index_default = {
       const redirectTarget = (request.headers.get("X-Fleet-Redirect") || request.headers.get("X-Redirect-To") || "").trim();
       const isRedirect = Boolean(redirectTarget);
       if (isRedirect) {
+        if (agentGrant && agentGrant.allowRedirects === false) {
+          return new Response("Upload rejected: This agent token is not permitted to create redirect URLs.", { status: 403 });
+        }
         if (request.headers.get("X-Fleet-Allow-Redirects") === "false") {
           return new Response("Upload rejected: This agent token is not permitted to create redirect URLs.", { status: 403 });
         }
@@ -4970,6 +4987,7 @@ var index_default = {
         }
       }
       let maxFileBytes = isAdmin ? 300 * 1024 * 1024 : isGuest ? GUEST_MAX_FILE_BYTES : 100 * 1024 * 1024;
+      if (agentGrant?.maxFileBytes && agentGrant.maxFileBytes < maxFileBytes) maxFileBytes = agentGrant.maxFileBytes;
       const customMaxFileMb = parseFloat(request.headers.get("X-Fleet-Max-File-MB") || "");
       if (!isNaN(customMaxFileMb) && customMaxFileMb > 0) {
         maxFileBytes = Math.min(maxFileBytes, customMaxFileMb * 1024 * 1024);
@@ -5177,6 +5195,22 @@ var index_default = {
       }
     }
     return new Response("Method Not Allowed: Only GET, HEAD, PUT, POST, and DELETE are supported.", { status: 405 });
+  }
+var index_default = {
+  async fetch(request, env, ctx) {
+    try {
+      return await handleRequest(request, env, ctx);
+    } catch (err) {
+      const pending = captureWorkerException(err, request, env);
+      if (ctx && ctx.waitUntil) ctx.waitUntil(pending);
+      else pending.catch(() => {});
+      throw err;
+    }
+  },
+  async scheduled(_event, env, ctx) {
+    const job = reapCostGuards(env);
+    if (ctx && ctx.waitUntil) ctx.waitUntil(job);
+    else await job;
   }
 };
 export {

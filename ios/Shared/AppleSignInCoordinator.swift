@@ -1,10 +1,11 @@
 import AuthenticationServices
+import Combine
 import CryptoKit
 import Foundation
 import Security
-import SwiftUI
+import UIKit
 
-/// Native Sign in with Apple via `ASAuthorizationAppleIDProvider`.
+/// Apple Sign In and the GitHub/Google web session are not presented.
 ///
 /// The worker implements the Apple *web* flow (`/auth/apple/start` →
 /// `form_post` → `/auth/apple/callback`).  That flow mints its own client

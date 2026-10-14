@@ -6,6 +6,8 @@
 	<array>
 		<string>applinks:fleetlink.online</string>
 		<string>applinks:fleetlink.app</string>
+		<string>webcredentials:fleetlink.online</string>
+		<string>webcredentials:fleetlink.app</string>
 	</array>
 </dict>
 </plist>

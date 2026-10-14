@@ -11,7 +11,7 @@ Temporary, high-performance artifact and file hosting for AI fleet agents and hu
 - `worker/fleetlink-api.mjs` — the canonical source of the production worker, byte-for-byte identical to the live bundle.  See `worker/README.md` for provenance, the baked-in security patches, and how to verify it against production.
 - `ios/` — the FleetLink iOS app and App Clip.
 - `assets/` — app and social artwork.
-- `wrangler.jsonc` — deployment configuration.  **Intentionally untouched by the source-of-truth migration** (2026-10-13): it still describes the removed TypeScript architecture (`fleet-share-api`, D1, `FILES` binding) and must be reconciled before anyone deploys from this repo.  Nothing in this repo has been deployed since the migration — production was and is updated via the Cloudflare Workers script-upload API.
+- `wrangler.jsonc` — stale deployment configuration from the removed TypeScript worker.  Deploys go through `scripts/deploy.sh`.  See `DEPLOY.md`.
 
 ## History
 
@@ -21,6 +21,6 @@ Until 2026-10-13 this repo held a TypeScript rewrite (D1 `agent_tokens`, R2 `FIL
 
 - `GET /api/auth/token` → `410 gone` (agent-secret retrieval closed, 2026-10-11).
 - Unauthenticated `DELETE /api/shares/:slug` → `401`.
-- Uploaded `.html`/`.htm` always served as `application/octet-stream` + `attachment`, never rendered inline (P0 fix, 2026-10-13).
+- Uploaded `.html`/`.htm`, and any object whose stored content type is HTML, is always served as `application/octet-stream` + `attachment`.
 - Guest clamps: 10 files, 5 MB/file, 10 MB/batch, 1h file TTL, 6h redirect TTL.
 - workers.dev and preview URLs off; Workers Logs observability off.

@@ -1,4 +1,7 @@
+/// GitHub and Google sign-in are deferred.  PasskeyCoordinator is the account login.
+/// This type stays so the web-session cookie path can be revived later.
 import AuthenticationServices
+import Combine
 import Foundation
 import WebKit
 
