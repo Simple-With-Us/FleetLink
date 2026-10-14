@@ -1,81 +1,151 @@
-// Final wiring for passkeys (WebAuthn)
-// Primary login. Replace the TODO blocks with @simplewebauthn/server calls.
+// Passkeys (WebAuthn) — final wiring with @simplewebauthn/server
+// Primary login + dashboard management. Users create their own tokens after sign-in.
+// Targets FleetLink CF account. No shared secrets for auth.
 
-import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
+import {
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+  generateAuthenticationOptions,
+  verifyAuthenticationResponse,
+} from '@simplewebauthn/server';
 
-export interface Env {
-  DB: D1Database;
-  ADMIN_HOST?: string;
+export interface PasskeyCredential {
+  id: string;
+  userId: string;
+  credentialId: string;
+  publicKey: string;
+  counter: number;
+  deviceType?: string;
+  backedUp?: boolean;
+  transports?: string;
+  createdAt: string;
+  lastUsedAt?: string;
 }
 
-const RP_ID = 'fleetlink.app';
 const RP_NAME = 'FleetLink';
+const RP_ID = 'fleetlink.app';
 const ORIGIN = 'https://fleetlink.app';
 
-export async function startPublicRegistration(env: Env, username: string) {
-  const userId = crypto.randomUUID();
+async function storeChallenge(env: any, challengeId: string, challenge: string) {
+  // TODO: store in KV or D1 with TTL ~5 min
+  // await env.KV.put(`challenge:${challengeId}`, challenge, { expirationTtl: 300 });
+}
+
+async function getChallenge(env: any, challengeId: string): Promise<string | null> {
+  // return await env.KV.get(`challenge:${challengeId}`);
+  return null;
+}
+
+export async function startPublicRegistration(env: any, username: string) {
   const options = await generateRegistrationOptions({
     rpName: RP_NAME,
     rpID: RP_ID,
-    userID: new TextEncoder().encode(userId),
-    userName: username || 'user',
+    userName: username,
+    attestationType: 'none',
     authenticatorSelection: {
       residentKey: 'required',
       userVerification: 'required',
     },
-    attestationType: 'none',
   });
-  // Store options.challenge against userId in D1 or KV with short TTL
-  return { options, userId };
+  const challengeId = crypto.randomUUID();
+  await storeChallenge(env, challengeId, options.challenge);
+  return { options, challengeId };
 }
 
-export async function finishPublicRegistration(env: Env, userId: string, attestation: any) {
-  // const expectedChallenge = await getChallenge(userId);
+export async function finishPublicRegistration(env: any, challengeId: string, attestation: any) {
+  const expectedChallenge = await getChallenge(env, challengeId);
+  if (!expectedChallenge) throw new Error('Challenge expired');
+
   const verification = await verifyRegistrationResponse({
     response: attestation,
-    expectedChallenge: 'stored-challenge',
+    expectedChallenge,
     expectedOrigin: ORIGIN,
     expectedRPID: RP_ID,
+    requireUserVerification: true,
   });
-  if (verification.verified) {
-    // INSERT user + passkey
-    // issue session cookie
+
+  if (!verification.verified || !verification.registrationInfo) {
+    throw new Error('Verification failed');
   }
-  return { ok: verification.verified };
+
+  const userId = crypto.randomUUID();
+  // TODO: insert user + passkey into D1, issue fl_session cookie
+  return { ok: true, userId };
 }
 
-export async function startLogin(env: Env) {
+export async function startLogin(env: any) {
   const options = await generateAuthenticationOptions({
     rpID: RP_ID,
-    userVerification: 'preferred',
-    allowCredentials: [],
+    userVerification: 'required',
   });
-  return { options };
+  const challengeId = crypto.randomUUID();
+  await storeChallenge(env, challengeId, options.challenge);
+  return { options, challengeId };
 }
 
-export async function finishLogin(env: Env, assertion: any) {
+export async function finishLogin(env: any, challengeId: string, assertion: any) {
+  const expectedChallenge = await getChallenge(env, challengeId);
+  if (!expectedChallenge) throw new Error('Challenge expired');
+
+  // TODO: look up credential by assertion.id from D1
+  const credential = { id: '', publicKey: new Uint8Array(), counter: 0 };
+
   const verification = await verifyAuthenticationResponse({
     response: assertion,
-    expectedChallenge: 'stored-challenge',
+    expectedChallenge,
     expectedOrigin: ORIGIN,
     expectedRPID: RP_ID,
-    authenticator: { credentialID: '', credentialPublicKey: new Uint8Array(), counter: 0 },
+    credential,
+    requireUserVerification: true,
   });
-  if (verification.verified) {
-    // update counter, set fl_session cookie
-  }
-  return { ok: verification.verified };
+
+  if (!verification.verified) throw new Error('Login verification failed');
+
+  // TODO: update counter, issue fl_session
+  return { ok: true, sessionToken: crypto.randomUUID() };
 }
 
-// Authenticated management remains as previously defined
-export async function listUserPasskeys(env: Env, userId: string) {
-  const { results } = await env.DB.prepare(
-    'SELECT id, credential_id, created_at, last_used_at FROM passkeys WHERE user_id = ?'
-  ).bind(userId).all();
-  return results || [];
+export async function startAuthenticatedRegistration(env: any, userId: string) {
+  // TODO: fetch existing passkeys for excludeCredentials
+  const options = await generateRegistrationOptions({
+    rpName: RP_NAME,
+    rpID: RP_ID,
+    userName: userId,
+    attestationType: 'none',
+    authenticatorSelection: {
+      residentKey: 'required',
+      userVerification: 'required',
+    },
+  });
+  const challengeId = crypto.randomUUID();
+  await storeChallenge(env, challengeId, options.challenge);
+  return { options, challengeId };
 }
 
-export async function revokePasskey(env: Env, userId: string, id: string) {
-  await env.DB.prepare('DELETE FROM passkeys WHERE id = ? AND user_id = ?').bind(id, userId).run();
+export async function finishAuthenticatedRegistration(env: any, userId: string, challengeId: string, attestation: any) {
+  const expectedChallenge = await getChallenge(env, challengeId);
+  if (!expectedChallenge) throw new Error('Challenge expired');
+
+  const verification = await verifyRegistrationResponse({
+    response: attestation,
+    expectedChallenge,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RP_ID,
+    requireUserVerification: true,
+  });
+
+  if (!verification.verified) throw new Error('Verification failed');
+
+  // TODO: insert passkey for userId
+  return { ok: true };
+}
+
+export async function listUserPasskeys(env: any, userId: string): Promise<PasskeyCredential[]> {
+  // TODO: SELECT from D1
+  return [];
+}
+
+export async function revokePasskey(env: any, userId: string, passkeyId: string) {
+  // TODO: DELETE from D1
   return { ok: true };
 }

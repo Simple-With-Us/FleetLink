@@ -1,0 +1,7 @@
+{
+  "name": "fleetlink",
+  "private": true,
+  "dependencies": {
+    "@simplewebauthn/server": "^11.0.0"
+  }
+}
