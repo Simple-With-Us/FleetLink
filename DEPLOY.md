@@ -6,9 +6,9 @@ This is the approval list for putting FL-1 on `fleetlink-api`.  Nothing in this 
 
 A passkey is bound to one relying party ID.  `fleetlink.online` and `fleetlink.app` are different registrable domains, so one passkey cannot be valid on both.
 
-Recommended choice: **RP ID `fleetlink.app`**, origins `https://fleetlink.app`.  That is the account host.  Share HTML is served on `fleetlink.online`, and the session cookie should not be issued there.  The iOS app reads `FleetLinkAccountOrigin` (default `https://fleetlink.app`) and the worker allowlist must match.
+Approved choice: **RP ID `fleetlink.online`**, origin `https://fleetlink.online`.  The iOS app reads `FleetLinkAccountOrigin` (default `https://fleetlink.online`) and every account call goes there.  `https://fleetlink.app` is a share mirror.  A ceremony whose Origin is `https://fleetlink.app` is rejected, because a passkey cannot be valid for both registrable domains.
 
-The other choice is RP ID `fleetlink.online` with origin `https://fleetlink.online`.  If you pick that, change `FleetLinkAccountOrigin` in `ios/project.yml` and ship an app build before anyone creates a passkey.  Do not list both origins unless you have accepted that a ceremony on the share host can set a session cookie there.
+Do not add `https://fleetlink.app` to `WEBAUTHN_ORIGINS`.  Shipping an app build whose account origin still says `https://fleetlink.app` makes passkey registration call the host the worker refuses.
 
 Set these Infisical values to the choice you approve:
 
@@ -16,7 +16,7 @@ Set these Infisical values to the choice you approve:
 - `WEBAUTHN_ORIGINS` (comma-separated, exact `https://` origins)
 - `WEBAUTHN_RP_NAME` (optional, default `FleetLink`)
 
-Associated Domains already include `webcredentials:fleetlink.online` and `webcredentials:fleetlink.app`, so either choice can succeed once the app is installed.  The server still accepts only the configured origin list.
+Associated Domains include `webcredentials:fleetlink.online` and `webcredentials:fleetlink.app`.  The server accepts only `https://fleetlink.online`.  The association file keeps the shipped app ids (`online.fleetlink`, `online.fleetlink.ios`) and both clip ids (`online.fleetlink.Clip`, `online.fleetlink.ios.Clip`) so the smart banner keeps opening the clip.
 
 ## Approvals and secrets
 

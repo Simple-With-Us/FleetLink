@@ -17,14 +17,14 @@ public final class SessionManager: ObservableObject {
     private static let passkeyBearerAccount = "account.passkeyBearer"
     public static let sessionCookieName = "fl_session"
 
-    /// Account API host.  Passkeys are bound to one RP ID, so this stays on the
-    /// account host chosen in DEPLOY.md.  The Info.plist key overrides the default.
+    /// Account API host.  Passkeys are bound to RP ID fleetlink.online, so account
+    /// calls stay on that origin.  The Info.plist key overrides the default.
     public static var accountOrigin: URL {
         if let raw = Bundle.main.object(forInfoDictionaryKey: "FleetLinkAccountOrigin") as? String,
            let url = URL(string: raw) {
             return url
         }
-        return URL(string: "https://fleetlink.app")!
+        return URL(string: "https://fleetlink.online")!
     }
 
     public static var portalOrigin: URL { accountOrigin }
