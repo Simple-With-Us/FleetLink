@@ -1,37 +1,29 @@
-# Passkeys (Primary) + GitHub/Apple/Google + Dashboard + iOS
+# Passkeys (Primary) + GitHub/Apple/Google + Dashboard + iOS — Structural Complete
+
+## Authentication model
+No shared admin/agent secrets. Login is via passkeys (primary) or GitHub/Apple/Google (secondary). After sign-in, users create their own agent tokens in the dashboard/app. Old ADMIN_SECRET / AGENT_SECRET are retired.
 
 ## Cloudflare account
-Must use the dedicated FleetLink Cloudflare account (worker `fleetlink-api`). Never touch the old `fleet-share-api` worker on the Usage.Jays.Services account. Deploys go through the Cloudflare Workers script-upload API, not wrangler from this repo until wrangler.jsonc is reconciled.
+Must use the dedicated FleetLink Cloudflare account (worker `fleetlink-api`). Never touch the old `fleet-share-api` worker on the Usage.Jays.Services account. Deploys go through the Cloudflare Workers script-upload API.
 
 ## Owner direction (2026-10-14)
 Don’t worry about losing files. Nothing essential is stored there. Everyone already lost access too. Root-path compatibility and existing seat access are no longer hard blockers for cutover.
 
-## Endpoints implemented (stubs)
+## Completed on branch
+- D1 migration `migrations/0006_passkeys.sql` (passkeys table with user FK, indexes).
+- `src/passkeys.ts` with full function set:
+  - Public registration/login start+finish
+  - Authenticated registration (dashboard)
+  - listUserPasskeys / revokePasskey
+- Docs for dashboard, iOS, OAuth, auth model, and cutover update.
+- Plan for Passkeys panel on /dashboard and PortalView.
 
-**Public (sign-in):**
-- POST /auth/passkey/register/start
-- POST /auth/passkey/register/finish
-- POST /auth/passkey/login/start
-- POST /auth/passkey/login/finish
+## Remaining for production
+- Add `@simplewebauthn/server` dependency and replace stubs with real verifyRegistrationResponse / verifyAuthenticationResponse.
+- Wire `handlePasskeyRoutes` into the main worker router.
+- Implement session cookie issuance (signed, HttpOnly) and challenge storage (KV or D1).
+- Add the Passkeys panel UI to the dashboard and iOS PortalView.
+- Set OAuth secrets and SESSION_SECRET on the FleetLink account.
+- Deploy via script-upload after staging verification.
 
-**Authenticated (dashboard / iOS management):**
-- POST /api/user/passkeys/register/start
-- POST /api/user/passkeys/register/finish
-- GET /api/user/passkeys
-- DELETE /api/user/passkeys/:id
-
-## Dashboard
-- /dashboard Passkeys panel: list, register additional, revoke.
-- Shows linked GitHub / Apple / Google identities.
-
-## iOS
-- PortalView / AccountView: Passkeys section for list / register / revoke.
-- Sign-in buttons for Passkeys (native), GitHub, Apple, Google.
-
-## Next
-- Wire into worker router.
-- Add @simplewebauthn/server dependency.
-- D1 migration for passkeys table.
-- Full verification and session cookie issuance.
-
-Aligned with removed TS system and FL-1. Path/access blockers relaxed. Deploy only to the FleetLink account. No production deploy yet.
+Aligned with removed TS system and FL-1. Structural pieces are in place. Ready for final wiring and dependency addition.
