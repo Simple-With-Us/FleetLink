@@ -83,4 +83,15 @@ SELECT 'it''s -- still a string';
     "CREATE TABLE users (id TEXT)",
     "SELECT 'it''s -- still a string'",
   ]);
+
+  const multiline = splitSqlStatements(`INSERT INTO notes (body) VALUES ('line one
+-- this dash pair stays inside the string
+line two'); -- trailing note
+-- real comment
+SELECT 1;
+`);
+  assert.deepEqual(multiline, [
+    "INSERT INTO notes (body) VALUES ('line one\n-- this dash pair stays inside the string\nline two')",
+    "SELECT 1",
+  ]);
 });

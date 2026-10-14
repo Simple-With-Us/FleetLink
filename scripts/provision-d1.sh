@@ -57,16 +57,21 @@ def split_sql_statements(sql):
     lines sit above a statement.  Splitting first would glue those comments to
     the next statement and the old startswith("--") filter would drop it.
     Quotes are respected so `--` inside a string stays part of the statement.
+    A string may span lines.  The quote flag is carried forward so `--` on a
+    continuation line is not treated as a comment.
     """
-    cleaned = [_strip_sql_line_comment(line) for line in sql.splitlines()]
+    cleaned = []
+    in_string = False
+    for line in sql.splitlines():
+        stripped, in_string = _strip_sql_line_comment(line, in_string)
+        cleaned.append(stripped)
     text = "\n".join(cleaned)
     return [part.strip() for part in text.split(";") if part.strip()]
 
 
-def _strip_sql_line_comment(line):
+def _strip_sql_line_comment(line, in_string=False):
     out = []
     i = 0
-    in_string = False
     while i < len(line):
         ch = line[i]
         if in_string:
@@ -88,7 +93,7 @@ def _strip_sql_line_comment(line):
             break
         out.append(ch)
         i += 1
-    return "".join(out)
+    return "".join(out), in_string
 # --- end split_sql_statements ---
 
 root, api, db_id = sys.argv[1:]
