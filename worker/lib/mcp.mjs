@@ -108,7 +108,8 @@ const ToolCallParamsSchema = z.object({
 }).strict();
 
 const UpstreamJsonSchema = z.union([z.record(z.unknown()), z.array(z.unknown())]);
-const UpstreamErrorSchema = z.object({ error: z.string() });
+// Unknown keys fail the parse.  extractMessage then returns the raw body so a new upstream field stays visible.
+const UpstreamErrorSchema = z.object({ error: z.string() }).strict();
 
 const TOOLS = [
   {

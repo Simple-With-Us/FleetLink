@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import worker from "../worker/fleetlink-api.mjs";
+import { handleMcp } from "../worker/lib/mcp.mjs";
 import { hashSessionToken } from "../worker/lib/sessions.mjs";
 import { createAgentToken, revokeAgentToken } from "../worker/lib/tokens.mjs";
 import { accountEnv, openAccountDb } from "./d1-memory.mjs";
@@ -800,6 +801,41 @@ test("create_link, renew, delete, and list follow the HTTP handlers", async () =
   assert.equal(accountWrite.body.result.isError, true);
   assert.match(toolText(accountWrite.body), /cannot write shares/);
   assert.equal(accountWrite.text.includes(session), false);
+});
+
+test("upstream error JSON rejects unknown keys instead of stripping them", async () => {
+  async function toolError(bodyText, status) {
+    const response = await handleMcp(new Request("https://fleetlink.online/mcp", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer test"
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 7,
+        method: "tools/call",
+        params: { name: "fleetlink_delete_share", arguments: { slug: "gone" } }
+      })
+    }), {}, {
+      authenticate: async () => ({ isAdmin: true }),
+      call: async () => new Response(bodyText, {
+        status,
+        headers: { "content-type": "application/json" }
+      })
+    });
+    const body = await response.json();
+    assert.equal(body.result.isError, true);
+    return toolText(body);
+  }
+
+  const exact = '{"error":"Share gone."}';
+  assert.equal(await toolError(exact, 404), "Share gone.");
+
+  const drifted = '{"error":"Share gone.","code":"extra"}';
+  const surfaced = await toolError(drifted, 404);
+  assert.equal(surfaced, drifted);
+  assert.equal(surfaced.includes("code"), true);
 });
 
 test("storage failures and anonymous deletes stay generic and unauthorized", async () => {
