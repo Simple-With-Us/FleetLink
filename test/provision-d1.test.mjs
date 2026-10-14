@@ -94,4 +94,21 @@ SELECT 1;
     "INSERT INTO notes (body) VALUES ('line one\n-- this dash pair stays inside the string\nline two')",
     "SELECT 1",
   ]);
+
+  assert.deepEqual(
+    splitSqlStatements("SELECT 'multi\n--comment\nline' FROM t;"),
+    ["SELECT 'multi\n--comment\nline' FROM t"],
+  );
+
+  assert.deepEqual(
+    splitSqlStatements(`INSERT INTO notes (body) VALUES ('multi
+--comment
+line; still');
+SELECT 1;
+`),
+    [
+      "INSERT INTO notes (body) VALUES ('multi\n--comment\nline; still')",
+      "SELECT 1",
+    ],
+  );
 });

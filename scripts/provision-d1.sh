@@ -56,44 +56,43 @@ def split_sql_statements(sql):
     A `--` comment runs to the end of the line, including when several comment
     lines sit above a statement.  Splitting first would glue those comments to
     the next statement and the old startswith("--") filter would drop it.
-    Quotes are respected so `--` inside a string stays part of the statement.
-    A string may span lines.  The quote flag is carried forward so `--` on a
-    continuation line is not treated as a comment.
+    One pass tracks single quotes across newlines, so `--` and `;` inside a
+    string stay part of the statement.  A doubled quote (`''`) is an escaped
+    quote, not the end of the string.
     """
-    cleaned = []
-    in_string = False
-    for line in sql.splitlines():
-        stripped, in_string = _strip_sql_line_comment(line, in_string)
-        cleaned.append(stripped)
-    text = "\n".join(cleaned)
-    return [part.strip() for part in text.split(";") if part.strip()]
-
-
-def _strip_sql_line_comment(line, in_string=False):
-    out = []
+    statements = []
+    buf = []
     i = 0
-    while i < len(line):
-        ch = line[i]
-        if in_string:
-            out.append(ch)
-            if ch == "'":
-                if i + 1 < len(line) and line[i + 1] == "'":
-                    out.append(line[i + 1])
-                    i += 2
-                    continue
-                in_string = False
-            i += 1
-            continue
+    n = len(sql)
+    in_string = False
+    while i < n:
+        ch = sql[i]
         if ch == "'":
-            in_string = True
-            out.append(ch)
+            buf.append(ch)
+            if in_string and i + 1 < n and sql[i + 1] == "'":
+                buf.append(sql[i + 1])
+                i += 2
+                continue
+            in_string = not in_string
             i += 1
             continue
-        if ch == "-" and i + 1 < len(line) and line[i + 1] == "-":
-            break
-        out.append(ch)
+        if not in_string and ch == "-" and i + 1 < n and sql[i + 1] == "-":
+            while i < n and sql[i] != "\n":
+                i += 1
+            continue
+        if not in_string and ch == ";":
+            statement = "".join(buf).strip()
+            if statement:
+                statements.append(statement)
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
         i += 1
-    return "".join(out), in_string
+    statement = "".join(buf).strip()
+    if statement:
+        statements.append(statement)
+    return statements
 # --- end split_sql_statements ---
 
 root, api, db_id = sys.argv[1:]
