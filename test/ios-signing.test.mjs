@@ -4,8 +4,8 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { signAscJwt, selectProfiles, assertProfileBundle, buildAlreadyUploaded } from "../scripts/ios-install-profiles.mjs";
-import { loadSigning } from "../scripts/ios-load-signing.mjs";
+import { signAscJwt, selectProfiles, assertProfileBundle, buildAlreadyUploaded, AppsResponseSchema, BuildsResponseSchema, ProfilesResponseSchema } from "../scripts/ios-install-profiles.mjs";
+import { loadSigning, SecretsResponseSchema } from "../scripts/ios-load-signing.mjs";
 
 const root = new URL("..", import.meta.url);
 
@@ -174,7 +174,7 @@ test("ASC jwt and profile selection stay on the FleetLink App Store profiles", a
   );
 });
 
-test("Infisical login and secret payloads are rejected when the shape is wrong", async () => {
+test("Infisical login payload is rejected when the shape is wrong", async () => {
   const dir = mkdtempSync(join(tmpdir(), "fl-sign-"));
   await assert.rejects(
     () => loadSigning({
@@ -190,4 +190,32 @@ test("Infisical login and secret payloads are rejected when the shape is wrong",
     }),
     /unexpected shape/
   );
+});
+
+test("Infisical secrets payload is rejected when the shape is wrong", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "fl-sign-"));
+  const env = {
+    INFISICAL_CLIENT_ID: "client",
+    INFISICAL_CLIENT_SECRET: "secret",
+    INFISICAL_PROJECT_ID: "fleetlink-project",
+    INFISICAL_ASC_PROJECT_ID: "ops-project"
+  };
+  const fetchImpl = async (url) => {
+    const href = String(url);
+    if (href.endsWith("/api/v1/auth/universal-auth/login")) return jsonResponse({ accessToken: "token" });
+    return jsonResponse({ secrets: [{ secretValue: "present-without-a-name" }] });
+  };
+  await assert.rejects(
+    () => loadSigning({ env, fetchImpl, log() {}, githubEnv: join(dir, "github.env") }),
+    /Infisical read \/asc returned an unexpected shape/
+  );
+  const empty = SecretsResponseSchema.safeParse({ secrets: null });
+  assert.equal(empty.success, true);
+  assert.deepEqual(empty.data.secrets, []);
+  const blank = SecretsResponseSchema.safeParse({ secrets: [{ secretKey: "ASC_KEY_ID", secretValue: null }] });
+  assert.equal(blank.success, true);
+  assert.equal(blank.data.secrets[0].secretValue, "");
+  assert.equal(AppsResponseSchema.safeParse({ data: [] }).success, true);
+  assert.equal(BuildsResponseSchema.safeParse({ data: [{ id: "1" }] }).success, true);
+  assert.equal(ProfilesResponseSchema.safeParse({ nope: true }).success, false);
 });

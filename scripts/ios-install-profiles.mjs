@@ -12,15 +12,15 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // App Store Connect returns links, relationships, and paging beside these fields.
 // Unknown fields are ignored so a healthy payload is not rejected.
-const AppsResponseSchema = z.object({
+export const AppsResponseSchema = z.object({
   data: z.array(z.object({ id: z.string().min(1) }).passthrough())
 }).passthrough();
 
-const BuildsResponseSchema = z.object({
+export const BuildsResponseSchema = z.object({
   data: z.array(z.object({ id: z.string().min(1) }).passthrough())
 }).passthrough();
 
-const ProfilesResponseSchema = z.object({
+export const ProfilesResponseSchema = z.object({
   data: z.array(z.object({
     attributes: z.object({
       name: z.string().min(1),

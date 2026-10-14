@@ -11,15 +11,15 @@ const SITE = "https://app.infisical.com";
 
 // Infisical adds id, version, and folder fields beside secretKey and secretValue.
 // Unknown fields are ignored.  A strict object would reject a healthy response.
-const LoginResponseSchema = z.object({
+export const LoginResponseSchema = z.object({
   accessToken: z.string().min(1)
 }).passthrough();
 
-const SecretsResponseSchema = z.object({
+export const SecretsResponseSchema = z.object({
   secrets: z.array(z.object({
     secretKey: z.string().min(1),
-    secretValue: z.string()
-  }).passthrough())
+    secretValue: z.string().nullish().transform((value) => value ?? "")
+  }).passthrough()).nullish().transform((value) => value ?? [])
 }).passthrough();
 
 function parseBody(schema, body, label) {
