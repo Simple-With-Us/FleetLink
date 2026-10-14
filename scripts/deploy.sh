@@ -104,8 +104,16 @@ UPLOAD="$(curl --config "$WORKDIR/curl.cfg" -sS -X PUT \
   "${API}/workers/scripts/${SCRIPT_NAME}" \
   -F "metadata=@${WORKDIR}/metadata.json;type=application/json" \
   -F "fleetlink-api.mjs=@${ROOT}/dist/fleetlink-api.mjs;type=application/javascript+module")"
-python3 -c 'import json,sys; body=json.load(sys.stdin);
-raise SystemExit("script upload failed: " + json.dumps(body.get("errors"))) if not body.get("success") else print("Script uploaded")' <<<"$UPLOAD"
+# A conditional expression used as the operand of raise evaluates print() to
+# None on success, and raise None is a TypeError.  set -e then aborts the script.
+python3 -c '
+import json, sys
+body = json.load(sys.stdin)
+if not body.get("success"):
+    raise SystemExit("script upload failed: " + json.dumps(body.get("errors")))
+else:
+    print("Script uploaded")
+' <<<"$UPLOAD"
 
 # Publish secret bindings from the environment.  Values stay in the process
 # environment and are not passed as arguments, logged, or written to the repo.
