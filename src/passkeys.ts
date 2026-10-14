@@ -1,5 +1,5 @@
-// Passkeys (WebAuthn) as default/only login for FleetLink multi-user
-// Owner request: passkeys preferred or only for initial build.
+// Passkeys (WebAuthn) as primary login for FleetLink multi-user
+// Secondary: GitHub / Google / Apple OAuth
 // Use @simplewebauthn/server on the Worker + D1.
 
 export interface PasskeyCredential {
@@ -14,29 +14,67 @@ export interface PasskeyCredential {
   createdAt: string;
 }
 
+/** Start passkey registration for a signed-in or new user. */
 export async function startRegistration(env: any, userId: string, username: string) {
-  // generateRegistrationOptions from @simplewebauthn/server
-  // rpID = fleetlink.app or fleetlink.online
-  // residentKey: required, userVerification: required
+  // TODO: generateRegistrationOptions from @simplewebauthn/server
+  // rpID = env.ADMIN_HOST || 'fleetlink.app'
+  // residentKey: 'required', userVerification: 'preferred'
   // Store challenge in KV or D1 with short TTL
-  return { options: {}, challengeId: crypto.randomUUID() };
+  const challengeId = crypto.randomUUID();
+  return {
+    options: {
+      rp: { name: 'FleetLink', id: 'fleetlink.app' },
+      user: { id: userId, name: username, displayName: username },
+      challenge: challengeId,
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+      timeout: 60000,
+      attestation: 'none'
+    },
+    challengeId
+  };
 }
 
+/** Finish passkey registration and issue session. */
 export async function finishRegistration(env: any, challengeId: string, attestation: any) {
-  // verifyRegistrationResponse
+  // TODO: verifyRegistrationResponse
   // Insert into passkeys table
-  // Create or link user, issue fl_session
-  return { ok: true };
+  // Create or link user, issue fl_session cookie
+  return { ok: true, userId: 'user_' + crypto.randomUUID().slice(0, 8) };
 }
 
+/** Start passkey login (discoverable). */
 export async function startLogin(env: any) {
-  // generateAuthenticationOptions
-  // allowCredentials from user's passkeys or empty for discoverable
-  return { options: {}, challengeId: crypto.randomUUID() };
+  // TODO: generateAuthenticationOptions
+  // allowCredentials: [] for discoverable credentials
+  const challengeId = crypto.randomUUID();
+  return {
+    options: {
+      challenge: challengeId,
+      rpId: 'fleetlink.app',
+      allowCredentials: [],
+      userVerification: 'preferred',
+      timeout: 60000
+    },
+    challengeId
+  };
 }
 
+/** Finish passkey login and issue session. */
 export async function finishLogin(env: any, challengeId: string, assertion: any) {
-  // verifyAuthenticationResponse
+  // TODO: verifyAuthenticationResponse
   // Update counter, issue fl_session cookie
-  return { ok: true, session: "" };
+  return { ok: true, session: 'sess_' + crypto.randomUUID().slice(0, 16) };
+}
+
+/** List passkeys for a user (dashboard). */
+export async function listPasskeys(env: any, userId: string): Promise<PasskeyCredential[]> {
+  // TODO: SELECT from passkeys WHERE user_id = ?
+  return [];
+}
+
+/** Revoke a passkey. */
+export async function revokePasskey(env: any, userId: string, passkeyId: string): Promise<boolean> {
+  // TODO: DELETE FROM passkeys WHERE id = ? AND user_id = ?
+  return true;
 }
