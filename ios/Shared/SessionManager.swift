@@ -1,17 +1,12 @@
 import Foundation
 import SwiftUI
 
-/// Owns the signed-in session and the separately-kept admin/agent bearer secret.
+/// Owns the signed-in passkey session and the separately-kept admin/agent secret.
 ///
-/// Two credentials, deliberately kept apart:
-///
-/// 1. **Account session** — the `fl_session` cookie issued by the OAuth callback.
-///    It lives in the Keychain and is sent as a `Cookie` header.  It identifies a
-///    human account and supports the read path (`GET /api/me`, `GET /api/shares`).
-/// 2. **Admin / agent bearer secret** — the pasted `X-Fleet-Admin` style token the
-///    fleet's MCP server and agents already use.  It is unchanged, still works,
-///    and remains the only credential that can perform the `sameOrigin`-gated
-///    writes from a native client.
+/// 1. **Account session** — a bearer token from passkey registration or sign-in.
+///    It lives in the Keychain and is sent as `Authorization: Bearer`.
+/// 2. **Admin / agent bearer secret** — the pasted operator token.  It is not a
+///    passkey session and remains the credential for operator writes.
 ///
 /// The app never sets an `Origin` header by hand.  See `WebAuthSession` and the
 /// PR body for why.
@@ -19,10 +14,20 @@ import SwiftUI
 public final class SessionManager: ObservableObject {
     private static let sessionCookieAccount = "account.session"
     private static let bearerSecretAccount = "account.bearerSecret"
+    private static let passkeyBearerAccount = "account.passkeyBearer"
     public static let sessionCookieName = "fl_session"
 
-    /// The portal origin that issues sessions.  `ADMIN_HOST` is `fleetlink.app`.
-    public static let portalOrigin = URL(string: "https://fleetlink.app")!
+    /// Account API host.  Passkeys are bound to one RP ID, so this stays on the
+    /// account host chosen in DEPLOY.md.  The Info.plist key overrides the default.
+    public static var accountOrigin: URL {
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "FleetLinkAccountOrigin") as? String,
+           let url = URL(string: raw) {
+            return url
+        }
+        return URL(string: "https://fleetlink.app")!
+    }
+
+    public static var portalOrigin: URL { accountOrigin }
 
     @Published public private(set) var user: SessionUser?
     @Published public private(set) var isCheckingSession: Bool = false
@@ -71,29 +76,45 @@ public final class SessionManager: ObservableObject {
         Keychain.remove(account: Self.sessionCookieAccount)
     }
 
-    /// Validate the stored cookie against `GET /api/me` and load the account.
+    /// The passkey session token.  Sent as `Authorization: Bearer`, never as a cookie.
+    public var passkeyBearer: String? {
+        let value = Keychain.get(account: Self.passkeyBearerAccount)
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    public func adoptBearerToken(_ token: String) {
+        Keychain.set(token, account: Self.passkeyBearerAccount)
+        lastError = nil
+    }
+
+    public func clearBearerToken() {
+        Keychain.remove(account: Self.passkeyBearerAccount)
+    }
+
+    /// Validate the stored bearer token against `GET /api/me`.
     /// Returns `true` when a live session is present.
     @discardableResult
     public func refreshSession() async -> Bool {
-        guard let header = sessionCookieHeader else {
+        guard let token = passkeyBearer else {
             user = nil
             return false
         }
         isCheckingSession = true
         defer { isCheckingSession = false }
         do {
-            var request = URLRequest(url: Self.portalOrigin.appendingPathComponent("api/me"))
+            var request = URLRequest(url: Self.accountOrigin.appending(path: "api/me"))
             request.httpMethod = "GET"
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            request.setValue(header, forHTTPHeaderField: "Cookie")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("ios", forHTTPHeaderField: "X-Fleet-Client")
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 user = nil
                 return false
             }
             if http.statusCode == 401 {
-                // Expired, revoked or disabled.  Drop it so the UI shows signed out.
-                clearSessionCookie()
+                clearBearerToken()
                 user = nil
                 return false
             }
@@ -118,13 +139,15 @@ public final class SessionManager: ObservableObject {
     /// the network call fails we still clear the local session, because the app
     /// must not stay signed in after the user asked to leave.
     public func signOut() async {
-        if let value = sessionCookieValue {
-            var request = URLRequest(url: Self.portalOrigin.appendingPathComponent("api/auth/logout"))
+        if let token = passkeyBearer {
+            var request = URLRequest(url: Self.accountOrigin.appending(path: "api/auth/logout"))
             request.httpMethod = "POST"
-            request.setValue("\(Self.sessionCookieName)=\(value)", forHTTPHeaderField: "Cookie")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("ios", forHTTPHeaderField: "X-Fleet-Client")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
             try? await URLSession.shared.data(for: request)
         }
+        clearBearerToken()
         clearSessionCookie()
         user = nil
         lastError = nil
