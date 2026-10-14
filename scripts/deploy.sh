@@ -26,13 +26,12 @@ WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 echo "Fetching Infisical machine-identity token"
-INFISICAL_TOKEN="$(infisical login \
-  --method=universal-auth \
-  --client-id="$INFISICAL_CLIENT_ID" \
-  --client-secret="$INFISICAL_CLIENT_SECRET" \
-  --plain --silent)"
+# The CLI reads these names itself.  They stay in the environment and are not arguments.
+export INFISICAL_UNIVERSAL_AUTH_CLIENT_ID="$INFISICAL_CLIENT_ID"
+export INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET="$INFISICAL_CLIENT_SECRET"
+export INFISICAL_TOKEN="$(infisical login --method=universal-auth --plain --silent)"
+unset INFISICAL_UNIVERSAL_AUTH_CLIENT_ID INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET
 infisical export \
-  --token="$INFISICAL_TOKEN" \
   --projectId="$INFISICAL_PROJECT_ID" \
   --env="$INFISICAL_ENV" \
   --format=dotenv > "$WORKDIR/secrets.env"
@@ -88,20 +87,32 @@ metadata["bindings"] = [b for b in metadata["bindings"] if b.get("text", "x") !=
 json.dump(metadata, open(path, "w"))
 PY
 
+# curl reads the bearer token from this config so it never appears in argv.
+python3 - "$WORKDIR/curl.cfg" <<'PY'
+import os, sys
+token = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+if not token:
+    raise SystemExit("CLOUDFLARE_API_TOKEN is not set")
+if any(ch in token for ch in "\r\n\""):
+    raise SystemExit("CLOUDFLARE_API_TOKEN cannot be placed in a curl config")
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    handle.write('header = "Authorization: Bearer %s"\n' % token)
+PY
+
 echo "Uploading ${SCRIPT_NAME} (module only, secrets follow as secret bindings)"
-UPLOAD="$(curl -sS -X PUT \
+UPLOAD="$(curl --config "$WORKDIR/curl.cfg" -sS -X PUT \
   "${API}/workers/scripts/${SCRIPT_NAME}" \
-  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
   -F "metadata=@${WORKDIR}/metadata.json;type=application/json" \
   -F "fleetlink-api.mjs=@${ROOT}/dist/fleetlink-api.mjs;type=application/javascript+module")"
-python3 -c 'import json,sys; body=json.loads(sys.argv[1]);
-raise SystemExit("script upload failed: " + json.dumps(body.get("errors"))) if not body.get("success") else print("Script uploaded")' "$UPLOAD"
+python3 -c 'import json,sys; body=json.load(sys.stdin);
+raise SystemExit("script upload failed: " + json.dumps(body.get("errors"))) if not body.get("success") else print("Script uploaded")' <<<"$UPLOAD"
 
 # Publish secret bindings from the environment.  Values stay in the process
 # environment and are not passed as arguments, logged, or written to the repo.
-python3 - "$API" "$SCRIPT_NAME" "$CLOUDFLARE_API_TOKEN" <<'PY'
+python3 - "$API" "$SCRIPT_NAME" <<'PY'
 import json, os, sys, urllib.request
-api, script, token = sys.argv[1:]
+api, script = sys.argv[1:]
+token = os.environ["CLOUDFLARE_API_TOKEN"]
 names = [
     "ADMIN_SECRET",
     "AGENT_SECRET",
@@ -134,9 +145,8 @@ for name in names:
 PY
 
 echo "Disabling workers.dev and forcing observability off"
-curl -sS -X POST \
+curl --config "$WORKDIR/curl.cfg" -sS -X POST \
   "${API}/workers/scripts/${SCRIPT_NAME}/subdomain" \
-  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
   -H "Content-Type: application/json" \
   --data '{"enabled":false}' >/dev/null || echo "workers.dev subdomain endpoint returned an error.  Confirm in the dashboard that workers.dev stays off."
 
