@@ -240,6 +240,45 @@ async function resolveR2Key(env, key) {
 }
 __name(resolveR2Key, "resolveR2Key");
 __name2(resolveR2Key, "resolveR2Key");
+const R2_DELETE_LIMIT = 1000;
+function shareSlugFromDeletePath(pathname) {
+  const path = String(pathname || "").replace(/\/+$/g, "") || "/";
+  const api = /^\/api\/shares\/([^/]+)$/i.exec(path);
+  return api ? api[1] : null;
+}
+__name(shareSlugFromDeletePath, "shareSlugFromDeletePath");
+__name2(shareSlugFromDeletePath, "shareSlugFromDeletePath");
+async function collectShareObjectKeys(env, slug) {
+  const keys = [];
+  let cursor;
+  for (;;) {
+    const listOpts = { prefix: `${slug}/`, limit: R2_DELETE_LIMIT };
+    if (cursor) listOpts.cursor = cursor;
+    const listRes = await env.FLEET_SHARES.list(listOpts);
+    for (const o of listRes.objects || []) {
+      if (o && o.key && !isSettingsStorageKey(o.key)) keys.push(o.key);
+    }
+    if (!listRes.truncated) break;
+    if (!listRes.cursor || listRes.cursor === cursor) break;
+    cursor = listRes.cursor;
+    if (keys.length > 2e4) break;
+  }
+  try {
+    const single = await env.FLEET_SHARES.head(slug);
+    if (single && !isSettingsStorageKey(slug)) keys.push(slug);
+  } catch (_) {
+  }
+  return keys;
+}
+__name(collectShareObjectKeys, "collectShareObjectKeys");
+__name2(collectShareObjectKeys, "collectShareObjectKeys");
+async function deleteObjectKeys(env, keys) {
+  for (let i = 0; i < keys.length; i += R2_DELETE_LIMIT) {
+    await env.FLEET_SHARES.delete(keys.slice(i, i + R2_DELETE_LIMIT));
+  }
+}
+__name(deleteObjectKeys, "deleteObjectKeys");
+__name2(deleteObjectKeys, "deleteObjectKeys");
 var GUEST_MAX_FILES = 10;
 var GUEST_MAX_FILE_BYTES = 5 * 1024 * 1024;
 var GUEST_MAX_BATCH_BYTES = 10 * 1024 * 1024;
@@ -5518,33 +5557,9 @@ async function handleRequest(request, env, ctx) {
             return jsonResponse(400, { error: "That name is reserved." });
           }
           targetSlug = resolvedSlug;
-          let keysToDelete = [];
-          let truncated = true;
-          let cursor = void 0;
-          while (truncated) {
-            const listOpts = { prefix: `${targetSlug}/`, limit: 1e3 };
-            if (cursor) listOpts.cursor = cursor;
-            const listRes = await env.FLEET_SHARES.list(listOpts);
-            for (const o of listRes.objects) {
-              if (o && isSettingsStorageKey(o.key)) continue;
-              keysToDelete.push(o.key);
-            }
-            truncated = listRes.truncated;
-            cursor = listRes.cursor;
-            if (keysToDelete.length > 2e4) break;
-          }
-          try {
-            const single = await env.FLEET_SHARES.head(targetSlug);
-            if (single) {
-              keysToDelete.push(targetSlug);
-            }
-          } catch (_) {
-          }
+          const keysToDelete = await collectShareObjectKeys(env, targetSlug);
           if (keysToDelete.length > 0) {
-            for (let i = 0; i < keysToDelete.length; i += 1e3) {
-              const chunk = keysToDelete.slice(i, i + 1e3);
-              await env.FLEET_SHARES.delete(chunk);
-            }
+            await deleteObjectKeys(env, keysToDelete);
             totalDeleted += keysToDelete.length;
             deletedSlugs.push(targetSlug);
           }
@@ -6604,6 +6619,31 @@ async function handleRequest(request, env, ctx) {
       const deleteMethodAuth = await authenticate(request, secrets);
       if (!deleteMethodAuth.isAdmin) {
         return new Response("Delete rejected: Unauthorized. Provide a valid X-Fleet-Admin header with an Admin secret.", { status: 401 });
+      }
+      const apiSlug = shareSlugFromDeletePath(url.pathname);
+      const shareSlug = apiSlug || (key && !String(key).includes("/") ? key : null);
+      if (shareSlug) {
+        if (isSettingsStorageKey(shareSlug)) {
+          return new Response("Delete rejected: That name is reserved.", { status: 400 });
+        }
+        try {
+          const resolvedSlug = (await resolveR2Key(env, shareSlug)).split("/")[0];
+          if (!resolvedSlug) {
+            return new Response("Delete rejected: Missing target key in request URL.", { status: 400 });
+          }
+          if (isSettingsStorageKey(resolvedSlug)) {
+            return new Response("Delete rejected: That name is reserved.", { status: 400 });
+          }
+          const keysToDelete = await collectShareObjectKeys(env, resolvedSlug);
+          if (keysToDelete.length > 0) await deleteObjectKeys(env, keysToDelete);
+          return new Response(`Successfully deleted ${resolvedSlug}
+`, {
+            status: 200,
+            headers: { "content-type": "text/plain; charset=utf-8" }
+          });
+        } catch (err) {
+          return new Response(`Delete rejected: Storage error deleting from R2 - ${err.message || String(err)}`, { status: 500 });
+        }
       }
       if (isSettingsStorageKey(key)) {
         return new Response("Delete rejected: That name is reserved.", { status: 400 });
