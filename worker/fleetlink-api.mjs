@@ -4364,8 +4364,20 @@ function settingsConflict() {
   err.code = "conflict";
   return err;
 }
+function isSettingsPreconditionError(err) {
+  if (!err || typeof err !== "object") return false;
+  if (err.status === 412) return true;
+  const code = err.code;
+  if (code === 10031 || code === "10031" || code === "PreconditionFailed") return true;
+  const name = String(err.name || "");
+  if (/precondition/i.test(name)) return true;
+  const message = String(err.message || "");
+  return /precondition/i.test(message) || /\(10031\)/.test(message);
+}
 __name(settingsConflict, "settingsConflict");
 __name2(settingsConflict, "settingsConflict");
+__name(isSettingsPreconditionError, "isSettingsPreconditionError");
+__name2(isSettingsPreconditionError, "isSettingsPreconditionError");
 function invalidateSettingsCache(env) {
   if (env && typeof env === "object") settingsCache.delete(env);
 }
@@ -4430,14 +4442,18 @@ async function writeOverrides(env, overrides, record) {
   payload._v = version;
   for (const key of Object.keys(overrides)) payload[key] = overrides[key];
   const opts = { httpMetadata: { contentType: "application/json; charset=utf-8" } };
-  if (record.exists && record.etag) opts.onlyIf = { etagMatches: record.etag };
-  else if (!record.exists) opts.onlyIf = { etagDoesNotMatch: "*" };
+  // An existing object with no etag cannot be replaced conditionally.  Leave it unchanged.
+  if (record.exists && !record.etag) {
+    invalidateSettingsCache(env);
+    throw settingsConflict();
+  }
+  if (record.exists) opts.onlyIf = { etagMatches: record.etag };
+  else opts.onlyIf = { etagDoesNotMatch: "*" };
   let result;
   try {
     result = await ns.put(SETTINGS_DOC_KEY, JSON.stringify(payload), opts);
   } catch (err) {
-    const name = err && (err.code || err.name) || "";
-    if (String(name).includes("Precondition") || err && err.status === 412) {
+    if (isSettingsPreconditionError(err)) {
       invalidateSettingsCache(env);
       throw settingsConflict();
     }

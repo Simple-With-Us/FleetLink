@@ -198,7 +198,7 @@ test("visitor limits cannot be loosened and invalid writes do not stick", async 
   assert.equal(field(cleared.body, "guest_file_ttl_seconds").value, 120);
 });
 
-test("a tampered KV value cannot raise a visitor ceiling", async () => {
+test("a tampered stored value cannot raise a visitor ceiling", async () => {
   const { env, shares } = testEnv();
   await shares.put("settings:overrides", JSON.stringify({
     guest_max_files: 50,
@@ -318,6 +318,95 @@ test("settings body schema is strict", () => {
   assert.equal(SettingsUpdateBody.safeParse({ values: { guest_max_files: "4", guest_file_ttl_seconds: 120 } }).success, true);
   assert.equal(SettingsUpdateBody.safeParse({ values: { guest_max_files: 2 }, extra: true }).success, false);
   assert.equal(SettingsUpdateBody.safeParse({ values: [] }).success, false);
+});
+
+test("settings writes are conditional, including the first save and a clear", async () => {
+  const { env, shares } = testEnv();
+  const puts = [];
+  let deletes = 0;
+  const originalPut = shares.put.bind(shares);
+  const originalDelete = shares.delete.bind(shares);
+  shares.put = async (key, body, opts = {}) => {
+    if (key === "settings:overrides") puts.push({ body, onlyIf: opts.onlyIf || null });
+    return originalPut(key, body, opts);
+  };
+  shares.delete = async (key) => {
+    const keys = Array.isArray(key) ? key : [key];
+    if (keys.includes("settings:overrides")) deletes += 1;
+    return originalDelete(key);
+  };
+  const created = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 4 } }, "0"), env));
+  assert.equal(created.status, 200);
+  assert.equal(created.body.version, 1);
+  assert.deepEqual(puts[0].onlyIf, { etagDoesNotMatch: "*" });
+  const cleared = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: null } }, "1"), env));
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.version, 2);
+  const stored = JSON.parse(puts.at(-1).body);
+  assert.equal(stored._v, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(stored, "guest_max_files"), false);
+  assert.deepEqual(puts.at(-1).onlyIf, { etagMatches: '"v1"' });
+  assert.equal(deletes, 0);
+  assert.equal(shares.objects.has("settings:overrides"), true);
+});
+
+test("an R2 precondition failure is a conflict and a storage error is not", async () => {
+  const { env, shares } = testEnv();
+  const first = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 4 } }, "0"), env));
+  assert.equal(first.status, 200);
+  const originalPut = shares.put.bind(shares);
+  shares.put = async (key, body, opts) => {
+    if (key === "settings:overrides") throw new Error("put: Conditional headers were not satisfied. (10031)");
+    return originalPut(key, body, opts);
+  };
+  const raced = await readJson(await worker.fetch(admin("PUT", { values: { guest_file_ttl_seconds: 90 } }, "1"), env));
+  assert.equal(raced.status, 409);
+  assert.equal(raced.body.version, 1);
+  assert.equal(field(raced.body, "guest_max_files").value, 4);
+  let stored = JSON.parse(await (await shares.get("settings:overrides")).text());
+  assert.equal(stored.guest_max_files, 4);
+  assert.equal(stored._v, 1);
+  shares.put = async (key, body, opts) => {
+    if (key === "settings:overrides") return null;
+    return originalPut(key, body, opts);
+  };
+  const lost = await readJson(await worker.fetch(admin("PUT", { values: { guest_file_ttl_seconds: 90 } }, "1"), env));
+  assert.equal(lost.status, 409);
+  stored = JSON.parse(await (await shares.get("settings:overrides")).text());
+  assert.equal(stored.guest_max_files, 4);
+  shares.put = async (key, body, opts) => {
+    if (key === "settings:overrides") throw new Error("put: Service is temporarily unavailable. (10043)");
+    return originalPut(key, body, opts);
+  };
+  const down = await readJson(await worker.fetch(admin("PUT", { values: { guest_file_ttl_seconds: 90 } }, "1"), env));
+  assert.equal(down.status, 500);
+  stored = JSON.parse(await (await shares.get("settings:overrides")).text());
+  assert.equal(stored.guest_max_files, 4);
+  assert.equal(stored.guest_file_ttl_seconds, undefined);
+});
+
+test("a settings object with no etag is not replaced", async () => {
+  const { env, shares } = testEnv();
+  const first = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 4 } }, "0"), env));
+  assert.equal(first.status, 200);
+  const originalGet = shares.get.bind(shares);
+  const originalPut = shares.put.bind(shares);
+  let puts = 0;
+  shares.get = async (key) => {
+    const object = await originalGet(key);
+    if (key === "settings:overrides" && object) object.httpEtag = "";
+    return object;
+  };
+  shares.put = async (key, body, opts) => {
+    if (key === "settings:overrides") puts += 1;
+    return originalPut(key, body, opts);
+  };
+  const raced = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 2 } }, "1"), env));
+  assert.equal(raced.status, 409);
+  assert.equal(puts, 0);
+  const stored = JSON.parse(await (await originalGet("settings:overrides")).text());
+  assert.equal(stored.guest_max_files, 4);
+  assert.equal(stored._v, 1);
 });
 
 test("a stale If-Match does not overwrite a newer settings write", async () => {

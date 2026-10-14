@@ -8,7 +8,7 @@ The live worker is `worker/fleetlink-api.mjs` (`fleetlink-api` on Cloudflare).  
 
 Editable settings resolve in this order:
 
-1. Saved override in the `FLEET_SHARES` KV document `settings:overrides` (written only by an admin through `PUT /api/admin/settings`).
+1. Saved override in the `FLEET_SHARES` R2 object `settings:overrides` (written only by an admin through `PUT /api/admin/settings`).
 2. Deploy-time worker variable.  That is the path an Infisical value takes when a deploy copies it onto the worker.  The admin panel calls this source a deploy default.
 3. Built-in default baked into the worker.
 
@@ -34,11 +34,11 @@ The admin and agent access keys are Cloudflare Worker secrets.  They are not in 
 
 | Name | Secret | Where it lives | Default |
 |---|---|---|---|
-| `FLEET_SHARES` | No (namespace binding) | Worker KV binding.  Also the settings store. | Required.  Holds share objects and `settings:overrides`. |
+| `FLEET_SHARES` | No (namespace binding) | Worker R2 binding.  Also the settings store. | Required.  Holds share objects and `settings:overrides`. |
 | `FILES` | No (namespace binding) | Worker R2 binding, bucket name `fleet-shares` in the stale wrangler file. | Not enabled in the dedicated Cloudflare account.  The panel lists it only after the binding exists. |
 | `STORAGE_BINDINGS` | No | Optional worker var.  Extra uppercase binding names to offer beside `FLEET_SHARES` and `FILES`. | Empty |
 
-`storage_binding` picks which connected binding new and existing files use.  Settings always stay on `FLEET_SHARES`.  Keys under `settings:` are not served, listed, or deleted as shares.
+`storage_binding` picks which connected binding new and existing files use.  Settings always stay on `FLEET_SHARES`.  Keys under `settings:` are not served, listed, or deleted as shares.  A settings save uses a conditional `put` (`onlyIf` on the object etag).  Share reads call `head` and `list` with a delimiter on this same binding.  Those are R2 operations, so this binding has to be the R2 bucket.
 
 ## Worker secrets
 
