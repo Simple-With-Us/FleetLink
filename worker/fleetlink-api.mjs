@@ -2,6 +2,7 @@ import { appleAppSiteAssociation } from "./lib/aasa.mjs";
 import { handleAccountRoutes } from "./lib/account-routes.mjs";
 import { reapCostGuards } from "./lib/cost-guards.mjs";
 import { mustForceAttachment } from "./lib/html-safety.mjs";
+import { handleMcp } from "./lib/mcp.mjs";
 import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
 import { captureWorkerException } from "./lib/sentry-scrub.mjs";
 import { applyGrantTtl, lookupAgentToken, tighterCap } from "./lib/tokens.mjs";
@@ -96,6 +97,7 @@ var SYSTEM_ASSET_KEYS = /* @__PURE__ */ new Set([
 ]);
 var RESERVED_SLUGS = /* @__PURE__ */ new Set([
   "api",
+  "mcp",
   "portal",
   "admin",
   "auth",
@@ -2618,7 +2620,7 @@ function renderUserPortalHtml(origin) {
           <strong style="color: #065f46;">Agent Token / Admin:</strong>
           <div style="margin-top: 0.3rem;">\u2022 Agent: 100 MB / 500 MB / 7 days</div>
           <div>\u2022 Admin: 300 MB / 1 GB / Permanent</div>
-          <div>\u2022 Full API, CLI, and MCP access</div>
+          <div>\u2022 API, CLI, and remote MCP at /mcp</div>
         </div>
       </div>
     </div>
@@ -3789,11 +3791,21 @@ async function handleRequest(request, env, ctx) {
     const accountResponse = await handleAccountRoutes(request, env, ctx);
     if (accountResponse) return accountResponse;
     if (request.headers.get("X-Fleet-Auth")) {
+      const legacyHeaders = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
+      if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
+        legacyHeaders["WWW-Authenticate"] = 'Bearer realm="fleetlink"';
+      }
       return new Response(JSON.stringify({
         error: "Upload rejected: Legacy 'X-Fleet-Auth' header is retired. Please authenticate using 'X-Fleet-Admin' (admin operations) or 'X-Fleet-Agent' (fleet agents)."
       }), {
         status: 401,
-        headers: { "Content-Type": "application/json; charset=utf-8" }
+        headers: legacyHeaders
+      });
+    }
+    if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
+      return handleMcp(request, env, {
+        authenticate: (candidate) => authenticate(candidate, secrets),
+        call: (candidate) => handleRequest(candidate, env, ctx)
       });
     }
     if (hostname !== "fleetlink.app" && hostname !== "fleetlink.online" && (hostname.endsWith(".fleetlink.app") || hostname.endsWith(".fleetlink.online"))) {
@@ -4130,8 +4142,13 @@ async function handleRequest(request, env, ctx) {
     }
     if (url.pathname === "/api/portal/delete" && request.method === "POST") {
       const deleteAuth = await authenticate(request, secrets);
-      const isAdmin = deleteAuth.isAdmin;
-      if (!isAdmin && !deleteAuth.isAgent) {
+      let isAdmin = deleteAuth.isAdmin;
+      let isAgent = deleteAuth.isAgent;
+      if (!isAdmin && !isAgent) {
+        const grant = await lookupAgentToken(request, env);
+        if (grant) isAgent = true;
+      }
+      if (!isAdmin && !isAgent) {
         return unauthorizedJson();
       }
       try {
@@ -4209,8 +4226,12 @@ async function handleRequest(request, env, ctx) {
     }
     if ((url.pathname === "/api/portal/renew" || url.pathname === "/api/shares/renew") && request.method === "POST") {
       const renewAuth = await authenticate(request, secrets);
-      const isAdmin = renewAuth.isAdmin;
-      const isAgent = renewAuth.isAgent;
+      let isAdmin = renewAuth.isAdmin;
+      let isAgent = renewAuth.isAgent;
+      if (!isAdmin && !isAgent) {
+        const grant = await lookupAgentToken(request, env);
+        if (grant) isAgent = true;
+      }
       const isGuest = !isAdmin && !isAgent;
       if (isGuest) {
         return unauthorizedJson();

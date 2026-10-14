@@ -14,7 +14,9 @@ This is the esbuild bundle of the original `fleetlink-legacy` JavaScript codebas
 
 ## Editing
 
-Small fixes still land in `fleetlink-api.mjs`.  Account sign-in, the `/dashboard` page, team lookup, cost-guard reaping, and Sentry scrubbing live in `worker/lib/` and are imported by the bundle.  `scripts/bundle-worker.mjs` produces the single module `scripts/deploy.sh` uploads.  The account code is not deployed until the approvals in `DEPLOY.md` are done.
+Small fixes still land in `fleetlink-api.mjs`.  Account sign-in, the `/dashboard` page, team lookup, cost-guard reaping, Sentry scrubbing, and the remote MCP route live in `worker/lib/` and are imported by the bundle.  `scripts/bundle-worker.mjs` produces the single module `scripts/deploy.sh` uploads.  The account code is not deployed until the approvals in `DEPLOY.md` are done.
+
+`POST /mcp` is the Streamable HTTP MCP endpoint (protocol `2025-06-18`, JSON responses).  `GET /mcp` returns 405.  Auth is the same agent tokens, operator secrets, and account sessions as the rest of the HTTP API.  See `docs/mcp.md`.
 
 The file was byte-for-byte identical to production on 2026-10-13.  Later commits diverge on purpose.  Do not "fix" that by uploading this tree until `DEPLOY.md` is followed.
 
