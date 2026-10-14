@@ -28,7 +28,7 @@ struct FleetLinkApp: App {
                 }
                 .tag(0)
 
-                // Tab 1: Make Slug / Upload
+                // Tab 1: New share
                 CreateSlugView(portalManager: portalManager) { targetURL in
                     inputURLString = targetURL.absoluteString
                     selectedTab = 2
@@ -37,7 +37,7 @@ struct FleetLinkApp: App {
                     }
                 }
                 .tabItem {
-                    Label("Make Slug", systemImage: "plus.circle.fill")
+                    Label("New Share", systemImage: "plus.circle.fill")
                 }
                 .tag(1)
 
