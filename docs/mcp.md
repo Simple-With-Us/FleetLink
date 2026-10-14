@@ -100,6 +100,6 @@ url = "https://fleetlink.online/mcp"
 headers = { "Authorization" = "Bearer ${FLEETLINK_AGENT_TOKEN}" }
 ```
 
-## Skill follow-up
+## Skill
 
-This checkout has no `skills/fleetlink/SKILL.md`.  The installed FleetLink skill, where a runtime already has one, still needs a pass so it points agents at `https://fleetlink.online/mcp` instead of saying the worker has no MCP route.  This document is the source for that update.
+`skills/fleetlink/SKILL.md` is the agent skill.  It documents this server: the URL, `Authorization: Bearer <agent token>`, the six tools, and the Claude, Cursor, Codex, and Grok connect snippets.  `scripts/install-skill.sh` symlinks that file into agent skill directories.  `cli/fleet-share` pins the file's SHA-256.  A commit cannot record its own id, so the git pin names an ancestor that already contains those bytes.
