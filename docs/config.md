@@ -12,7 +12,7 @@ Editable settings resolve in this order:
 2. Deploy-time worker variable.  That is the path an Infisical value takes when a deploy copies it onto the worker.  The admin panel calls this source a deploy default.
 3. Built-in default baked into the worker.
 
-A missing or invalid saved value is ignored.  The next source is used.  Visitor limits cannot be raised past the ceilings below, not by a saved override and not by a deploy variable.
+A missing or invalid saved value is ignored for the effective result.  The next source is used.  The saved document itself is left in place, so a value the current deploy rejects can apply again when the deploy accepts it.  Visitor limits cannot be raised past the ceilings below, not by a saved override and not by a deploy variable.  The worker reuses a materialized copy for 30 seconds.  A successful admin save drops that copy on this isolate immediately.
 
 ## Infisical
 
@@ -56,7 +56,7 @@ Either name of a pair counts as set.  The panel does not say which one was fille
 
 ## Editable settings
 
-`GET` and `PUT /api/admin/settings` require an admin session or `X-Fleet-Admin`.  No credentials returns `401`.  A signed-in non-admin returns `403`.  `PUT` sends `{ "values": { "<key>": <value or null> } }`.  `null` clears the saved override.  An invalid value changes nothing.
+`GET` and `PUT /api/admin/settings` require an admin session or `X-Fleet-Admin`.  No credentials returns `401`.  A signed-in non-admin returns `403`.  `PUT` sends `{ "values": { "<key>": <value or null> } }`.  `null` clears the saved override.  An invalid value changes nothing.  Responses include `version`.  A client that sends `If-Match` with that version gets `409` when another save landed first, and nothing is written.  A saved value the current deploy rejects stays stored.  That write is refused with `fields` and `rejected` until the value is replaced, cleared, or the deploy accepts it again.
 
 | Key | Secret | Where it lives | Default | Bounds |
 |---|---|---|---|---|

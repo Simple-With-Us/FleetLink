@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import worker from "./fleetlink-api.mjs";
+import worker, { SettingsUpdateBody } from "./fleetlink-api.mjs";
 
 const ADMIN = "admin-secret-value";
 const AGENT = "agent-secret-value";
@@ -22,7 +22,7 @@ function createStore() {
         customMetadata: stored.customMetadata || {},
         httpMetadata: stored.httpMetadata || {},
         uploaded: stored.uploaded || new Date().toISOString(),
-        httpEtag: '"test"',
+        httpEtag: stored.httpEtag || '"test"',
         writeHttpMetadata(headers) {
           if (stored.httpMetadata && stored.httpMetadata.contentType) {
             headers.set("content-type", stored.httpMetadata.contentType);
@@ -34,14 +34,24 @@ function createStore() {
       };
     },
     async put(key, body, opts = {}) {
+      const current = objects.get(key);
+      const onlyIf = opts.onlyIf || null;
+      if (onlyIf && onlyIf.etagMatches && (!current || current.httpEtag !== onlyIf.etagMatches)) return null;
+      if (onlyIf && onlyIf.etagDoesNotMatch === "*" && current) return null;
+      if (onlyIf && onlyIf.etagDoesNotMatch && onlyIf.etagDoesNotMatch !== "*" && current && current.httpEtag === onlyIf.etagDoesNotMatch) return null;
       const text = typeof body === "string" ? body : "";
+      const etagN = (current && current.etagN || 0) + 1;
+      const httpEtag = `"v${etagN}"`;
       objects.set(key, {
         body,
         size: typeof body === "string" ? body.length : body && body.size || 0,
         customMetadata: opts.customMetadata || {},
         httpMetadata: opts.httpMetadata || {},
-        uploaded: new Date().toISOString()
+        uploaded: new Date().toISOString(),
+        httpEtag,
+        etagN
       });
+      return { key, httpEtag };
     },
     async delete(key) {
       const keys = Array.isArray(key) ? key : [key];
@@ -81,9 +91,10 @@ function testEnv(extra = {}) {
   };
 }
 
-function admin(method, body) {
+function admin(method, body, ifMatch) {
   const headers = { "X-Fleet-Admin": ADMIN, Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (ifMatch != null) headers["If-Match"] = `"${ifMatch}"`;
   return new Request("https://fleetlink.online/api/admin/settings", {
     method,
     headers,
@@ -293,10 +304,87 @@ test("admin portal renders Settings and anonymous visitors do not get it", async
   assert.match(html, /id="settings-panel"/);
   assert.match(html, /id="nav-settings-btn"/);
   assert.match(html, /\/api\/admin\/settings/);
+  assert.match(html, /If-Match/);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  new Function(script);
   assert.equal(html.includes(ADMIN), false);
   const guestPage = await worker.fetch(new Request("https://fleetlink.online/portal"), env);
   const guestHtml = await guestPage.text();
   assert.equal(guestHtml.includes('id="settings-panel"'), false);
+});
+
+test("settings body schema is strict", () => {
+  assert.equal(SettingsUpdateBody.safeParse({ values: { guest_max_files: 2 } }).success, true);
+  assert.equal(SettingsUpdateBody.safeParse({ values: { guest_max_files: "4", guest_file_ttl_seconds: 120 } }).success, true);
+  assert.equal(SettingsUpdateBody.safeParse({ values: { guest_max_files: 2 }, extra: true }).success, false);
+  assert.equal(SettingsUpdateBody.safeParse({ values: [] }).success, false);
+});
+
+test("a stale If-Match does not overwrite a newer settings write", async () => {
+  const { env } = testEnv();
+  const first = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 4 } }, "0"), env));
+  assert.equal(first.status, 200);
+  assert.equal(first.body.version, 1);
+  const stale = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 2 } }, "0"), env));
+  assert.equal(stale.status, 409);
+  const current = await readJson(await worker.fetch(admin("GET"), env));
+  assert.equal(field(current.body, "guest_max_files").value, 4);
+  assert.equal(current.body.version, 1);
+});
+
+test("concurrent settings writes keep both keys", async () => {
+  const { env } = testEnv();
+  const [files, ttl] = await Promise.all([
+    worker.fetch(admin("PUT", { values: { guest_max_files: 3 } }), env),
+    worker.fetch(admin("PUT", { values: { guest_file_ttl_seconds: 90 } }), env)
+  ]);
+  assert.equal((await readJson(files)).status, 200);
+  assert.equal((await readJson(ttl)).status, 200);
+  const current = await readJson(await worker.fetch(admin("GET"), env));
+  assert.equal(field(current.body, "guest_max_files").value, 3);
+  assert.equal(field(current.body, "guest_file_ttl_seconds").value, 90);
+  assert.equal(field(current.body, "guest_max_files").source, "override");
+  assert.equal(field(current.body, "guest_file_ttl_seconds").source, "override");
+});
+
+test("a settings write keeps an override the current deploy rejects", async () => {
+  const { env, shares } = testEnv({ SHARE_HOSTS: "fleetlink.online,foo.example.com" });
+  const saved = await readJson(await worker.fetch(admin("PUT", {
+    values: { share_hosts: "foo.example.com", default_share_host: "foo.example.com" }
+  }), env));
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  env.SHARE_HOSTS = "fleetlink.online";
+  const next = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 2 } }), env));
+  assert.equal(next.status, 400);
+  assert.equal(typeof next.body.fields.share_hosts, "string");
+  assert.equal(next.body.rejected.some((item) => item.key === "share_hosts" && item.reason === next.body.fields.share_hosts), true);
+  const stored = JSON.parse(await (await shares.get("settings:overrides")).text());
+  assert.equal(stored.share_hosts, "foo.example.com");
+  assert.equal(stored.guest_max_files, undefined);
+  env.SHARE_HOSTS = "fleetlink.online,foo.example.com";
+  const restored = await readJson(await worker.fetch(admin("GET"), env));
+  assert.equal(field(restored.body, "share_hosts").value, "foo.example.com");
+  assert.equal(field(restored.body, "share_hosts").source, "override");
+  assert.equal(field(restored.body, "guest_max_files").value, 10);
+});
+
+test("share reads reuse settings briefly and a save clears that copy", async () => {
+  const { env, shares } = testEnv();
+  let reads = 0;
+  const original = shares.get.bind(shares);
+  shares.get = async (key) => {
+    if (key === "settings:overrides") reads += 1;
+    return original(key);
+  };
+  await worker.fetch(new Request("https://fleetlink.online/missing-a"), env);
+  await worker.fetch(new Request("https://fleetlink.online/missing-b"), env);
+  assert.equal(reads, 1);
+  const saved = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 2 } }), env));
+  assert.equal(saved.status, 200);
+  const afterSave = reads;
+  await worker.fetch(new Request("https://fleetlink.online/missing-c"), env);
+  await worker.fetch(new Request("https://fleetlink.online/missing-d"), env);
+  assert.equal(reads, afterSave + 1);
 });
 
 test("security invariants stay in place", async () => {

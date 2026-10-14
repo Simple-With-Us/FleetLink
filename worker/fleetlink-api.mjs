@@ -5,6 +5,7 @@ import { mustForceAttachment } from "./lib/html-safety.mjs";
 import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
 import { captureWorkerException } from "./lib/sentry-scrub.mjs";
 import { randomHex } from "./lib/bytes.mjs";
+import { SettingsOverridesDocument, SettingsUpdateBody } from "./lib/settings-schema.mjs";
 import { applyGrantTtl, lookupAgentToken, tighterCap } from "./lib/tokens.mjs";
 
 function allocateShareId() {
@@ -3853,7 +3854,10 @@ function renderPortalHtml(overview, origin) {
         return "";
       }
 
+      var settingsVersion = null;
+
       function renderSettingsForm(data) {
+        if (data && data.version != null) settingsVersion = String(data.version);
         var fields = document.getElementById("settings-fields");
         var secretsRoot = document.getElementById("settings-secrets");
         if (!fields || !secretsRoot) return;
@@ -3998,16 +4002,23 @@ function renderPortalHtml(overview, origin) {
         var btn = document.getElementById("settings-save-btn");
         if (btn) btn.disabled = true;
         setSettingsStatus("Saving…");
+        var headers = { "Content-Type": "application/json", "Accept": "application/json" };
+        if (settingsVersion != null) headers["If-Match"] = '"' + settingsVersion + '"';
         fetch("/api/admin/settings", {
           method: "PUT",
-          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          headers: headers,
           body: JSON.stringify({ values: values })
         }).then(function(res) {
           return res.json().then(function(data) {
-            return { ok: res.ok, data: data };
+            return { ok: res.ok, status: res.status, data: data };
           });
         }).then(function(result) {
           if (btn) btn.disabled = false;
+          if (result.status === 409) {
+            if (result.data && result.data.settings) renderSettingsForm(result.data);
+            setSettingsStatus("Settings changed somewhere else.\u00A0 Review them and save again.");
+            return;
+          }
           if (!result.ok) {
             var msg = (result.data && result.data.error) || "Settings were not saved.";
             if (result.data && result.data.fields) {
@@ -4034,6 +4045,9 @@ function renderPortalHtml(overview, origin) {
 __name(renderPortalHtml, "renderPortalHtml");
 __name2(renderPortalHtml, "renderPortalHtml");
 var SETTINGS_DOC_KEY = "settings:overrides";
+var SETTINGS_CACHE_TTL_MS = 3e4;
+var settingsCache = /* @__PURE__ */ new WeakMap();
+var settingsWriteTail = Promise.resolve();
 var HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
 var BLOCKED_HOST_SUFFIXES = ["workers.dev", "pages.dev", "trycloudflare.com", "cloudflare.net"];
 var SETTING_FIELDS = {
@@ -4340,55 +4354,128 @@ function materializeSettings(env, overrides, strict) {
 }
 __name(materializeSettings, "materializeSettings");
 __name2(materializeSettings, "materializeSettings");
-async function readStorageText(env, key) {
-  const ns = env && env.FLEET_SHARES;
-  if (!ns || typeof ns.get !== "function") return null;
-  const raw = await ns.get(key);
-  if (raw == null) return null;
-  if (typeof raw === "string") return raw;
-  if (typeof raw.text === "function") return await raw.text();
-  return null;
+function emptySettingsRecord() {
+  return { overrides: blankBag(), version: 0, etag: null, exists: false };
 }
-__name(readStorageText, "readStorageText");
-__name2(readStorageText, "readStorageText");
-async function readOverrides(env) {
+__name(emptySettingsRecord, "emptySettingsRecord");
+__name2(emptySettingsRecord, "emptySettingsRecord");
+function settingsConflict() {
+  const err = new Error("settings conflict");
+  err.code = "conflict";
+  return err;
+}
+__name(settingsConflict, "settingsConflict");
+__name2(settingsConflict, "settingsConflict");
+function invalidateSettingsCache(env) {
+  if (env && typeof env === "object") settingsCache.delete(env);
+}
+__name(invalidateSettingsCache, "invalidateSettingsCache");
+__name2(invalidateSettingsCache, "invalidateSettingsCache");
+function withSettingsWriteLock(work) {
+  const run = settingsWriteTail.then(work, work);
+  settingsWriteTail = run.then(() => {
+  }, () => {
+  });
+  return run;
+}
+__name(withSettingsWriteLock, "withSettingsWriteLock");
+__name2(withSettingsWriteLock, "withSettingsWriteLock");
+async function readSettingsRecord(env) {
+  const empty = emptySettingsRecord();
   try {
-    const text = await readStorageText(env, SETTINGS_DOC_KEY);
-    if (!text) return blankBag();
-    const parsed = JSON.parse(text);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return blankBag();
+    const ns = env && env.FLEET_SHARES;
+    if (!ns || typeof ns.get !== "function") return empty;
+    const raw = await ns.get(SETTINGS_DOC_KEY);
+    if (raw == null) return empty;
+    const etag = typeof raw === "object" && raw ? raw.httpEtag || raw.etag || null : null;
+    let text = null;
+    if (typeof raw === "string") text = raw;
+    else if (typeof raw.text === "function") text = await raw.text();
+    if (!text) return { overrides: blankBag(), version: 0, etag, exists: true };
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return { overrides: blankBag(), version: 0, etag, exists: true };
+    }
+    const parsed = SettingsOverridesDocument.safeParse(json);
+    if (!parsed.success) return { overrides: blankBag(), version: 0, etag, exists: true };
+    const data = parsed.data;
     const overrides = blankBag();
     for (const key of Object.keys(SETTING_FIELDS)) {
-      if (Object.prototype.hasOwnProperty.call(parsed, key)) overrides[key] = parsed[key];
+      if (Object.prototype.hasOwnProperty.call(data, key) && data[key] !== void 0) overrides[key] = data[key];
     }
-    return overrides;
+    return {
+      overrides,
+      version: data._v == null ? 0 : data._v,
+      etag,
+      exists: true
+    };
   } catch {
-    return blankBag();
+    return empty;
   }
 }
-__name(readOverrides, "readOverrides");
-__name2(readOverrides, "readOverrides");
-async function writeOverrides(env, overrides) {
+__name(readSettingsRecord, "readSettingsRecord");
+__name2(readSettingsRecord, "readSettingsRecord");
+async function writeOverrides(env, overrides, record) {
   const ns = env && env.FLEET_SHARES;
   if (!ns || typeof ns.put !== "function") throw new Error("storage unavailable");
-  const keys = Object.keys(overrides);
-  if (keys.length === 0) {
-    if (typeof ns.delete === "function") await ns.delete(SETTINGS_DOC_KEY);
-    return;
+  const current = await readSettingsRecord(env);
+  if (current.version !== record.version || current.exists !== record.exists || current.etag !== record.etag) {
+    invalidateSettingsCache(env);
+    throw settingsConflict();
   }
+  const version = record.version + 1;
   const payload = blankBag();
-  for (const key of keys) payload[key] = overrides[key];
-  await ns.put(SETTINGS_DOC_KEY, JSON.stringify(payload));
+  payload._v = version;
+  for (const key of Object.keys(overrides)) payload[key] = overrides[key];
+  const opts = { httpMetadata: { contentType: "application/json; charset=utf-8" } };
+  if (record.exists && record.etag) opts.onlyIf = { etagMatches: record.etag };
+  else if (!record.exists) opts.onlyIf = { etagDoesNotMatch: "*" };
+  let result;
+  try {
+    result = await ns.put(SETTINGS_DOC_KEY, JSON.stringify(payload), opts);
+  } catch (err) {
+    const name = err && (err.code || err.name) || "";
+    if (String(name).includes("Precondition") || err && err.status === 412) {
+      invalidateSettingsCache(env);
+      throw settingsConflict();
+    }
+    throw err;
+  }
+  if (result === null) {
+    invalidateSettingsCache(env);
+    throw settingsConflict();
+  }
+  invalidateSettingsCache(env);
+  return version;
 }
 __name(writeOverrides, "writeOverrides");
 __name2(writeOverrides, "writeOverrides");
-async function loadEffectiveSettings(env) {
+function effectiveFromRecord(env, record) {
   try {
-    const materialized = materializeSettings(env, await readOverrides(env), false);
+    const materialized = materializeSettings(env, record && record.overrides || blankBag(), false);
     if (materialized.ok) return materialized.state;
   } catch {
   }
   return materializeSettings(env, blankBag(), false).state;
+}
+__name(effectiveFromRecord, "effectiveFromRecord");
+__name2(effectiveFromRecord, "effectiveFromRecord");
+async function loadEffectiveSettings(env) {
+  const now = Date.now();
+  if (env && typeof env === "object") {
+    const hit = settingsCache.get(env);
+    if (hit && now - hit.at < SETTINGS_CACHE_TTL_MS) return hit.state;
+  }
+  let state;
+  try {
+    state = effectiveFromRecord(env, await readSettingsRecord(env));
+  } catch {
+    state = materializeSettings(env, blankBag(), false).state;
+  }
+  if (env && typeof env === "object") settingsCache.set(env, { at: now, state });
+  return state;
 }
 __name(loadEffectiveSettings, "loadEffectiveSettings");
 __name2(loadEffectiveSettings, "loadEffectiveSettings");
@@ -4447,25 +4534,42 @@ function responseFieldKey(key) {
 }
 __name(responseFieldKey, "responseFieldKey");
 __name2(responseFieldKey, "responseFieldKey");
-async function putAdminSettings(request, env) {
-  const declared = Number(request.headers.get("content-length") || "0");
-  if (Number.isFinite(declared) && declared > 2e4) {
-    return jsonResponse(413, { error: "Settings document is too large." });
+function settingsFieldError(error, fields) {
+  const body = { error };
+  if (fields && Object.keys(fields).length) {
+    body.fields = fields;
+    body.rejected = Object.keys(fields).map((key) => ({ key, reason: fields[key] }));
   }
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return jsonResponse(400, { error: "The settings document could not be read." });
-  }
-  if (!body || typeof body !== "object" || Array.isArray(body) || !body.values || typeof body.values !== "object" || Array.isArray(body.values)) {
-    return jsonResponse(400, { error: "Send a values object." });
-  }
-  const incoming = body.values;
+  return jsonResponse(400, body);
+}
+__name(settingsFieldError, "settingsFieldError");
+__name2(settingsFieldError, "settingsFieldError");
+function settingsView(env, record) {
+  const payload = settingsPayload(env, effectiveFromRecord(env, record));
+  payload.version = record.version;
+  return payload;
+}
+__name(settingsView, "settingsView");
+__name2(settingsView, "settingsView");
+function parseIfMatch(header) {
+  if (header == null || String(header).trim() === "") return { version: null };
+  const text = String(header).trim();
+  const match = /^(?:W\/)?"(\d+)"$/.exec(text) || /^(\d+)$/.exec(text);
+  if (!match) return { error: true };
+  return { version: match[1] };
+}
+__name(parseIfMatch, "parseIfMatch");
+__name2(parseIfMatch, "parseIfMatch");
+function conflictResponse(env, record) {
+  return jsonResponse(409, {
+    error: "Settings changed before this save. Reload and try again.",
+    ...settingsView(env, record)
+  });
+}
+__name(conflictResponse, "conflictResponse");
+__name2(conflictResponse, "conflictResponse");
+async function applySettingsPatch(env, incoming, ifMatch) {
   const keys = Object.keys(incoming);
-  if (keys.length === 0 || keys.length > 20) {
-    return jsonResponse(400, { error: "Send between one and twenty settings." });
-  }
   const fields = blankBag();
   for (const key of keys) {
     const reported = responseFieldKey(key);
@@ -4477,32 +4581,69 @@ async function putAdminSettings(request, env) {
     const checked = validateFieldValue(key, incoming[key], env);
     if (!checked.ok) fields[reported] = checked.error;
   }
-  if (Object.keys(fields).length) {
-    return jsonResponse(400, { error: "Check the highlighted settings.", fields });
-  }
-  const next = blankBag();
-  const current = await readOverrides(env);
-  for (const key of Object.keys(SETTING_FIELDS)) {
-    if (!Object.prototype.hasOwnProperty.call(current, key)) continue;
-    const checked = validateFieldValue(key, current[key], env);
-    if (checked.ok) next[key] = checked.stored;
-  }
-  for (const key of keys) {
-    if (incoming[key] === null) {
-      delete next[key];
-      continue;
+  if (Object.keys(fields).length) return settingsFieldError("Check the highlighted settings.", fields);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const record = await readSettingsRecord(env);
+    if (ifMatch != null && String(record.version) !== ifMatch) return conflictResponse(env, record);
+    const next = blankBag();
+    for (const key of Object.keys(record.overrides)) {
+      if (record.overrides[key] === void 0) continue;
+      next[key] = record.overrides[key];
     }
-    const checked = validateFieldValue(key, incoming[key], env);
-    next[key] = checked.stored;
+    for (const key of keys) {
+      if (incoming[key] === null) {
+        delete next[key];
+        continue;
+      }
+      const checked = validateFieldValue(key, incoming[key], env);
+      if (!checked.ok) {
+        const retryFields = blankBag();
+        retryFields[responseFieldKey(key)] = checked.error;
+        return settingsFieldError("Check the highlighted settings.", retryFields);
+      }
+      next[key] = checked.stored;
+    }
+    const draft = materializeSettings(env, next, true);
+    if (!draft.ok) return settingsFieldError("Check the highlighted settings.", draft.errors);
+    try {
+      const version = await writeOverrides(env, next, record);
+      const payload = settingsPayload(env, draft.state);
+      payload.version = version;
+      return jsonResponse(200, payload);
+    } catch (err) {
+      if (err && err.code === "conflict") {
+        if (ifMatch != null) return conflictResponse(env, await readSettingsRecord(env));
+        continue;
+      }
+      return jsonResponse(500, { error: "Settings could not be saved." });
+    }
   }
-  const draft = materializeSettings(env, next, true);
-  if (!draft.ok) return jsonResponse(400, { error: "Check the highlighted settings.", fields: draft.errors });
+  return conflictResponse(env, await readSettingsRecord(env));
+}
+__name(applySettingsPatch, "applySettingsPatch");
+__name2(applySettingsPatch, "applySettingsPatch");
+async function putAdminSettings(request, env) {
+  const declared = Number(request.headers.get("content-length") || "0");
+  if (Number.isFinite(declared) && declared > 2e4) {
+    return jsonResponse(413, { error: "Settings document is too large." });
+  }
+  const ifMatch = parseIfMatch(request.headers.get("If-Match"));
+  if (ifMatch.error) return jsonResponse(400, { error: "If-Match has to be the settings version." });
+  let raw;
   try {
-    await writeOverrides(env, next);
+    raw = await request.json();
   } catch {
-    return jsonResponse(500, { error: "Settings could not be saved." });
+    return jsonResponse(400, { error: "The settings document could not be read." });
   }
-  return jsonResponse(200, settingsPayload(env, draft.state));
+  const parsed = SettingsUpdateBody.safeParse(raw);
+  if (!parsed.success) return jsonResponse(400, { error: "Send a values object." });
+  const body = parsed.data;
+  const incoming = body.values;
+  const keys = Object.keys(incoming);
+  if (keys.length === 0 || keys.length > 20) {
+    return jsonResponse(400, { error: "Send between one and twenty settings." });
+  }
+  return withSettingsWriteLock(() => applySettingsPatch(env, incoming, ifMatch.version));
 }
 __name(putAdminSettings, "putAdminSettings");
 __name2(putAdminSettings, "putAdminSettings");
@@ -4514,7 +4655,7 @@ async function handleAdminSettings(request, env, auth) {
     return jsonResponse(401, { error: "Authentication required." });
   }
   if (request.method === "GET") {
-    return jsonResponse(200, settingsPayload(env, await loadEffectiveSettings(env)));
+    return jsonResponse(200, settingsView(env, await readSettingsRecord(env)));
   }
   if (request.method === "PUT") return putAdminSettings(request, env);
   return jsonResponse(405, { error: "Method not allowed." });
@@ -6061,6 +6202,8 @@ var index_default = {
   }
 };
 export {
+  SettingsOverridesDocument,
+  SettingsUpdateBody,
   index_default as default
 };
 //# sourceMappingURL=index.js.map
