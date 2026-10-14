@@ -10,7 +10,7 @@ description: >-
 
 # FleetLink
 
-FleetLink hosts a file or a folder at a short link on `https://fleetlink.online`.  `https://fleetlink.app` serves the same worker.  The canonical CLI in this repo is `cli/fleet-share`.  The canonical HTTP behavior is `worker/fleetlink-api.mjs`.
+FleetLink hosts a file or a folder at a short link on `https://fleetlink.online`.  `https://fleetlink.app` serves the same worker.  The canonical CLI in this repo is `cli/fleet-share`.  Share routes live in `worker/fleetlink-api.mjs`.  Passkey accounts, the dashboard, cost guards, and per-user agent tokens live in `worker/lib/` and stay off the live worker until `DEPLOY.md` is followed.
 
 ## MCP
 
@@ -42,9 +42,9 @@ Lines are `KEY=value`.  A leading `export` is ignored by the CLI and will not ma
 
 Keep the file mode at `600`.  The CLI does not enforce that.
 
-The worker compares those values to its secret bindings `ADMIN_SECRET` or `FLEET_ADMIN_SECRET`, and `AGENT_SECRET` or `FLEET_AGENT_SECRET`.  There is one admin secret and one agent secret.  The worker does not store a table of per-seat tokens.
+The worker compares those values to its secret bindings `ADMIN_SECRET` or `FLEET_ADMIN_SECRET`, and `AGENT_SECRET` or `FLEET_AGENT_SECRET`.  There is one operator admin secret and one operator agent secret.  `worker/lib/tokens.mjs` also accepts `Authorization: Bearer fla_...` against the D1 `agent_tokens` table once that database is provisioned.  That path is not live until `DEPLOY.md` is followed.  The CLI does not send an `fla_` token.  Do not invent one.
 
-`Authorization: Bearer <same secret>` is accepted anywhere those headers are accepted.  A browser session cookie `fl_session` from `POST /api/auth` (`{"secret":"...","remember":true}`) also works.  Prefer a header for scripts.
+`Authorization: Bearer <same operator secret>` is accepted anywhere those headers are accepted.  A bearer value that starts with `fla_` is a per-user agent token, not the operator secret.  A browser session cookie `fl_session` from `POST /api/auth` (`{"secret":"...","remember":true}`) also works.  Prefer a header for scripts.
 
 Any non-empty `X-Fleet-Auth` header is rejected with `401` before routing, including when a current header is also present.  Do not send it.
 
@@ -94,7 +94,7 @@ A successful PUT body is plain text: `Successfully uploaded to <url>` and `(Expi
 
 `POST /api/redirect` with JSON `{"url":"https://...","slug":"name","days":30}` creates a redirect object.  Admin and agent may both choose `slug`.  `PUT /<slug>` with `X-Fleet-Redirect: https://...` (alias `X-Redirect-To`) does the same.  The destination must be `http` or `https` and at most 2048 characters.  `X-Fleet-Allow-Redirects: false` rejects redirect creation.  A host such as `notes.fleetlink.online/path` is stored under the key `notes/path`.  The labels `www`, `api`, `admin`, and `portal` are not remapped.
 
-Send `Content-Type: text/markdown; charset=utf-8` for Markdown you want the site to render.  Uploaded `.html` and `.htm` (any case) are always downloaded as `application/octet-stream` with `Content-Disposition: attachment`, even when the stored type is `text/html`.  A path containing `.env` is also downloaded as an attachment.  The worker's own directory index is generated HTML.  An uploaded `index.html` is not.
+Send `Content-Type: text/markdown; charset=utf-8` for Markdown you want the site to render.  Uploaded `.html` and `.htm` (any case), and any object whose stored content type is `text/html` or `application/xhtml+xml`, are always downloaded as `application/octet-stream` with `Content-Disposition: attachment`.  A path containing `.env` is also downloaded as an attachment.  The worker's own directory index is generated HTML.  An uploaded `index.html` is not.
 
 A caller may send `X-Fleet-Max-Days`, `X-Fleet-Max-Files`, `X-Fleet-Max-File-MB`, or `X-Fleet-Max-Batch-MB` to tighten that one request.  Those headers are not a saved policy.
 
