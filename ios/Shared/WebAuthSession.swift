@@ -39,15 +39,15 @@ public final class WebAuthSession: NSObject, ObservableObject {
         public var errorDescription: String? {
             switch self {
             case .canceled:
-                return "Sign-In Was Cancelled."
+                return "Sign-in was cancelled."
             case .providerUnavailable:
-                return "Sign-In Is Not Available Right Now.  The Provider Is Not Configured On The Server."
+                return "Sign-in is not available right now.  Try again later."
             case .providerError(let detail):
-                return detail.isEmpty ? "The Provider Could Not Complete The Sign-In." : detail
+                return detail.isEmpty ? "Sign-in could not finish.  Try again." : detail
             case .noSessionCookie:
-                return "Sign-In Finished Without A Session.  Please Try Again."
+                return "Sign-in finished without a session.  Try again."
             case .network:
-                return "Could Not Reach The Sign-In Service.  Please Check Your Connection."
+                return "Could not reach the sign-in service.  Check your connection."
             }
         }
     }
@@ -64,7 +64,7 @@ public final class WebAuthSession: NSObject, ObservableObject {
 
     public func signIn(with provider: Provider) async throws {
         guard let start = URL(string: "https://fleetlink.app/auth/\(provider.rawValue)/start") else {
-            throw Failure.providerError("The Sign-In Address Is Not Valid.")
+            throw Failure.providerError("The sign-in address is not valid.")
         }
         // The callback finishes with a 303 to `/`, which is not a custom scheme,
         // so the completion handler below is not the success signal; the cookie
@@ -97,7 +97,7 @@ public final class WebAuthSession: NSObject, ObservableObject {
         self.session = session
         isPresenting = true
         if !session.start() {
-            finish(with: .failure(Failure.providerError("The Sign-In Window Could Not Open.")))
+            finish(with: .failure(Failure.providerError("The sign-in window could not open.  Try again.")))
             return
         }
 

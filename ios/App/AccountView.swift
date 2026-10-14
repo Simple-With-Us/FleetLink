@@ -2,8 +2,7 @@ import AuthenticationServices
 import SwiftUI
 
 /// The account card: signed out shows the three providers, signed in shows who
-/// you are with a sign-out button.  Every string is Title Case and uses two
-/// spaces between sentences.
+/// you are with a sign-out button.  Sentences use two spaces.
 struct AccountView: View {
     @ObservedObject var session: SessionManager
     @ObservedObject var webAuth: WebAuthSession
@@ -45,7 +44,7 @@ struct AccountView: View {
                     .accessibilityIdentifier("accountName")
                 Spacer()
                 if user.isAdmin {
-                    Text("Admin")
+                    Text("Account owner")
                         .font(.caption2.bold())
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -59,7 +58,7 @@ struct AccountView: View {
                     .foregroundColor(.secondary)
                     .accessibilityIdentifier("accountEmail")
             }
-            Text("Signed In With A FleetLink Account.  Your Session Is Stored Securely On This Device.")
+            Text("Signed in to FleetLink.  This sign-in stays on this device.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -76,7 +75,7 @@ struct AccountView: View {
                 if isSigningIn {
                     ProgressView().controlSize(.small)
                 }
-                Text("Sign Out")
+                Text("Sign out")
             }
         }
         .disabled(isBusy)
@@ -87,7 +86,7 @@ struct AccountView: View {
 
     @ViewBuilder
     private var signedOut: some View {
-        Text("Sign In To View Your Shares, Create Custom Slugs, And Manage Agent Tokens.  Your Session Is Stored In The Keychain, Never In Plain Text.")
+        Text("Sign in to see your links and choose a short name.  This sign-in stays on this device.")
             .font(.caption)
             .foregroundColor(.secondary)
 
@@ -113,7 +112,7 @@ struct AccountView: View {
                         try await webAuth.signIn(with: provider)
                     } catch {
                         session.report(error: (error as? WebAuthSession.Failure)?.errorDescription
-                            ?? "Sign-In With \(provider.displayName) Could Not Start.")
+                            ?? "Sign in with \(provider.displayName) could not start.  Try again.")
                     }
                     isSigningIn = false
                 }

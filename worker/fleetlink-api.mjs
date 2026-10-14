@@ -30,6 +30,14 @@ __name2(safeEqual, "safeEqual");
 function escapeHtml(str) {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+function renderStatusPage(title, message) {
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)} \u2022 FleetLink</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 36rem; margin: 4rem auto; padding: 1.5rem; color: #111827; line-height: 1.55; }
+    a { color: #1d4ed8; }
+    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+  </style></head><body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="/">FleetLink home</a></p></main></body></html>`;
+}
 __name(escapeHtml, "escapeHtml");
 __name2(escapeHtml, "escapeHtml");
 function isSocialCrawler(userAgent) {
@@ -324,7 +332,7 @@ var BASE_SHORTCUT_XML = `<?xml version="1.0" encoding="UTF-8"?>
 			<key>WFWorkflowActionParameters</key>
 			<dict>
 				<key>WFCommentActionText</key>
-				<string>FleetLink - Share files, documents, and photos directly from the iOS Share Sheet to FleetLink.online.</string>
+				<string>Share a file or photo from the iPhone share sheet.  FleetLink copies the link when it finishes.</string>
 			</dict>
 		</dict>
 		<dict>
@@ -389,7 +397,7 @@ var BASE_SHORTCUT_XML = `<?xml version="1.0" encoding="UTF-8"?>
 				<key>WFAllowsMultilineText</key>
 				<false/>
 				<key>WFAskActionPrompt</key>
-				<string>Custom slug (leave blank to auto-generate)?</string>
+				<string>Link name (leave blank and FleetLink picks one)?</string>
 				<key>WFInputType</key>
 				<string>Text</string>
 			</dict>
@@ -758,7 +766,7 @@ var BASE_SHORTCUT_XML = `<?xml version="1.0" encoding="UTF-8"?>
 			<key>ParameterKey</key>
 			<string>WFTextActionText</string>
 			<key>Text</key>
-			<string>Enter your FleetLink Secret Token (Admin or Agent secret):</string>
+			<string>Enter your FleetLink sign-in code:</string>
 		</dict>
 	</array>
 	<key>WFWorkflowInputContentItemClasses</key>
@@ -785,12 +793,12 @@ function generateShortcutXml() {
 __name(generateShortcutXml, "generateShortcutXml");
 __name2(generateShortcutXml, "generateShortcutXml");
 function renderPrivacyHtml(origin) {
-  return `<!DOCTYPE html><html lang="en"><head><title>Privacy Policy &bull; FleetLink Hosting</title>
+  return `<!DOCTYPE html><html lang="en"><head><title>Privacy &bull; FleetLink</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   ${renderOgTags({
     title: "Privacy Policy \u2014 FleetLink",
-    description: "Privacy policy for FleetLink artifact hosting, ephemeral file sharing, and vanity redirects.",
+    description: "What FleetLink stores, how long a link stays up, and how to ask a question.",
     url: `${origin}/privacy`,
     imageUrl: `${origin}/preview.png`
   })}
@@ -805,6 +813,9 @@ function renderPrivacyHtml(origin) {
       --primary-hover: #1d4ed8;
     }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 2.5rem 1.5rem; max-width: 800px; margin: 0 auto; color: var(--text); line-height: 1.65; background: var(--bg); }
+    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+    .skip-link { position: absolute; left: 0.75rem; top: -4rem; background: #111827; color: #fff; padding: 0.55rem 0.8rem; border-radius: 6px; z-index: 10; font-weight: 700; text-decoration: none; }
+    .skip-link:focus { top: 0.75rem; }
     h1 { font-size: 2rem; font-weight: 800; margin-bottom: 0.5rem; color: #111827; letter-spacing: -0.025em; }
     h2 { font-size: 1.35rem; font-weight: 700; margin-top: 2rem; margin-bottom: 0.75rem; color: #1f2937; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
     p { margin-bottom: 1rem; }
@@ -822,57 +833,56 @@ function renderPrivacyHtml(origin) {
   </style>
 </head>
 <body>
-  <div class="back-nav"><a href="/">&larr; Back to FleetLink.online</a></div>
+  <a href="#privacy-content" class="skip-link">Skip to content</a>
+  <main id="privacy-content">
+  <div class="back-nav"><a href="/">&larr; Back to FleetLink</a></div>
   <span class="badge">Privacy Policy</span>
-  <h1>FleetLink Privacy Policy</h1>
+  <h1>Privacy</h1>
   <div class="meta-box">
     <strong>Effective Date:</strong> October 7, 2026 &bull; <strong>Scope:</strong> fleetlink.online, fleetlink.app, iOS App &amp; App Clip (online.fleetlink.ios), fleet-share CLI &bull; <strong>Operator:</strong> Simple With Us
   </div>
 
-  <h2>1. Core Privacy Commitment</h2>
-  <p>FleetLink is engineered specifically around <strong>ephemeral, zero-knowledge, time-bounded storage</strong>.&nbsp; Browsing, viewing, or downloading public files, static websites, and artifacts requires no user registration, no account creation, and no collection of personal identity data.&nbsp; We never monetize, sell, or rent your uploaded data, metadata, or activity to advertising networks or data brokers.</p>
+  <h2>What this page covers</h2>
+  <p>FleetLink holds a file or a web address for a set time, then removes it.&nbsp; Opening a link does not require an account.&nbsp; Sharing a new file or short link from the website does.&nbsp; We do not sell what you upload, and we do not use it for advertising.</p>
 
-  <h2>2. Ephemeral Storage &amp; Automatic Expiration</h2>
-  <p>Every file, batch, and redirect short URL uploaded to FleetLink is governed by an enforced Time-to-Live (TTL) expiration schedule:</p>
+  <h2>How long a link stays up</h2>
   <ul>
-    <li><strong>Unauthenticated Guest Files:</strong> Strictly capped at 6 hours maximum retention, after which files are permanently destroyed.</li>
-    <li><strong>Unauthenticated Guest Redirects:</strong> Capped at 24 hours maximum retention.</li>
-    <li><strong>AI Fleet Agents:</strong> Automated agent uploads default to 3 days and are strictly capped at 7 days maximum retention.</li>
-    <li><strong>Custom Vanity Redirects:</strong> Vanity short links are retained for up to 180 days (6 months).</li>
-    <li><strong>Permanent Admin Assets:</strong> Permanent hosting is restricted exclusively to authenticated administrative assets under 500 MB.</li>
-    <li><strong>Automated Pruning:</strong> When an expiration timestamp passes, all underlying file objects stored in Cloudflare R2 and routing tables are permanently and irreversibly purged from our storage infrastructure.</li>
+    <li><strong>Signed-in files:</strong> Up to 7 days (3 days unless you choose otherwise), then removed.</li>
+    <li><strong>Signed-in short links:</strong> Up to 6 months.</li>
+    <li><strong>Account owner:</strong> An upload under 500 MB can stay until you delete it.</li>
+    <li><strong>No account:</strong> Sharing from the website is turned off.&nbsp; If a share is ever accepted without an account, the cap is 10 files, 5 MB each, 10 MB together, 1 hour for files, and 6 hours for a short link.</li>
+  </ul>
+  <p>When the time is up, the file or short link is deleted.&nbsp; You can also delete your own link sooner from <a href="/portal">Your links</a>.</p>
+
+  <h2>What is stored</h2>
+  <ul>
+    <li><strong>Files you share.</strong> Text, pictures, and other files stay only for the time you chose.&nbsp; HTML files are stored so people can download them.&nbsp; They are not shown as a live page in the browser.</li>
+    <li><strong>Web addresses.</strong> A short link stores the address it should open.</li>
+    <li><strong>Passwords.</strong> If you set a password, FleetLink stores a one-way check, not the password itself.</li>
+    <li><strong>Sign-in codes.</strong> A code used by a script or shortcut is stored as a one-way check.</li>
+    <li><strong>Visit counts.</strong> The website host may count visits in aggregate.&nbsp; That count is not an advertising profile.</li>
   </ul>
 
-  <h2>3. Information We Collect and Process</h2>
-  <p>When you interact with FleetLink, we process only the minimal technical data required to deliver requested services:</p>
+  <h2>What we do not do</h2>
   <ul>
-    <li><strong>Uploaded Content:</strong> The files, directories, text, HTML widgets, and markdown you upload to generate temporary links.&nbsp; This content is stored ephemerally in Cloudflare R2 storage in encrypted form at rest.</li>
-    <li><strong>Redirect Targets:</strong> The destination URLs you provide when generating vanity short redirect links.</li>
-    <li><strong>Password Challenges:</strong> When an uploader enables password protection on a share, access is guarded using PBKDF2 cryptographic password hashes and salts.&nbsp; Cleartext passwords are never stored or logged.</li>
-    <li><strong>Authentication Tokens:</strong> Scoped API tokens generated for automated agents or administrators, stored only as cryptographic SHA-256 hashes.</li>
-    <li><strong>Technical Telemetry:</strong> Cloudflare privacy-first Web Analytics (RUM) measuring aggregated page performance and latency without tracking individual visitors, IP addresses, or cross-site browsing history.</li>
+    <li>We do not sell what you upload.</li>
+    <li>We do not add advertising trackers.</li>
+    <li>We do not read a password-protected file in order to describe it.</li>
   </ul>
 
-  <h2>4. What We Do Not Collect or Share</h2>
-  <ul>
-    <li>We do <strong>not</strong> require accounts or email addresses for public file sharing and artifact viewing.</li>
-    <li>We do <strong>not</strong> sell, license, or monetize any uploaded user data or traffic metadata.</li>
-    <li>We do <strong>not</strong> use third-party tracking scripts, advertising trackers, or behavioral profiling cookies.</li>
-    <li>We do <strong>not</strong> inspect or parse the contents of private, password-protected shares.</li>
-  </ul>
+  <h2>Deleting a link</h2>
+  <p>The connection uses HTTPS.&nbsp; When you are signed in, delete a file or a short link from <a href="/portal">Your links</a> and it is removed then.</p>
 
-  <h2>5. Security &amp; Self-Serve Deletion</h2>
-  <p>All communication with FleetLink is encrypted in transit using modern TLS (HTTPS).&nbsp; Uploaders holding their administrative secret token can immediately delete individual files, batches, or vanity redirect links at any time prior to scheduled expiration via the Web Admin Portal (<code>/portal</code>), CLI helper (<code>fleet-share</code>), or direct API call (<code>DELETE /&lt;slug&gt;/&lt;file&gt;</code>).&nbsp; Deletion immediately removes objects from Cloudflare R2 storage.</p>
+  <h2>iPhone app</h2>
+  <p>The FleetLink iPhone app and the small link preview do not ask for your contacts or your location.&nbsp; They do not read your photo library unless you choose a file to share.&nbsp; A release build may send a crash report with your name, email, and file contents removed.</p>
 
-  <h2>6. Apple iOS App &amp; App Clip</h2>
-  <p>The native FleetLink iOS parent app (<code>online.fleetlink.ios</code>) and embedded App Clip (<code>online.fleetlink.ios.Clip</code>) operate strictly within Apple's privacy sandbox.&nbsp; They request no device permissions, access no contacts or photo libraries without explicit user export, and perform zero location or telemetry tracking.</p>
-
-  <h2>7. Contact &amp; Inquiries</h2>
-  <p>For inquiries regarding this Privacy Policy, quota adjustments, or immediate manual pruning requests, please contact our administrative team at <a href="mailto:support@fleetlink.online">support@fleetlink.online</a> or visit the Simple With Us parent catalog at <a href="https://simplewithus.com/fleetlink/privacy.html" rel="noopener">simplewithus.com/fleetlink/privacy.html</a>.</p>
+  <h2>Questions</h2>
+  <p>Write to <a href="mailto:support@fleetlink.online">support@fleetlink.online</a>.&nbsp; The same policy is also published at <a href="https://simplewithus.com/fleetlink/privacy.html" rel="noopener">simplewithus.com/fleetlink/privacy.html</a>.</p>
 
   <footer>
-    <p>&copy; 2026 Simple With Us &bull; <a href="/">FleetLink.online</a> &bull; <a href="https://simplewithus.com/fleetlink/">Simple With Us Catalog</a> &bull; <a href="mailto:support@fleetlink.online">support@fleetlink.online</a></p>
+    <p>&copy; 2026 Simple With Us &bull; <a href="/">FleetLink</a> &bull; <a href="/instructions/">Instructions</a> &bull; <a href="mailto:support@fleetlink.online">support@fleetlink.online</a></p>
   </footer>
+  </main>
 </body></html>`;
 }
 __name(renderPrivacyHtml, "renderPrivacyHtml");
@@ -884,7 +894,7 @@ function renderLoginHtml(origin, errorMsg, isLoggedOut) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   ${renderOgTags({
     title: "Sign In \u2014 FleetLink",
-    description: "Sign in to FleetLink artifact hosting and vanity redirect management.",
+    description: "Sign in to share a file or see your links.",
     url: `${origin}/login`,
     imageUrl: `${origin}/preview.png`
   })}
@@ -916,26 +926,28 @@ function renderLoginHtml(origin, errorMsg, isLoggedOut) {
     .nav-links { display: flex; justify-content: space-between; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border); font-size: 0.85rem; }
     .nav-links a { color: var(--primary); text-decoration: none; }
     .nav-links a:hover { text-decoration: underline; }
-    .hint { font-size: 0.78rem; color: #94a3b8; margin-top: 0.25rem; }
+    .hint { font-size: 0.85rem; color: #334155; margin-top: 0.25rem; }
+    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+    button, .nav-links a { min-height: 44px; }
   </style></head><body>
   <div class="card">
     <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem;">
       <div style="font-size: 1.75rem;">\u26A1</div>
       <div style="font-weight: 800; font-size: 1.2rem; color: #0f172a;">Fleet<span style="color:var(--primary);">Link</span></div>
     </div>
-    <h1>Sign In</h1>
-    <p>Sign in with your username, email, account role, or secret token.</p>
-    ${isLoggedOut ? `<div class="msg-box success-box"><strong>\u2713 Signed Out:</strong> You have been successfully signed out.</div>` : ""}
+    <h1>Sign in</h1>
+    <p>Use the name and password for your account, or paste your sign-in code.</p>
+    ${isLoggedOut ? `<div class="msg-box success-box" role="status">You are signed out.</div>` : ""}
     ${errorMsg ? `<div class="msg-box error-box"><strong>Error:</strong> ${escapeHtml(errorMsg)}</div>` : ""}
     <form method="POST" action="/login" id="login-form">
       <div class="form-group">
-        <label for="username">Username, Email, or Secret Token:</label>
-        <input type="text" id="username" name="username" placeholder="admin, agent, email, or token" autocomplete="username" required autofocus>
+        <label for="username">Name, email, or sign-in code</label>
+        <input type="text" id="username" name="username" placeholder="Name, email, or sign-in code" autocomplete="username" required autofocus>
       </div>
       <div class="form-group">
-        <label for="password">Password (Optional if entering token above):</label>
-        <input type="password" id="password" name="password" placeholder="Password (or token)" autocomplete="current-password">
-        <div class="hint">Admins and agents can enter their secret token in either field.</div>
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Password, if you have one" autocomplete="current-password">
+        <div class="hint">A sign-in code can go in either box.&nbsp; The password can stay empty when you use a code.</div>
       </div>
       <div class="checkbox-wrap">
         <input type="checkbox" id="remember" name="remember" value="true" checked>
@@ -945,7 +957,7 @@ function renderLoginHtml(origin, errorMsg, isLoggedOut) {
     </form>
     <div class="nav-links">
       <a href="/">&larr; FleetLink Home</a>
-      <a href="/portal">Admin Portal</a>
+      <a href="/portal">Your links</a>
       <a href="/privacy">Privacy Policy</a>
     </div>
   </div>
@@ -954,13 +966,13 @@ function renderLoginHtml(origin, errorMsg, isLoggedOut) {
 __name(renderLoginHtml, "renderLoginHtml");
 __name2(renderLoginHtml, "renderLoginHtml");
 function renderHomeHtml(origin) {
-  return `<!DOCTYPE html><html lang="en"><head><title>FleetLink Hosting</title>
+  return `<!DOCTYPE html><html lang="en"><head><title>FleetLink — share a file or a short link</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.Clip, app-clip-display=card">
   ${renderOgTags({
-    title: "FleetLink Hosting",
-    description: "Temporary, high-performance artifact, file, web directory, and static site sharing for AI fleet agents and developers.",
+    title: "FleetLink",
+    description: "Share a file or a short link for a set time.  It is removed when that time is up.",
     url: origin,
     imageUrl: `${origin}/preview.png`
   })}
@@ -1056,7 +1068,7 @@ function renderHomeHtml(origin) {
     .upload-form-group input[type="text"], .upload-form-group input[type="password"], .upload-form-group select { width: 100%; box-sizing: border-box; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.92rem; }
     .drop-zone { border: 2px dashed #93c5fd; background: #ffffff; border-radius: 8px; padding: 1.5rem; text-align: center; cursor: pointer; transition: border-color 0.2s; }
     .drop-zone:hover { border-color: var(--primary); }
-    .file-input { display: none; }
+    .file-input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; display: block; }
     .btn-upload { background: var(--primary); color: white; border: none; border-radius: 6px; padding: 0.65rem 1.25rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
     .btn-upload:hover { background: var(--primary-hover); }
     .progress-bar { width: 100%; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-top: 1rem; display: none; }
@@ -1074,34 +1086,50 @@ function renderHomeHtml(origin) {
     .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
     .btn-secondary { background: #f3f4f6; color: #4b5563; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.55rem 1rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; }
     .btn-primary { background: var(--primary); color: white; border: none; border-radius: 6px; padding: 0.55rem 1.1rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
-    .modal-error { color: #dc2626; font-size: 0.85rem; margin-bottom: 0.75rem; display: none; }
+    .modal-error { color: #991b1b; font-size: 0.85rem; margin-bottom: 0.75rem; display: none; }
+    .skip-link { position: absolute; left: 0.75rem; top: -4rem; background: #111827; color: #ffffff; padding: 0.55rem 0.8rem; border-radius: 6px; z-index: 10001; font-weight: 700; }
+    .skip-link:focus { top: 0.75rem; }
+    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+    .nav-link-btn, .auth-btn, .btn-upload, .copy-btn, button { min-height: 44px; }
+    footer a { color: #1e3a8a; text-decoration: underline; }
+    .file-input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+    .file-input:focus-visible + .drop-zone { outline: 3px solid #1d4ed8; outline-offset: 3px; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+    .fine { color: #374151; font-size: 0.9rem; line-height: 1.5; }
+    @media (prefers-reduced-motion: reduce) {
+      .pulse-dot { animation: none; }
+      * { scroll-behavior: auto !important; transition: none !important; }
+    }
   </style></head><body>
 
-    <nav class="top-nav">
+    <a href="#content" class="skip-link">Skip to content</a>
+    <nav class="top-nav" aria-label="Primary">
       <a href="/" class="brand">
-        <div class="pulse-dot"></div>
+        <div class="pulse-dot" aria-hidden="true"></div>
         <div class="brand-logo">Fleet<span>Link</span></div>
       </a>
       <div class="nav-actions">
-        <a href="/portal" id="nav-portal-btn" class="nav-link-btn" style="display: inline-flex; background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;">
-          <span>\u26A1</span> <span>Portal</span>
-        </a>
         <a href="#upload-wizard" class="nav-link-btn" style="background: #ecfdf5; color: #065f46; border-color: #a7f3d0;">
-          <span>\u{1F680}</span> <span>Upload</span>
+          Share
         </a>
         <a href="/instructions/" class="nav-link-btn">
-          <span>\u{1F4D6}</span> <span>Instructions</span>
+          Instructions
+        </a>
+        <a href="/portal" id="nav-portal-btn" class="nav-link-btn" style="display: inline-flex; background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;">
+          Your links
         </a>
         <div id="auth-container">
           <button type="button" id="auth-btn" class="auth-btn" onclick="openAuthModal()">
-            <span id="auth-lock-icon">\u{1F512}</span> <span id="auth-btn-label">Authenticate</span>
+            <span id="auth-lock-icon" aria-hidden="true">\u{1F512}</span> <span id="auth-btn-label">Sign in</span>
           </button>
         </div>
       </div>
     </nav>
 
-    <h1>FleetLink Hosting</h1>
-    <p class="sub">High-performance artifact, markdown, directory, and static site sharing.</p>
+    <main id="content">
+    <p class="badge">Temporary sharing</p>
+    <h1>Share a file.  Send a short link.</h1>
+    <p class="sub">FleetLink holds a file or a web address for a set time, then removes it.&nbsp; Anyone with the link can open it.</p>
     
     <div class="domain-pills">
       <span class="domain-pill-primary">Primary: FleetLink.online</span>
@@ -1109,440 +1137,183 @@ function renderHomeHtml(origin) {
     </div>
 
     <!-- Interactive In-Browser Upload Wizard (Direct Web Upload) -->
-    <div id="upload-wizard" class="card">
+    <div id="upload-wizard" class="card" aria-labelledby="share-heading">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
-        <h3 style="margin: 0; color: #065f46;">\u{1F680} Direct Web Upload Wizard</h3>
+        <h3 style="margin: 0; color: #065f46;" id="share-heading">Share from this browser</h3>
         <div style="display: flex; gap: 0.5rem; align-items: center;">
           <span id="user-role-badge" class="badge" style="background: #d1fae5; color: #065f46; margin: 0; display: none;">Authenticated</span>
           <button type="button" id="wizard-signout-btn" onclick="handleSignOutPrompt()" style="background: #ffffff; border: 1px solid #86efac; color: #065f46; border-radius: 6px; padding: 0.25rem 0.6rem; font-size: 0.8rem; cursor: pointer; font-weight: 600; display: none;">Sign Out</button>
         </div>
       </div>
-      <p id="wizard-auth-prompt" style="font-size: 0.92rem; color: #047857; margin-bottom: 1.25rem;">
-        Upload files or create redirect short links.  Uploads and redirects require an Admin or Agent token.  Enter your token or sign in to continue.
+      <p id="wizard-auth-prompt" style="font-size: 0.92rem; color: #065f46; margin-bottom: 1.25rem;">
+        Sign in to share a file or make a short link.&nbsp; When the time is up, FleetLink removes it.
       </p>
+      <div id="wizard-notice-box" role="alert" style="display: none;"></div>
 
-      <!-- Wizard Mode Switcher: Files vs Custom Redirect URL -->
-      <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem;">
-        <button type="button" id="tab-files" class="nav-link-btn" style="background: #2563eb; color: #ffffff; border-color: #2563eb; padding: 0.45rem 0.9rem; font-size: 0.88rem;" onclick="switchWizardMode('files')">\u{1F4C1} Files &amp; Batches</button>
-        <button type="button" id="tab-redirect" class="nav-link-btn" style="background: #ffffff; color: #374151; border-color: #d1d5db; padding: 0.45rem 0.9rem; font-size: 0.88rem;" onclick="switchWizardMode('redirect')">\u{1F517} Custom Redirect URL</button>
+      <div role="tablist" aria-label="What to share" style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem;">
+        <button type="button" id="tab-files" role="tab" aria-selected="true" aria-controls="wizard-file-group" class="nav-link-btn" style="background: #2563eb; color: #ffffff; border-color: #2563eb; padding: 0.45rem 0.9rem; font-size: 0.88rem;" onclick="switchWizardMode('files')">Files</button>
+        <button type="button" id="tab-redirect" role="tab" aria-selected="false" aria-controls="wizard-target-url-group" class="nav-link-btn" style="background: #ffffff; color: #374151; border-color: #d1d5db; padding: 0.45rem 0.9rem; font-size: 0.88rem;" onclick="switchWizardMode('redirect')">Short link</button>
       </div>
 
       <form id="browser-upload-form" onsubmit="handleBrowserUpload(event)">
         <!-- Inline Secret field shown when not signed in -->
         <div id="wizard-inline-secret-group" class="upload-form-group" style="background: #fefce8; border: 1px solid #fde047; padding: 0.85rem; border-radius: 8px;">
-          <label for="wizard-secret-input" style="color: #854d0e; font-weight: 700; margin-bottom: 0.25rem;">\u{1F510} Sign In / Authentication Token:</label>
-          <input type="password" id="wizard-secret-input" placeholder="Enter FLEET_ADMIN_SECRET or FLEET_AGENT_SECRET" style="background: white; border-color: #facc15;" autocomplete="current-password">
-          <div style="font-size: 0.78rem; color: #a16207; margin-top: 0.35rem;">Anonymous uploads are no longer accepted.  Enter an Admin or Agent token, or sign in.</div>
+          <label for="wizard-secret-input" style="color: #713f12; font-weight: 700; margin-bottom: 0.25rem;">Sign-in code</label>
+          <input type="password" id="wizard-secret-input" placeholder="Paste your sign-in code" style="background: white; border-color: #facc15;" autocomplete="current-password">
+          <div style="font-size: 0.85rem; color: #713f12; margin-top: 0.35rem;">Required.&nbsp; You can also use Sign in at the top.&nbsp; This code is not saved inside the iPhone shortcut.</div>
         </div>
 
         <!-- Files Selection Group (Shown in Files mode) -->
-        <div id="wizard-file-group" class="upload-form-group">
-          <label>Select Files or Folder:</label>
-          <div class="drop-zone" onclick="document.getElementById('wizard-files').click()">
-            <div id="drop-text" style="font-size: 0.95rem; color: #4b5563;">\u{1F4C1} Tap or drag files / photos here to upload</div>
-            <input type="file" id="wizard-files" class="file-input" multiple onchange="handleFilesSelected(this)">
-          </div>
+        <div id="wizard-file-group" class="upload-form-group" role="tabpanel" aria-labelledby="tab-files">
+          <label for="wizard-files">Files</label>
+          <input type="file" id="wizard-files" class="file-input" multiple onchange="handleFilesSelected(this)">
+          <label class="drop-zone" for="wizard-files">
+            <span id="drop-text" style="font-size: 0.95rem; color: #374151;">Choose files</span>
+          </label>
           <div id="file-count-label" style="font-size: 0.8rem; color: #6b7280; margin-top: 0.3rem;"></div>
         </div>
 
         <!-- Target URL Group (Shown in Redirect mode) -->
-        <div id="wizard-target-url-group" class="upload-form-group" style="display: none; background: #eff6ff; border: 1px solid #bfdbfe; padding: 0.85rem; border-radius: 8px;">
-          <label for="wizard-target-url" style="color: #1e40af; font-weight: 700; margin-bottom: 0.3rem;">\u{1F3AF} Destination / Target URL (Required):</label>
-          <input type="url" id="wizard-target-url" placeholder="https://example.com/my-destination-url" style="background: white; border-color: #93c5fd;">
-          <div style="font-size: 0.78rem; color: #3b82f6; margin-top: 0.35rem;">Visitors to your short link will be redirected (HTTP 302) to this address.  Unauthenticated guests get 24-hour links; authenticated users and agents can retain redirects for up to 30&ndash;180 days.</div>
+        <div id="wizard-target-url-group" class="upload-form-group" role="tabpanel" aria-labelledby="tab-redirect" style="display: none; background: #eff6ff; border: 1px solid #bfdbfe; padding: 0.85rem; border-radius: 8px;">
+          <label for="wizard-target-url" style="color: #1e3a8a; font-weight: 700; margin-bottom: 0.3rem;">Web address to open</label>
+          <input type="url" id="wizard-target-url" placeholder="https://example.com/page" style="background: white; border-color: #93c5fd;" inputmode="url" autocomplete="url">
+          <div style="font-size: 0.85rem; color: #1e3a8a; margin-top: 0.35rem;">People who open your FleetLink link are sent to this address.&nbsp; A signed-in short link can last up to 6 months.</div>
         </div>
 
         <div class="form-grid">
           <div class="upload-form-group">
-            <label for="wizard-slug" id="wizard-slug-label">Custom Slug (Optional for Auth Users; Guests get Random Slugs):</label>
-            <input type="text" id="wizard-slug" placeholder="e.g. test-report or docs">
+            <label for="wizard-slug" id="wizard-slug-label">Link name (optional)</label>
+            <input type="text" id="wizard-slug" placeholder="notes or weekly-update" autocomplete="off" spellcheck="false">
           </div>
           <div class="upload-form-group">
-            <label for="wizard-ttl">Expiration (TTL):</label>
+            <label for="wizard-ttl">How long it stays up</label>
             <select id="wizard-ttl">
-              <option value="0.0416">1 Hour</option>
-              <option value="0.25" selected>6 Hours (Guest Max)</option>
-              <option value="1">1 Day (Redirect Guest Max)</option>
-              <option value="3">3 Days (Auth Default)</option>
-              <option value="7">7 Days (Auth Files Max)</option>
-              <option value="30">30 Days (Auth Redirect)</option>
-              <option value="forever" id="ttl-forever-opt">Forever (Admin Only)</option>
+              <option value="0.0416">1 hour</option>
+              <option value="0.25">6 hours</option>
+              <option value="1">1 day</option>
+              <option value="3" selected>3 days</option>
+              <option value="7">7 days</option>
+              <option value="forever" id="ttl-forever-opt" disabled>Until you delete it</option>
             </select>
           </div>
         </div>
 
         <div class="form-grid">
           <div class="upload-form-group">
-            <label for="wizard-title">Title / Heading (Link Preview):</label>
-            <input type="text" id="wizard-title" placeholder="e.g. FleetLink Documentation">
+            <label for="wizard-title">Title shown with the link</label>
+            <input type="text" id="wizard-title" placeholder="Weekly notes">
           </div>
           <div class="upload-form-group">
-            <label for="wizard-password">Password Protect (Optional):</label>
-            <input type="text" id="wizard-password" placeholder="Leave empty for public share">
+            <label for="wizard-password">Password (optional)</label>
+            <input type="text" id="wizard-password" placeholder="Leave empty if anyone with the link may open it" autocomplete="off">
           </div>
         </div>
 
         <div class="upload-form-group">
-          <label for="wizard-preview">Social Sharing Preview Image (Optional, max 5MB):</label>
+          <label for="wizard-preview">Picture for the link preview (optional, up to 5 MB)</label>
           <input type="file" id="wizard-preview" accept="image/png,image/jpeg,image/webp,image/gif" style="font-size: 0.85rem;">
         </div>
 
-        <div class="progress-bar" id="upload-progress-bar">
+        <div class="progress-bar" id="upload-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Sharing progress">
           <div class="progress-fill" id="upload-progress-fill"></div>
         </div>
 
         <button type="submit" id="btn-submit-upload" class="btn-upload" style="margin-top: 0.5rem; width: 100%;">
-          Upload to FleetLink
+          Share
         </button>
       </form>
 
-      <div class="upload-result" id="wizard-result"></div>
+      <div class="upload-result" id="wizard-result" role="status"></div>
     </div>
 
     <!-- Apple Shortcut for iOS Share Sheet (Prominent Top Feature) -->
     <div id="shortcut-feature" class="card" style="background: #fdf4ff; border: 1px solid #f0abfc; margin-top: 1.5rem;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
-        <h3 style="margin: 0; color: #86198f; display: flex; align-items: center; gap: 0.5rem;">
-          <span>\u{1F4F2}</span> <span>Apple Shortcut (iOS Share Sheet Integration)</span>
-        </h3>
-        <span class="badge" style="background: #fae8ff; color: #86198f; margin: 0; border: 1px solid #f5d0fe;">Share Sheet 1-Tap Export</span>
+        <h3 style="margin: 0; color: #86198f;">Share from iPhone</h3>
+        <span class="badge" style="background: #fae8ff; color: #6b21a8; margin: 0; border: 1px solid #f5d0fe;">Share sheet</span>
       </div>
-      <p style="color: #701a75; font-size: 0.95rem; margin-bottom: 1.25rem; line-height: 1.5;">
-        Export files, documents, and photos directly from any app on your iPhone or iPad (Files, Photos, Safari, Notes) to FleetLink with a single tap in the iOS Share Sheet. Uploads instantly and copies your public share link to your clipboard.
+      <p style="color: #581c87; font-size: 0.95rem; margin-bottom: 1.25rem; line-height: 1.5;">
+        Add a shortcut, then use Share in Photos, Files, or Safari.&nbsp; FleetLink uploads the file and copies the link.
       </p>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
         <div style="background: #ffffff; border: 1px solid #f5d0fe; border-radius: 8px; padding: 1.25rem; display: flex; flex-direction: column; justify-content: space-between;">
           <div>
-            <h4 style="margin: 0 0 0.35rem 0; color: #86198f; font-size: 0.98rem; font-weight: 700;">\u{1F4E5} Official Signed Shortcut</h4>
-            <p style="font-size: 0.85rem; color: #4b5563; margin-bottom: 1rem; line-height: 1.4;">
-              Apple-signed shortcut package (<code>.shortcut</code>). Opens natively in the iOS Shortcuts app and prompts for your FleetLink secret during setup.
+            <h4 style="margin: 0 0 0.35rem 0; color: #86198f; font-size: 0.98rem; font-weight: 700;">Add the shortcut</h4>
+            <p style="font-size: 0.9rem; color: #374151; margin-bottom: 1rem; line-height: 1.45;">
+              Opens in Shortcuts and asks for your sign-in code.&nbsp; The file you download does not contain that code.
             </p>
           </div>
-          <a href="/Share-to-FleetLink.shortcut?download=1" class="btn-upload" style="display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; text-decoration: none; font-size: 0.9rem; padding: 0.6rem 1rem; background: #9333ea; color: white; border-radius: 6px; text-align: center;" download="Share-to-FleetLink.shortcut">
-            <span>\u2B07\uFE0F</span> <span>Download Official Shortcut (.shortcut)</span>
+          <a href="/Share-to-FleetLink.shortcut?download=1" class="btn-upload" style="display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; text-decoration: none; font-size: 0.9rem; padding: 0.6rem 1rem; background: #6b21a8; color: white; border-radius: 6px; text-align: center;" download="Share-to-FleetLink.shortcut">
+            <span>Download shortcut</span>
           </a>
         </div>
 
         <div style="background: #ffffff; border: 1px solid #f5d0fe; border-radius: 8px; padding: 1.25rem; display: flex; flex-direction: column; justify-content: space-between;">
           <div>
-            <h4 style="margin: 0 0 0.35rem 0; color: #86198f; font-size: 0.98rem; font-weight: 700;">\u{1F511} Personalize with Your Secret</h4>
-            <p style="font-size: 0.85rem; color: #4b5563; margin-bottom: 1rem; line-height: 1.4;">
-              Type your secret token above and copy it to paste during iOS setup, then download the shortcut.  The shortcut asks for your secret when you add it and never contains one.
+            <h4 style="margin: 0 0 0.35rem 0; color: #86198f; font-size: 0.98rem; font-weight: 700;">Have the code ready</h4>
+            <p style="font-size: 0.9rem; color: #374151; margin-bottom: 1rem; line-height: 1.45;">
+              Paste your sign-in code in the box above, copy it, then download the shortcut and paste when Shortcuts asks.
             </p>
           </div>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
             <button type="button" id="copy-shortcut-token-btn" onclick="copyTokenForShortcut()" style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.88rem; padding: 0.6rem 0.9rem; background: #fdf4ff; border: 1px solid #c084fc; border-radius: 6px; color: #7e22ce; font-weight: 600; cursor: pointer; transition: all 0.15s;">
-              <span>\u{1F4CB}</span> <span id="copy-shortcut-token-label">Copy Secret for Shortcut</span>
+              <span id="copy-shortcut-token-label">Copy sign-in code</span>
             </button>
-            <button type="button" id="btn-download-custom-shortcut" onclick="downloadCustomShortcut()" style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.88rem; padding: 0.6rem 0.9rem; background: #7e22ce; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: all 0.15s;">
-              <span>\u26A1</span> <span>Download Shortcut</span>
+            <button type="button" id="btn-download-custom-shortcut" onclick="downloadCustomShortcut()" style="display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.88rem; padding: 0.6rem 0.9rem; background: #6b21a8; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">
+              <span>Download shortcut</span>
             </button>
           </div>
         </div>
       </div>
 
       <div style="font-size: 0.84rem; color: #701a75; line-height: 1.5; border-top: 1px dashed #f5d0fe; padding-top: 0.75rem;">
-        \u{1F4A1} <strong>Quick Setup:</strong> Tap <strong>Copy Secret</strong> &rarr; Tap <strong>Download Shortcut</strong> &rarr; Tap <strong>"Add Shortcut"</strong> in iOS Shortcuts &rarr; Paste your secret when prompted &rarr; All set!  Now tap <strong>Share &rarr; "Share to FleetLink"</strong> in Photos, Files, or Safari.
+        <strong>Setup:</strong> Copy sign-in code, download the shortcut, tap Add Shortcut, then paste the code when asked.&nbsp; After that, use Share and choose Share to FleetLink.
       </div>
     </div>
 
-    <!-- Core Features Grid -->
     <div class="features-grid">
       <div class="feature-card">
-        <span class="feature-icon">\u{1F4DD}</span>
-        <div class="feature-title">Native Markdown Rendering</div>
-        <p class="feature-desc">Upload <code>.md</code> documents to view beautifully formatted GitHub-styled pages with syntax highlighting, clean typography, and responsive reading views.</p>
+        <div class="feature-title">Notes that read like a page</div>
+        <p class="feature-desc">A <code>.md</code> file opens as formatted text, with room to read on a phone.</p>
       </div>
-
       <div class="feature-card">
-        <span class="feature-icon">\u{1F310}</span>
-        <div class="feature-title">Static Website Hosting</div>
-        <p class="feature-desc">Deploy static sites and documentation folders containing an <code>index.html</code>. Assets, scripts, and relative links resolve naturally.</p>
+        <div class="feature-title">A folder you can browse</div>
+        <p class="feature-desc">Several files under one link get a simple list, with the size of each file.</p>
       </div>
-
       <div class="feature-card">
-        <span class="feature-icon">\u{1F4C2}</span>
-        <div class="feature-title">Web Directory Browsing</div>
-        <p class="feature-desc">Batches and folder uploads automatically generate an interactive, clean directory index with file sizes, counts, and one-click downloads.</p>
+        <div class="feature-title">A title and a picture</div>
+        <p class="feature-desc">Messages and other apps can show the title and picture you chose for the link.</p>
       </div>
-
       <div class="feature-card">
-        <span class="feature-icon">\u{1F5BC}\uFE0F</span>
-        <div class="feature-title">Social Sharing Preview Cards</div>
-        <p class="feature-desc">Configure titles and preview images (<code>preview.png</code>) to render rich Open Graph and Twitter summary cards for Slack, iMessage, etc.</p>
-      </div>
-
-      <div class="feature-card">
-        <span class="feature-icon">\u{1F512}</span>
-        <div class="feature-title">Password Protection</div>
-        <p class="feature-desc">Lock sensitive artifacts behind a password gate (<code>--password &lt;phrase&gt;</code>). Authenticated Admin browser sessions bypass prompts automatically.</p>
-      </div>
-
-      <div class="feature-card">
-        <span class="feature-icon">\u26A1</span>
-        <div class="feature-title">iOS App Clip Integration</div>
-        <p class="feature-desc">Instantaneous preview on iOS via the native Apple App Clip (<code>online.fleetlink.Clip</code>) directly from Messages, Safari, or QR codes without full app install.</p>
-      </div>
-
-      <div class="feature-card">
-        <span class="feature-icon">\u23F1\uFE0F</span>
-        <div class="feature-title">Two-Tier Expiration & Permanent</div>
-        <p class="feature-desc">Automated AI fleet seats use scoped tokens capped at 7 days max. Human operators and Admin tokens can host assets permanently (<code>forever</code>).</p>
+        <div class="feature-title">A password when you want one</div>
+        <p class="feature-desc">Leave the password empty and anyone with the link can open it.&nbsp; Set one and they must type it first.</p>
       </div>
     </div>
 
-    <!-- Upload Limits & Enterprise Support Card -->
-    <div class="card" style="background: #f8fafc; border-left: 4px solid var(--primary); margin-top: 1rem;">
-      <h3 style="margin-top: 0; font-size: 1.15rem; color: #0f172a;">\u{1F4CA} Upload Limits &amp; Storage Quotas</h3>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin: 0.75rem 0;">
-        <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 1rem;">
-          <h4 style="margin: 0 0 0.35rem 0; color: #b45309; font-size: 0.95rem;">\u{1F464} Guest Limits (No Login)</h4>
-          <ul style="margin: 0; padding-left: 1.2rem; font-size: 0.88rem; color: #334155;">
-            <li><strong>Batch Total Limit:</strong> Up to 20 MB total per upload</li>
-            <li><strong>File Count:</strong> Up to 40 files per share</li>
-            <li><strong>Retention:</strong> 6 hours max for files; 24 hours max for redirect links</li>
-            <li><strong>Lease Renewals:</strong> Renew up to 3 times (restarts timer)</li>
-            <li><strong>Slugs:</strong> Auto-generated random slugs only</li>
-            <li><strong>Browser Cap:</strong> Up to 60 MB / 120 files across active shares</li>
-          </ul>
-        </div>
-        <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 1rem;">
-          <h4 style="margin: 0 0 0.35rem 0; color: #2563eb; font-size: 0.95rem;">\u2728 Free User Account Limits</h4>
-          <ul style="margin: 0; padding-left: 1.2rem; font-size: 0.88rem; color: #334155;">
-            <li><strong>Batch Total Limit:</strong> Up to 300 MB per upload</li>
-            <li><strong>File Count:</strong> Up to 500 files per share</li>
-            <li><strong>Retention:</strong> Up to 7 days for files; up to 30 days for redirects</li>
-            <li><strong>Slugs:</strong> Custom vanity slugs &amp; slug renaming in portal</li>
-            <li><strong>Agent Tokens:</strong> Up to 3 agent sub-accounts included</li>
-            <li><strong>Higher Limits:</strong> 1-click limit increase request after 3 slugs</li>
-          </ul>
-        </div>
-        <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 1rem;">
-          <h4 style="margin: 0 0 0.35rem 0; color: #065f46; font-size: 0.95rem;">\u{1F916} Agent Token Limits</h4>
-          <ul style="margin: 0; padding-left: 1.2rem; font-size: 0.88rem; color: #334155;">
-            <li><strong>Per-File Size:</strong> Up to 100 MB per file</li>
-            <li><strong>Batch Total Limit:</strong> Up to 500 MB per upload</li>
-            <li><strong>File Count:</strong> Up to 50 files per share</li>
-            <li><strong>Retention:</strong> Capped at 7 days maximum (default 3 days)</li>
-          </ul>
-        </div>
-        <div style="background: #ffffff; border: 1px solid var(--border); border-radius: 8px; padding: 1rem;">
-          <h4 style="margin: 0 0 0.35rem 0; color: #1e40af; font-size: 0.95rem;">\u{1F451} Admin Token Limits</h4>
-          <ul style="margin: 0; padding-left: 1.2rem; font-size: 0.88rem; color: #334155;">
-            <li><strong>Per-File Size:</strong> Up to 300 MB per file</li>
-            <li><strong>Batch Total Limit:</strong> Up to 1 GB (1,024 MB)</li>
-            <li><strong>File Count:</strong> Up to 1,000 files per upload</li>
-            <li><strong>Retention:</strong> Permanent (<code>forever</code>) for uploads &le; 500 MB</li>
-          </ul>
-        </div>
-      </div>
-      <p style="margin: 0.5rem 0 0 0; font-size: 0.88rem; color: #64748b;">
-        Need higher upload limits, custom retention rules, or dedicated enterprise storage quotas? Contact <a href="mailto:support@fleetlink.online" style="color: var(--primary); font-weight: 600; text-decoration: underline;">support@fleetlink.online</a>.
-      </p>
-      <p style="margin: 0.75rem 0 0 0; font-size: 0.78rem; color: #94a3b8; line-height: 1.4; border-top: 1px dashed var(--border); padding-top: 0.6rem;">
-        * Notice: All storage quotas, upload allowances, and retention timeframes are provided on a best-effort, non-binding basis. FleetLink reserves the right to modify limits, prune, or delete hosted files and batches at any time without prior notice in cases of excessive resource utilization, storage constraints, or abuse.
-      </p>
+    <div class="card" style="border-left: 4px solid var(--primary);">
+      <h3 style="margin-top: 0;">How long it stays up</h3>
+      <p class="fine">Sign in before you share.&nbsp; A signed-in file can stay up to 7 days.&nbsp; A signed-in short link can stay up to 6 months.&nbsp; The account owner can keep a smaller upload until they delete it.</p>
+      <p class="fine">Sharing without an account is turned off on this website.&nbsp; If a share is ever accepted without an account, it is capped at 10 files, 5 MB each, 10 MB together, 1 hour for files, and 6 hours for short links.</p>
+      <p class="fine" style="margin-bottom: 0;">HTML files download instead of opening in the browser.&nbsp; <a href="/instructions/">Read the instructions</a> for the iPhone shortcut and for sharing from a computer.</p>
     </div>
 
-    <!-- Apple App Clip Usage Guide -->
-    <div class="card" style="background: #faf5ff; border: 1px solid #e9d5ff; margin-top: 1rem;">
-      <h3 style="margin-top: 0; color: #6b21a8; font-size: 1.15rem;">\u26A1 How to Use the Apple App Clip</h3>
-      <p style="color: #581c87; font-size: 0.92rem; margin-bottom: 0.75rem;">
-        FleetLink includes a fully built native SwiftUI App Clip (<code>online.fleetlink.Clip</code>) for instant artifact viewing on iPhone and iPad without installing an app from the App Store:
-      </p>
-      <ul style="color: #4c1d95; font-size: 0.9rem; margin-bottom: 0.5rem;">
-        <li><strong>Safari Smart App Banner:</strong> Visiting any FleetLink share in mobile Safari automatically displays an iOS "Open in App Clip" card at the top.</li>
-        <li><strong>iMessage & Notes:</strong> Sending or tapping a FleetLink link in Apple Messages renders an interactive App Clip card that slides up natively.</li>
-        <li><strong>Instant Zero-Install Launch:</strong> Tapping "Open" launches the native iOS viewer instantly with smooth zooming, native code syntax highlighting, markdown rendering, and 1-tap clipboard copying.</li>
-        <li><strong>Public Distribution:</strong> Managed via XcodeGen in <code>ios/</code> under Apple Team ID <code>CC8UTF7ATG</code> and pre-configured for App Store Connect distribution.</li>
-      </ul>
-    </div>
-
-    <!-- Step 1: Download Toolkit Files -->
-    <div class="card">
-      <h3>\u{1F4E6} Download FleetLink CLI & Token File</h3>
-      <p>Download the pre-packaged kit components below to upload from your local terminal or scripts:</p>
-      
-      <div class="download-grid">
-        <a href="/instructions/fleet-share?download=1" class="download-card" download="fleet-share">
-          <h4>\u{1F4E5} fleet-share</h4>
-          <p>Universal bash CLI for uploading files, directories, websites, and preview cards.</p>
-        </a>
-        <a href="/instructions/fleetlink-auth.env?download=1" class="download-card" download="fleetlink-auth.env">
-          <h4>\u{1F511} fleetlink-auth.env</h4>
-          <p>Authentication token file containing your Admin and Agent secrets.</p>
-        </a>
-      </div>
-    </div>
-
-    <!-- Step 2: Install CLI & Place Secrets -->
-    <div class="card">
-      <h3>\u{1F4BB} Quick Terminal Setup</h3>
-      <p>Run these commands in macOS or Linux terminal to place credentials and install the CLI:</p>
-      
-      <h4>1. Place authentication credentials:</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">mkdir -p ~/.secrets
-cp ~/Downloads/fleetlink-auth.env ~/.secrets/fleetlink-auth.env
-chmod 600 ~/.secrets/fleetlink-auth.env
-ln -sf fleetlink-auth.env ~/.secrets/fleet-share-auth.env
-ln -sf fleetlink-auth.env ~/.secrets/fleet-link-auth.env</pre>
-      </div>
-
-      <h4>2. Install the <code>fleet-share</code> CLI helper:</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">mkdir -p ~/apps
-cp ~/Downloads/fleet-share ~/apps/fleet-share
-chmod +x ~/apps/fleet-share
-~/apps/fleet-share</pre>
-      </div>
-    </div>
-
-    <!-- Step 3: CLI Usage Examples -->
-    <div class="card">
-      <h3>\u{1F680} CLI Usage Examples</h3>
-      <p>Upload files, directories, preview cards, and static websites using <code>fleet-share</code>:</p>
-
-      <h4>1. Upload a single markdown file or document:</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">fleet-share notes.md</pre>
-      </div>
-
-      <h4>2. Upload an entire directory tree:</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">fleet-share ./dist</pre>
-      </div>
-
-      <h4>3. Social preview card & custom title (iMessage, Slack, Twitter):</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">fleet-share --preview cover.png --title "FleetLink Release Preview" ./dist</pre>
-      </div>
-
-      <h4>4. Password-protect any share:</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">fleet-share --password "SecretPass123" ./dist</pre>
-      </div>
-
-      <h4>5. Permanent hosting (Admin token only):</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">fleet-share --slug docs --forever ./documentation</pre>
-      </div>
-
-      <h4>6. Custom Vanity Redirect URL (Up to 6 Months / 180 Days for Users & Agents):</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">fleet-share --redirect "https://example.com/my-destination" --slug "vanity-link"</pre>
-      </div>
-    </div>
-
-    <!-- Step 4: Direct curl Commands -->
-    <div class="card">
-      <h3>\u{1F310} Direct Domain Target & curl Commands</h3>
-      <p>Target whichever domain you want for the link: <strong>FleetLink.online</strong> (primary) or <strong>FleetLink.app</strong> (secondary mirror):</p>
-      
-      <h4>Default Domain (FleetLink.online):</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">curl -X PUT "https://fleetlink.online/&lt;batch-or-slug&gt;/&lt;filename&gt;"      -T ./artifact.md      -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET"      -H "Content-Type: text/markdown; charset=utf-8"      -H "X-Expire-Days: 3"</pre>
-      </div>
-
-      <h4>Secondary Mirror (FleetLink.app):</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">curl -X PUT "https://fleetlink.app/&lt;batch-or-slug&gt;/&lt;filename&gt;"      -T ./artifact.md      -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET"      -H "Content-Type: text/markdown; charset=utf-8"      -H "X-Expire-Days: 3"</pre>
-      </div>
-
-      <h4>With Social Sharing Preview Image & Title:</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">curl -X PUT "https://fleetlink.online/&lt;slug&gt;/&lt;filename&gt;"      -T ./report.html      -H "X-Fleet-Admin: $FLEET_ADMIN_SECRET"      -H "X-Fleet-Title: FleetLink Test Results"      -H "X-Fleet-Preview: cover.png"</pre>
-      </div>
-
-      <h4>Create Custom Redirect URL via curl (Up to 180 Days / 6 Months):</h4>
-      <div class="cmd-box">
-        <div class="cmd-header">
-          <div class="cmd-dots"><span class="cmd-dot red"></span><span class="cmd-dot yellow"></span><span class="cmd-dot green"></span><span class="cmd-title">bash</span></div>
-          <button type="button" class="copy-btn" onclick="copyCode(this)">\u{1F4CB} Copy</button>
-        </div>
-        <pre class="cmd-body">curl -X PUT "https://fleetlink.online/&lt;vanity-slug&gt;"      -H "X-Fleet-Agent: $FLEET_AGENT_SECRET"      -H "X-Fleet-Redirect: https://example.com/target-destination"      -H "X-Expire-Days: 180"</pre>
-      </div>
-    </div>
-
-    <!-- Web Directory Browsing & Static Sites -->
-    <div class="card">
-      <h3>\u{1F5C2}\uFE0F Web Directory Browsing & Static Website Hosting</h3>
-      <ul>
-        <li><strong>Web Directory Index:</strong> When multiple files are shared under a batch or directory path (e.g. <code>https://fleetlink.online/build-123/</code>), visiting the trailing slash URL automatically renders an interactive Web Directory listing with direct links to each artifact.</li>
-        <li><strong>Static Website Hosting:</strong> If your uploaded directory includes an <code>index.html</code> at the root or within subdirectories, <strong>FleetLink.online</strong> serves the live rendered web page directly rather than the raw directory index. Relative asset paths (CSS, JS, images) resolve seamlessly!</li>
-      </ul>
-    </div>
-
-    <!-- Two Token Tiers -->
-    <div class="card">
-      <h3>\u{1F511} Two Authentication Tiers (Admin vs Agent)</h3>
-      <ul>
-        <li><strong>Admin Token (<code>ADMIN_SECRET</code> / <code>FLEET_ADMIN_SECRET</code>):</strong> For human operators and administrators. Grants unrestricted uploads, custom slug reservation, direct web UI uploads, and permanent hosting (<code>X-Expire-Days: forever</code>). Automatically bypasses password challenges on protected links in browser sessions!</li>
-        <li><strong>Agent Token (<code>AGENT_SECRET</code> / <code>FLEET_AGENT_SECRET</code>):</strong> Scoped token for autonomous AI fleet seats. Enforces a hard TTL limit capped at a maximum of <strong>7 days</strong> (defaults to 3 days). Requests for <code>forever</code> or &gt; 7 days are automatically rejected.</li>
-      </ul>
-    </div>
-
-    <!-- Page Footer & Legal Terms -->
-    <footer style="margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); text-align: center; font-size: 0.82rem; color: #9ca3af; line-height: 1.5;">
-      <p style="margin: 0 0 0.4rem 0;">FleetLink Hosting &bull; <a href="mailto:support@fleetlink.online" style="color: #6b7280; text-decoration: underline;">support@fleetlink.online</a> &bull; <a href="/portal" style="color: #6b7280; text-decoration: underline;">Admin Portal</a> &bull; <a href="/privacy" style="color: #6b7280; text-decoration: underline;">Privacy Policy</a></p>
-      <p style="margin: 0; font-size: 0.75rem; color: #9ca3af;">
-        Service allowances, hosting quotas, and retention timeframes are provided on a best-effort, non-binding basis. We reserve the right to prune, expire, or delete content at our sole discretion to prevent excessive resource utilization or abuse.
+    <footer style="margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); text-align: center; font-size: 0.9rem; color: #374151; line-height: 1.5;">
+      <p style="margin: 0 0 0.4rem 0;">FleetLink &bull; <a href="mailto:support@fleetlink.online">support@fleetlink.online</a> &bull; <a href="/instructions/">Instructions</a> &bull; <a href="/portal">Your links</a> &bull; <a href="/privacy">Privacy</a></p>
+      <p style="margin: 0; font-size: 0.85rem; color: #374151;">
+        How long a link stays up can change if storage runs short or a share is misused.&nbsp; You can delete your own link sooner from Your links.
       </p>
     </footer>
+    </main>
 
-    <!-- Authentication Modal -->
-    <div id="auth-modal" class="modal-overlay">
-      <div class="modal">
-        <h2>\u{1F512} FleetLink Authentication</h2>
-        <p>Enter your <strong>Admin</strong> or <strong>Agent</strong> Secret token to sign into <strong>FleetLink.online</strong>.</p>
-        <div id="modal-error-msg" class="modal-error"></div>
+    <div id="auth-modal" class="modal-overlay" role="presentation" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+        <h2 id="auth-modal-title">Sign in</h2>
+        <p>Enter the sign-in code for your FleetLink account.</p>
+        <div id="modal-error-msg" class="modal-error" role="alert"></div>
         <form onsubmit="handleAuthSubmit(event)">
-          <input type="password" id="modal-secret-input" placeholder="Admin or Agent Secret Token" required autofocus>
+          <label for="modal-secret-input" style="display:block;font-weight:600;font-size:0.88rem;color:#334155;margin-bottom:0.35rem;">Sign-in code</label>
+          <input type="password" id="modal-secret-input" placeholder="Sign-in code" autocomplete="current-password" required>
           <label class="modal-checkbox">
             <input type="checkbox" id="modal-remember-input" checked> Stay signed in for 30 days
           </label>
@@ -1567,17 +1338,17 @@ chmod +x ~/apps/fleet-share
         
         if (token) {
           navigator.clipboard.writeText(token).then(function() {
-            if (label) label.innerText = "\u2705 Secret Copied!";
+            if (label) label.innerText = "Copied";
             setTimeout(function() {
-              if (label) label.innerText = "Copy Secret for Shortcut";
+              if (label) label.innerText = "Copy sign-in code";
             }, 2500);
           });
         } else {
           if (inlineInput) inlineInput.focus();
           if (label) {
-            label.innerText = "Type your secret above first";
+            label.innerText = "Paste your code above first";
             setTimeout(function() {
-              label.innerText = "Copy Secret for Shortcut";
+              label.innerText = "Copy sign-in code";
             }, 2500);
           }
         }
@@ -1627,17 +1398,17 @@ chmod +x ~/apps/fleet-share
             authBtn.onclick = handleSignOutPrompt;
           }
           if (lockIcon) lockIcon.innerText = "\u{1F513}";
-          if (label) label.innerText = (role === "admin") ? "Admin" : "Agent";
+          if (label) label.innerText = "Signed in";
           if (authCont) authCont.style.display = "inline-flex";
           if (portalBtn) portalBtn.style.display = "inline-flex";
           if (wizard) wizard.classList.add("active");
           if (secretGroup) secretGroup.style.display = "none";
           if (roleBadge) {
             roleBadge.style.display = "inline-block";
-            roleBadge.innerText = (role || "").toUpperCase();
+            roleBadge.innerText = "Signed in";
           }
           if (signOutBtn) signOutBtn.style.display = "inline-block";
-          if (promptText) promptText.innerText = "You are authenticated as " + (role || "user") + "! Submit files, web directories, or static sites directly from your browser.";
+          if (promptText) promptText.innerText = "You are signed in.  Add files or make a short link.  The link is ready to copy when sharing finishes.";
           if (ttlForeverOpt) {
             ttlForeverOpt.disabled = (role !== "admin");
           }
@@ -1649,12 +1420,12 @@ chmod +x ~/apps/fleet-share
             authBtn.onclick = openAuthModal;
           }
           if (lockIcon) lockIcon.innerText = "\u{1F512}";
-          if (label) label.innerText = "Authenticate";
+          if (label) label.innerText = "Sign in";
           if (wizard) wizard.classList.add("active");
           if (secretGroup) secretGroup.style.display = "block";
           if (roleBadge) roleBadge.style.display = "none";
           if (signOutBtn) signOutBtn.style.display = "none";
-          if (promptText) promptText.innerText = "Select files, photos, or documents below, or create vanity short links. Uploads and vanity links are publicly available for all users. Admin or Agent token is optional for extended limits.";
+          if (promptText) promptText.innerText = "Sign in to share a file or make a short link.  When the time is up, FleetLink removes it.";
         }
       }
 
@@ -1664,18 +1435,29 @@ chmod +x ~/apps/fleet-share
         var input = document.getElementById("modal-secret-input");
         if (input) input.value = "";
         var modal = document.getElementById("auth-modal");
-        if (modal) modal.classList.add("active");
+        if (modal) {
+          modal.classList.add("active");
+          modal.setAttribute("aria-hidden", "false");
+        }
         if (input) input.focus();
       }
 
       function closeAuthModal() {
         var modal = document.getElementById("auth-modal");
-        if (modal) modal.classList.remove("active");
+        if (modal) {
+          modal.classList.remove("active");
+          modal.setAttribute("aria-hidden", "true");
+        }
+        var authBtn = document.getElementById("auth-btn");
+        if (authBtn) authBtn.focus();
       }
 
+      document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape") closeAuthModal();
+      });
+
       function handleSignOutPrompt() {
-        var roleName = (currentUser && currentUser.role) ? currentUser.role : "user";
-        if (confirm("You are currently signed in as " + roleName + ". Would you like to sign out?")) {
+        if (confirm("Sign out of FleetLink on this browser?")) {
           fetch("/api/auth/logout", { method: "POST" }).then(function() {
             currentUser = null;
             updateAuthUI(false);
@@ -1715,14 +1497,14 @@ chmod +x ~/apps/fleet-share
             updateAuthUI(true, result.data.role);
           } else {
             if (errDiv) {
-              errDiv.innerText = result.data.error || "Authentication failed. Please check secret token.";
+              errDiv.innerText = plainShareError(result.data.error || "That sign-in code was not recognized.");
               errDiv.style.display = "block";
             }
           }
         })
         .catch(function() {
           if (errDiv) {
-            errDiv.innerText = "Network error while authenticating.";
+            errDiv.innerText = "The network request failed.  Check your connection and try again.";
             errDiv.style.display = "block";
           }
         })
@@ -1764,11 +1546,40 @@ chmod +x ~/apps/fleet-share
 
       var wizardMode = "files";
       
+      function plainShareError(msg) {
+        var text = String(msg || "Something went wrong.  Try again.");
+        if (/authentication required|invalid secret|authentication failed|invalid username or password/i.test(text)) {
+          return "Sign in before you share.  Use Sign in and enter your sign-in code.";
+        }
+        return text
+          .replace(/Cloudflare R2/gi, "storage")
+          .replace(/\bR2\b/g, "storage")
+          .replace(/system assets?/gi, "site files")
+          .replace(/TTL/g, "time limit")
+          .replace(/slug/gi, "link name")
+          .replace(/agent token/gi, "sign-in code")
+          .replace(/admin token/gi, "account owner sign-in");
+      }
+
+      function hasSignIn() {
+        if (currentUser) return true;
+        var secretInput = document.getElementById("wizard-secret-input");
+        return !!(secretInput && secretInput.value.trim());
+      }
+
+      function setProgress(value) {
+        var bar = document.getElementById("upload-progress-bar");
+        var fill = document.getElementById("upload-progress-fill");
+        if (fill) fill.style.width = value + "%";
+        if (bar) bar.setAttribute("aria-valuenow", String(value));
+      }
+
       function showWizardNotice(msg, isError) {
         var box = document.getElementById("wizard-notice-box");
         if (!box) {
           box = document.createElement("div");
           box.id = "wizard-notice-box";
+          box.setAttribute("role", "alert");
           var container = document.getElementById("upload-wizard") || document.body;
           container.insertBefore(box, container.children[1] || container.firstChild);
         }
@@ -1777,16 +1588,19 @@ chmod +x ~/apps/fleet-share
         box.style.marginBottom = "1rem";
         box.style.fontSize = "0.9rem";
         box.style.lineHeight = "1.4";
+        box.textContent = "";
+        var strong = document.createElement("strong");
+        strong.textContent = isError ? "Something went wrong. " : "Done. ";
+        box.appendChild(strong);
+        box.appendChild(document.createTextNode(msg));
         if (isError) {
           box.style.background = "#fee2e2";
           box.style.border = "1px solid #f87171";
           box.style.color = "#991b1b";
-          box.innerHTML = "<strong>Error:</strong> " + msg;
         } else {
           box.style.background = "#dcfce7";
           box.style.border = "1px solid #86efac";
-          box.style.color = "#15803d";
-          box.innerHTML = "<strong>\u2713 Notice:</strong> " + msg;
+          box.style.color = "#166534";
         }
         box.style.display = "block";
         box.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1803,6 +1617,11 @@ chmod +x ~/apps/fleet-share
         var ttlSelect = document.getElementById("wizard-ttl");
         var submitBtn = document.getElementById("btn-submit-upload");
 
+        var isAdminUser = currentUser && currentUser.role === "admin";
+        var foreverOpt = '<option value="forever" id="ttl-forever-opt"' + (isAdminUser ? "" : " disabled") + ">Until you delete it</option>";
+        if (tabFiles) tabFiles.setAttribute("aria-selected", mode === "files" ? "true" : "false");
+        if (tabRedirect) tabRedirect.setAttribute("aria-selected", mode === "redirect" ? "true" : "false");
+
         if (mode === "redirect") {
           tabRedirect.style.background = "#2563eb";
           tabRedirect.style.color = "#ffffff";
@@ -1813,16 +1632,16 @@ chmod +x ~/apps/fleet-share
 
           if (fileGroup) fileGroup.style.display = "none";
           if (targetUrlGroup) targetUrlGroup.style.display = "block";
-          if (slugLabel) slugLabel.innerText = "Custom Vanity Slug (Optional):";
+          if (slugLabel) slugLabel.innerText = "Link name (optional)";
           if (slugInput) slugInput.disabled = false;
-          if (submitBtn) submitBtn.innerText = "Create Redirect Link";
+          if (submitBtn) submitBtn.innerText = "Create short link";
 
           if (ttlSelect) {
-            ttlSelect.innerHTML = '<option value="7">7 Days</option>' +
-                                  '<option value="30">30 Days (1 Month)</option>' +
-                                  '<option value="90">90 Days (3 Months)</option>' +
-                                  '<option value="180" selected>180 Days (6 Months - Default)</option>' +
-                                  '<option value="forever" id="ttl-forever-opt">Forever (Admin Only)</option>';
+            ttlSelect.innerHTML = '<option value="1">1 day</option>' +
+                                  '<option value="7">7 days</option>' +
+                                  '<option value="30">30 days</option>' +
+                                  '<option value="180" selected>6 months</option>' +
+                                  foreverOpt;
           }
         } else {
           tabFiles.style.background = "#2563eb";
@@ -1832,21 +1651,22 @@ chmod +x ~/apps/fleet-share
           tabRedirect.style.color = "#374151";
           tabRedirect.style.borderColor = "#d1d5db";
 
-          var isAdminUser = currentUser && currentUser.role === "admin";
           if (fileGroup) fileGroup.style.display = "block";
           if (targetUrlGroup) targetUrlGroup.style.display = "none";
-          if (slugLabel) slugLabel.innerText = isAdminUser ? "Custom Slug / Path (Optional):" : "Custom Slug (Admin Only - Auto-generated for Guests):";
+          if (slugLabel) slugLabel.innerText = isAdminUser ? "Link name (optional)" : "Link name is chosen for you";
           if (slugInput) {
             slugInput.disabled = !isAdminUser;
             if (!isAdminUser) slugInput.value = "";
           }
-          if (submitBtn) submitBtn.innerText = "Upload to FleetLink";
+          if (submitBtn) submitBtn.innerText = "Share";
 
           if (ttlSelect) {
-            ttlSelect.innerHTML = '<option value="1">1 Day</option>' +
-                                  '<option value="3" selected>3 Days (Default)</option>' +
-                                  '<option value="7">7 Days</option>' +
-                                  '<option value="forever" id="ttl-forever-opt">Forever (Admin Only)</option>';
+            ttlSelect.innerHTML = '<option value="0.0416">1 hour</option>' +
+                                  '<option value="0.25">6 hours</option>' +
+                                  '<option value="1">1 day</option>' +
+                                  '<option value="3" selected>3 days</option>' +
+                                  '<option value="7">7 days</option>' +
+                                  foreverOpt;
           }
         }
       }
@@ -1875,12 +1695,12 @@ chmod +x ~/apps/fleet-share
           var targetUrlInput = document.getElementById("wizard-target-url");
           var targetUrl = targetUrlInput ? targetUrlInput.value.trim() : "";
           if (!targetUrl) {
-            alert("Please enter the destination URL to redirect to.");
+            showWizardNotice("Enter the web address people should open.", true);
             if (targetUrlInput) targetUrlInput.focus();
             return;
           }
           if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-            alert("Destination URL must start with http:// or https://");
+            showWizardNotice("The web address must start with http:// or https://.", true);
             if (targetUrlInput) targetUrlInput.focus();
             return;
           }
@@ -1893,17 +1713,9 @@ chmod +x ~/apps/fleet-share
           var title = document.getElementById("wizard-title").value.trim();
           var password = document.getElementById("wizard-password").value.trim();
 
-          if (!secret) {
-            if (slug) {
-              showWizardNotice("Custom vanity slugs require authentication. Please sign in or clear the slug field to get an auto-assigned random slug.", true);
-              return;
-            }
-            var activeShares = getUserShares().filter(function(s) { return !s.expire_at || s.expire_at > Date.now(); });
-            var activeFiles = activeShares.reduce(function(acc, s) { return acc + (s.files_count || 1); }, 0);
-            if (activeFiles >= 120) {
-              showWizardNotice("Guest browser session cap reached (120 active shares/files). Please create an account or delete expired shares in your portal (/portal).", true);
-              return;
-            }
+          if (!hasSignIn()) {
+            showWizardNotice("Sign in before you share.  Use Sign in and enter your sign-in code.", true);
+            return;
           }
 
           var submitBtn = document.getElementById("btn-submit-upload");
@@ -1951,11 +1763,11 @@ chmod +x ~/apps/fleet-share
                 resultDiv.style.display = "block";
                 resultDiv.innerHTML = "";
                 var strong = document.createElement("strong");
-                strong.innerText = "\u2705 Redirect Link Created!";
+                strong.innerText = "Your short link is ready.";
                 resultDiv.appendChild(strong);
                 var p = document.createElement("p");
                 p.style.margin = "0.5rem 0";
-                p.innerText = "Short Link: ";
+                p.innerText = "Link: ";
                 var a = document.createElement("a");
                 a.href = result.data.url;
                 a.target = "_blank";
@@ -1984,28 +1796,28 @@ chmod +x ~/apps/fleet-share
                 cBtn.className = "copy-btn";
                 cBtn.style.background = "#2563eb";
                 cBtn.style.color = "white";
-                cBtn.innerText = "\u{1F4CB} Copy Redirect Link";
+                cBtn.innerText = "Copy link";
                 cBtn.onclick = function() {
                   navigator.clipboard.writeText(result.data.url);
-                  showWizardNotice("Copied redirect link to clipboard!", false);
+                  showWizardNotice("Link copied.", false);
                 };
                 resultDiv.appendChild(cBtn);
 
                 var pPortal = document.createElement("p");
                 pPortal.style.margin = "0.6rem 0 0 0";
-                pPortal.innerHTML = '<a href="/portal" style="color: #1d4ed8; text-decoration: underline; font-weight: 600; font-size: 0.88rem;">\u26A1 View &amp; Manage in User Portal &rarr;</a>';
+                pPortal.innerHTML = '<a href="/portal" style="color: #1d4ed8; text-decoration: underline; font-weight: 600; font-size: 0.88rem;">See it in Your links</a>';
                 resultDiv.appendChild(pPortal);
               }
               checkAuthStatus();
             } else {
-              alert("Redirect creation failed: " + ((result.data && result.data.error) ? result.data.error : "Server error"));
+              showWizardNotice(plainShareError((result.data && result.data.error) ? result.data.error : "The short link was not created.  Try again."), true);
             }
           })
           .catch(function(err) {
-            alert("Redirect creation failed: " + (err.message || "Network error"));
+            showWizardNotice("The network request failed.  Check your connection and try again.", true);
           })
           .finally(function() {
-            if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = "Create Redirect Link"; }
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = "Create short link"; }
             setTimeout(function() {
               if (progressBar) progressBar.style.display = "none";
               if (progressFill) progressFill.style.width = "0%";
@@ -2016,7 +1828,7 @@ chmod +x ~/apps/fleet-share
 
         var fileInput = document.getElementById("wizard-files");
         if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
-          showWizardNotice("Please select at least one file to upload.", true);
+          showWizardNotice("Choose at least one file.", true);
           return;
         }
 
@@ -2027,40 +1839,16 @@ chmod +x ~/apps/fleet-share
         if (previewInput && previewInput.files && previewInput.files[0]) {
           var prevSize = previewInput.files[0].size;
           if (prevSize > 5 * 1024 * 1024) {
-            showWizardNotice("Social preview image exceeds 5MB limit. Please choose an image under 5MB.", true);
+            showWizardNotice("That picture is over 5 MB.  Choose a smaller one.", true);
             return;
           }
         }
 
         var slug = document.getElementById("wizard-slug").value.trim();
 
-        if (!secret) {
-          if (slug) {
-            showWizardNotice("Custom vanity slugs require authentication. Please sign in or clear the slug field to get an auto-assigned random slug.", true);
-            return;
-          }
-          if (fileInput.files.length > 40) {
-            showWizardNotice("Guest limit exceeded: Maximum 40 files per upload. Please sign in for up to 500 files.", true);
-            return;
-          }
-          var batchBytes = 0;
-          for (var i = 0; i < fileInput.files.length; i++) {
-            if (fileInput.files[i].size > 20 * 1024 * 1024) {
-              showWizardNotice('Guest limit exceeded: File "' + fileInput.files[i].name + '" exceeds the 20MB limit. Please sign in for 300MB files.', true);
-              return;
-            }
-            batchBytes += fileInput.files[i].size;
-          }
-          if (batchBytes > 20 * 1024 * 1024) {
-            showWizardNotice("Guest limit exceeded: Total batch exceeds the 20MB limit. Please sign in for 300MB batch uploads.", true);
-            return;
-          }
-          var activeShares = getUserShares().filter(function(s) { return !s.expire_at || s.expire_at > Date.now(); });
-          var activeFiles = activeShares.reduce(function(acc, s) { return acc + (s.files_count || 1); }, 0);
-          if (activeFiles + fileInput.files.length > 120) {
-            showWizardNotice("Guest browser session cap reached (120 active shares/files). Please create an account or delete older shares in your portal (/portal).", true);
-            return;
-          }
+        if (!hasSignIn()) {
+          showWizardNotice("Sign in before you share.  Use Sign in and enter your sign-in code.", true);
+          return;
         }
 
         var formData = new FormData();
@@ -2125,12 +1913,12 @@ chmod +x ~/apps/fleet-share
               resultDiv.innerHTML = "";
               
               var strong = document.createElement("strong");
-              strong.innerText = "\u2705 Upload Complete!";
+              strong.innerText = "Your link is ready.";
               resultDiv.appendChild(strong);
               
               var p = document.createElement("p");
               p.style.margin = "0.5rem 0";
-              p.innerText = "Shareable Link: ";
+              p.innerText = "Link: ";
               var a = document.createElement("a");
               a.href = result.data.url;
               a.target = "_blank";
@@ -2145,29 +1933,29 @@ chmod +x ~/apps/fleet-share
               cBtn.className = "copy-btn";
               cBtn.style.background = "#2563eb";
               cBtn.style.color = "white";
-              cBtn.innerText = "\u{1F4CB} Copy Link";
+              cBtn.innerText = "Copy link";
               cBtn.onclick = function() {
                 navigator.clipboard.writeText(result.data.url);
-                alert("Copied share link to clipboard!");
+                showWizardNotice("Link copied.", false);
               };
               resultDiv.appendChild(cBtn);
 
               var pPortal = document.createElement("p");
               pPortal.style.margin = "0.6rem 0 0 0";
-              pPortal.innerHTML = '<a href="/portal" style="color: #1d4ed8; text-decoration: underline; font-weight: 600; font-size: 0.88rem;">\u26A1 View &amp; Manage in User Portal &rarr;</a>';
+              pPortal.innerHTML = '<a href="/portal" style="color: #1d4ed8; text-decoration: underline; font-weight: 600; font-size: 0.88rem;">See it in Your links</a>';
               resultDiv.appendChild(pPortal);
             }
             // Auto-refresh auth status if server set cookie
             checkAuthStatus();
           } else {
-            alert("Upload failed: " + ((result.data && result.data.error) ? result.data.error : "Server error"));
+            showWizardNotice(plainShareError((result.data && result.data.error) ? result.data.error : "The upload did not finish.  Try again."), true);
           }
         })
         .catch(function() {
-          alert("Upload failed: Network error.");
+          showWizardNotice("The network request failed.  Check your connection and try again.", true);
         })
         .finally(function() {
-          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = "Upload to FleetLink"; }
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = "Share"; }
           setTimeout(function() {
             if (progressBar) progressBar.style.display = "none";
             if (progressFill) progressFill.style.width = "0%";
@@ -2181,6 +1969,138 @@ chmod +x ~/apps/fleet-share
 }
 __name(renderHomeHtml, "renderHomeHtml");
 __name2(renderHomeHtml, "renderHomeHtml");
+function renderInstructionsHtml(origin) {
+  return `<!DOCTYPE html><html lang="en"><head>
+  <title>Instructions &bull; FleetLink</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  ${renderOgTags({
+    title: "Instructions — FleetLink",
+    description: "How to share a file or a short link, how long it stays up, and how to share from a computer.",
+    url: `${origin}/instructions/`,
+    imageUrl: `${origin}/preview.png`
+  })}
+  <style>
+    :root { --border: #e5e7eb; --primary: #1d4ed8; --text: #111827; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 2rem 1.5rem; max-width: 800px; margin: 0 auto; color: var(--text); line-height: 1.6; background: #fff; }
+    @media (max-width: 600px) { body { padding: 1.25rem 1rem; } }
+    .skip-link { position: absolute; left: 0.75rem; top: -4rem; background: #111827; color: #fff; padding: 0.55rem 0.8rem; border-radius: 6px; z-index: 10; font-weight: 700; }
+    .skip-link:focus { top: 0.75rem; }
+    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+    a { color: var(--primary); }
+    nav { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .brand { font-weight: 800; color: #111827; text-decoration: none; letter-spacing: -0.02em; }
+    .brand span { color: #2563eb; }
+    .nav-links { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    .nav-links a { font-weight: 600; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
+    h1 { font-size: 2rem; letter-spacing: -0.03em; margin: 0 0 0.5rem; }
+    h2 { font-size: 1.25rem; margin: 2rem 0 0.5rem; }
+    p, li { color: #1f2937; }
+    .card { background: #f9fafb; border: 1px solid var(--border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1rem 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; margin: 0.75rem 0 1rem; }
+    th, td { text-align: left; padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { font-size: 0.8rem; letter-spacing: 0.03em; text-transform: uppercase; color: #374151; }
+    pre { background: #111827; color: #f9fafb; border-radius: 8px; padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.85rem; line-height: 1.45; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+    .toc a { display: inline-block; margin: 0.2rem 0.8rem 0.2rem 0; font-weight: 600; }
+    footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border); color: #374151; font-size: 0.9rem; }
+    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+  </style></head><body>
+  <a href="#content" class="skip-link">Skip to content</a>
+  <nav aria-label="Primary">
+    <a class="brand" href="/">Fleet<span>Link</span></a>
+    <div class="nav-links">
+      <a href="/#upload-wizard">Share</a>
+      <a href="/portal">Your links</a>
+      <a href="/privacy">Privacy</a>
+    </div>
+  </nav>
+  <main id="content">
+    <h1>Instructions</h1>
+    <p>FleetLink gives you a link to a file, a folder, or another web address.&nbsp; The link lasts for a set time, then the file or short link is removed.</p>
+    <p class="toc">
+      <a href="#website">On the website</a>
+      <a href="#iphone">On iPhone</a>
+      <a href="#duration">How long it stays up</a>
+      <a href="#computer">From a computer</a>
+      <a href="#open">What people see</a>
+    </p>
+
+    <h2 id="website">On the website</h2>
+    <ol>
+      <li>Open <a href="/">FleetLink</a> and choose Share.</li>
+      <li>Sign in with your sign-in code.</li>
+      <li>Choose Files, or choose Short link and paste a web address.</li>
+      <li>Choose how long it should stay up, then share.</li>
+      <li>Copy the link.&nbsp; It also appears under <a href="/portal">Your links</a> in this browser.</li>
+    </ol>
+    <div class="card">
+      <p style="margin:0;">A link name is the short word in the address, such as <code>fleetlink.online/notes</code>.&nbsp; Leave it blank and FleetLink picks one.&nbsp; Only the account owner can choose the name for a file.&nbsp; A short link can use a name you choose.</p>
+    </div>
+
+    <h2 id="iphone">On iPhone</h2>
+    <ol>
+      <li>On the website, paste your sign-in code and choose Copy sign-in code.</li>
+      <li>Download the shortcut and tap Add Shortcut.</li>
+      <li>Paste the code when Shortcuts asks.&nbsp; The downloaded shortcut does not contain the code.</li>
+      <li>In Photos, Files, or Safari, tap Share, then Share to FleetLink.</li>
+    </ol>
+    <p>A FleetLink link can also open in a small preview on iPhone without installing an app.&nbsp; The FleetLink app lists your links, lets you make a new one, and opens a link you paste.</p>
+
+    <h2 id="duration">How long it stays up</h2>
+    <table>
+      <thead>
+        <tr><th scope="col">Who is sharing</th><th scope="col">Files</th><th scope="col">Short links</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Signed in</th>
+          <td>Up to 7 days.&nbsp; Up to 100 MB per file, 500 MB together, and 50 files.</td>
+          <td>Up to 6 months.</td>
+        </tr>
+        <tr>
+          <th scope="row">Account owner</th>
+          <td>Can keep an upload until it is deleted, when it is under 500 MB.&nbsp; Up to 300 MB per file and 1 GB together.</td>
+          <td>Can keep a short link until it is deleted.</td>
+        </tr>
+        <tr>
+          <th scope="row">No account</th>
+          <td>Sharing from the website is turned off.&nbsp; If a share is ever accepted, the cap is 10 files, 5 MB each, 10 MB together, and 1 hour.</td>
+          <td>6 hours, and only if a share is accepted without an account.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>A password is optional.&nbsp; Without one, anyone with the link can open it.</p>
+
+    <h2 id="computer">From a computer</h2>
+    <p>You can share from a terminal with the <code>fleet-share</code> helper.&nbsp; <a href="/instructions/fleet-share?download=1" download="fleet-share">Download fleet-share</a>, then:</p>
+    <pre><code>chmod +x fleet-share
+./fleet-share notes.md</code></pre>
+    <p>The helper asks for your sign-in code, or reads it from a private file you create yourself.&nbsp; FleetLink does not offer that code as a download.</p>
+    <p>A direct upload uses a header on the request.&nbsp; Replace the code and the file name:</p>
+    <pre><code>curl -X PUT "https://fleetlink.online/notes/notes.md" \\
+  -T ./notes.md \\
+  -H "X-Fleet-Admin: YOUR_SIGN_IN_CODE" \\
+  -H "Content-Type: text/markdown; charset=utf-8" \\
+  -H "X-Expire-Days: 3"</code></pre>
+    <p>Use <code>X-Fleet-Agent</code> with an automation sign-in code.&nbsp; A short link uses <code>X-Fleet-Redirect</code> set to the web address, and <code>X-Expire-Days</code> up to 180.</p>
+
+    <h2 id="open">What people see</h2>
+    <ul>
+      <li>A Markdown file opens as a formatted page.&nbsp; A contents link jumps to the matching heading.</li>
+      <li>Several files under one link open as a list.</li>
+      <li>HTML files download instead of opening inside the browser.</li>
+      <li>A picture can be shown with the link in Messages and similar apps.</li>
+      <li>When the time is up, the link stops working.</li>
+    </ul>
+  </main>
+  <footer>
+    <a href="/">FleetLink</a> &bull; <a href="/portal">Your links</a> &bull; <a href="/privacy">Privacy</a> &bull; <a href="mailto:support@fleetlink.online">support@fleetlink.online</a>
+  </footer>
+</body></html>`;
+}
+__name(renderInstructionsHtml, "renderInstructionsHtml");
+__name2(renderInstructionsHtml, "renderInstructionsHtml");
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return "0 B";
   const k = 1024;
@@ -2286,7 +2206,7 @@ async function getBucketOverview(env) {
   let redirectCount = 0;
   const slugs = Array.from(slugMap.values()).map((s) => {
     const isSystemAsset = SYSTEM_ASSET_KEYS2.has(s.slug) || s.files.length === 1 && SYSTEM_ASSET_KEYS2.has(s.files[0].key);
-    let status = isSystemAsset ? "System Asset" : "Permanent";
+    let status = isSystemAsset ? "Site file" : "Until deleted";
     let statusClass = isSystemAsset ? "badge-system" : "badge-perm";
     let category = isSystemAsset ? "system" : "perm";
     if (s.isRedirect) {
@@ -2302,7 +2222,7 @@ async function getBucketOverview(env) {
         const msLeft = s.expireAt - now;
         const daysLeft = Math.floor(msLeft / (24 * 3600 * 1e3));
         const hoursLeft = Math.floor(msLeft % (24 * 3600 * 1e3) / (3600 * 1e3));
-        status = daysLeft > 0 ? `${daysLeft}d ${hoursLeft}h` : `${hoursLeft}h left`;
+        status = daysLeft > 0 ? (daysLeft === 1 ? "1 day" : `${daysLeft} days`) : (hoursLeft === 1 ? "1 hour left" : `${hoursLeft} hours left`);
         statusClass = "badge-expiring";
         category = "expiring";
         expiringCount++;
@@ -2356,29 +2276,32 @@ __name(getBucketOverview, "getBucketOverview");
 __name2(getBucketOverview, "getBucketOverview");
 function renderPortalLoginHtml(origin, errorMsg) {
   return `<!DOCTYPE html><html lang="en"><head>
-  <title>FleetLink Admin Portal \u2014 Authentication</title>
+  <title>Sign in &bull; FleetLink</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 1.5rem; box-sizing: border-box; }
     .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 2.25rem; max-width: 420px; width: 100%; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.06); }
     h2 { margin: 0 0 0.5rem 0; font-size: 1.35rem; color: #0f172a; }
-    p { margin: 0 0 1.5rem 0; font-size: 0.9rem; color: #64748b; line-height: 1.5; }
-    input[type="password"] { width: 100%; box-sizing: border-box; padding: 0.7rem 0.85rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.95rem; margin-bottom: 1rem; }
-    button { width: 100%; background: #2563eb; color: white; border: none; border-radius: 8px; padding: 0.75rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
-    button:hover { background: #1d4ed8; }
-    .error-msg { background: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; padding: 0.6rem 0.85rem; border-radius: 6px; font-size: 0.85rem; margin-bottom: 1rem; }
-    .back-link { display: block; text-align: center; margin-top: 1.25rem; font-size: 0.85rem; color: #64748b; text-decoration: none; }
+    p { margin: 0 0 1.5rem 0; font-size: 0.95rem; color: #334155; line-height: 1.5; }
+    label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.35rem; }
+    input[type="password"] { width: 100%; box-sizing: border-box; padding: 0.7rem 0.85rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; margin-bottom: 1rem; }
+    button { width: 100%; background: #1d4ed8; color: white; border: none; border-radius: 8px; padding: 0.75rem; font-size: 1rem; font-weight: 600; cursor: pointer; min-height: 44px; }
+    button:hover { background: #1e40af; }
+    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+    .error-msg { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 0.6rem 0.85rem; border-radius: 6px; font-size: 0.9rem; margin-bottom: 1rem; }
+    .back-link { display: block; text-align: center; margin-top: 1.25rem; font-size: 0.95rem; color: #1e3a8a; text-decoration: none; min-height: 44px; }
     .back-link:hover { text-decoration: underline; }
   </style></head><body>
   <div class="card">
     <div style="font-size: 2rem; margin-bottom: 0.75rem;">\u26A1</div>
-    <h2>FleetLink Admin Portal</h2>
-    <p>Sign in with your <strong>Admin Secret Token</strong> to view storage utilization across R2, browse all active slugs, and prune excessive or expired files.</p>
+    <h2>See every link</h2>
+    <p>Enter the account owner sign-in code.&nbsp; The same sign-in used elsewhere on FleetLink still works.</p>
     <form id="portal-login-form">
-      <div id="login-error" class="error-msg" style="display: ${errorMsg ? "block" : "none"};">${errorMsg ? escapeHtml(errorMsg) : ""}</div>
-      <input type="password" id="portal-secret" placeholder="Enter Admin Secret Token" required autofocus>
-      <button type="submit" id="portal-submit-btn">Unlock Portal</button>
+      <div id="login-error" class="error-msg" role="alert" style="display: ${errorMsg ? "block" : "none"};">${errorMsg ? escapeHtml(errorMsg) : ""}</div>
+      <label for="portal-secret">Sign-in code</label>
+      <input type="password" id="portal-secret" autocomplete="current-password" required autofocus>
+      <button type="submit" id="portal-submit-btn">Sign in</button>
     </form>
     <a href="/" class="back-link">&larr; Return to FleetLink Home</a>
   </div>
@@ -2401,21 +2324,21 @@ function renderPortalLoginHtml(origin, errorMsg) {
         if (res.ok && data.role === "admin") {
           window.location.reload();
         } else if (res.ok && data.role !== "admin") {
-          errDiv.innerText = "Access denied: Admin token required for back-end portal.";
+          errDiv.innerText = "That code does not open every link.  Use the account owner sign-in code.";
           errDiv.style.display = "block";
           btn.disabled = false;
-          btn.innerText = "Unlock Portal";
+          btn.innerText = "Sign in";
         } else {
-          errDiv.innerText = data.error || "Authentication failed.";
+          errDiv.innerText = "That sign-in code was not recognized.";
           errDiv.style.display = "block";
           btn.disabled = false;
-          btn.innerText = "Unlock Portal";
+          btn.innerText = "Sign in";
         }
       } catch (err) {
-        errDiv.innerText = "Network error connecting to FleetLink.";
+        errDiv.innerText = "The network request failed.  Check your connection and try again.";
         errDiv.style.display = "block";
         btn.disabled = false;
-        btn.innerText = "Unlock Portal";
+        btn.innerText = "Sign in";
       }
     };
   <\/script>
@@ -2425,7 +2348,7 @@ __name(renderPortalLoginHtml, "renderPortalLoginHtml");
 __name2(renderPortalLoginHtml, "renderPortalLoginHtml");
 function renderUserPortalHtml(origin) {
   return `<!DOCTYPE html><html lang="en"><head>
-  <title>FleetLink User Portal \u2014 Your Active Shares & Links</title>
+  <title>Your links &bull; FleetLink</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
@@ -2506,70 +2429,84 @@ function renderUserPortalHtml(origin) {
     .modal-card h3 { margin: 0 0 0.5rem 0; font-size: 1.25rem; color: #0f172a; }
     .modal-card p { font-size: 0.88rem; color: #64748b; margin: 0 0 1.25rem 0; line-height: 1.45; }
     .modal-card input[type="password"] { width: 100%; box-sizing: border-box; padding: 0.65rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.92rem; margin-bottom: 1rem; }
-    .modal-error { color: #dc2626; font-size: 0.85rem; margin-bottom: 0.75rem; display: none; }
+    .modal-error { color: #991b1b; font-size: 0.85rem; margin-bottom: 0.75rem; display: none; }
+    .skip-link { position: absolute; left: 0.75rem; top: -4rem; background: #111827; color: #fff; padding: 0.55rem 0.8rem; border-radius: 6px; z-index: 10001; font-weight: 700; text-decoration: none; }
+    .skip-link:focus { top: 0.75rem; }
+    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+    .btn, .action-btn, .filter-pill { min-height: 44px; font-family: inherit; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+    .search-label { font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 0.3rem; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
   </style></head><body>
 
-    <nav class="top-nav">
+    <a href="#links-content" class="skip-link">Skip to content</a>
+    <nav class="top-nav" aria-label="Primary">
       <a href="/" class="brand">
         <div class="brand-logo">Fleet<span>Link</span></div>
-        <span class="portal-pill">User Portal</span>
+        <span class="portal-pill">Your links</span>
       </a>
       <div class="nav-actions">
-        <a href="/#upload-wizard" class="btn btn-primary"><span>\u{1F680}</span> <span>New Upload</span></a>
-        <a href="/" class="btn"><span>\u{1F3E0}</span> <span>Home</span></a>
-        <button type="button" class="btn" onclick="openAdminModal()"><span>\u2699\uFE0F</span> <span>Operator Login</span></button>
+        <a href="/#upload-wizard" class="btn btn-primary">New share</a>
+        <a href="/instructions/" class="btn">Instructions</a>
+        <a href="/" class="btn">Home</a>
+        <button type="button" class="btn" onclick="openAdminModal()">Account owner sign-in</button>
       </div>
     </nav>
+    <main id="links-content">
 
     <!-- Guest Notice Banner -->
     <div id="user-guest-banner" style="background: #fefce8; border: 1px solid #fde047; border-radius: 10px; padding: 1.15rem 1.25rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
       <div>
-        <h4 style="margin: 0 0 0.35rem 0; color: #854d0e; font-size: 0.98rem; font-weight: 700;">\u{1F680} Guest Access Mode (6-Hour Expiration)</h4>
-        <div style="font-size: 0.86rem; color: #a16207; line-height: 1.45;">
-          You are viewing shares created in this browser session.  Guest uploads are limited to 20MB, 40 files, and 6-hour retention (up to 3 lease renewals).  Create a free account or sign in to unlock 300MB, 500 files, 7-day file retention, 30-day redirects, custom vanity slugs, and up to 3 agent sub-accounts!
+        <h4 style="margin: 0 0 0.35rem 0; color: #713f12; font-size: 0.98rem; font-weight: 700;">Links saved in this browser</h4>
+        <div style="font-size: 0.9rem; color: #713f12; line-height: 1.45;">
+          This list is stored on this device.&nbsp; Sign in on the home page before you share.&nbsp; A signed-in file can last up to 7 days, and a short link up to 6 months.
         </div>
       </div>
-      <a href="/#upload-wizard" class="btn" style="background: #eab308; color: #000000; font-weight: 700; border-color: #ca8a04; white-space: nowrap;">Create Free Account &rarr;</a>
+      <a href="/#upload-wizard" class="btn" style="background: #ca8a04; color: #1c1917; font-weight: 700; border-color: #a16207; white-space: nowrap;">Share something</a>
     </div>
 
     <!-- Metrics Grid -->
     <div class="metrics-grid">
       <div class="metric-card">
-        <div class="metric-label">Your Active Shares</div>
+        <div class="metric-label">Links on this device</div>
         <div class="metric-val" id="user-total-shares">0</div>
-        <div class="metric-sub" id="user-shares-sub">Saved in your browser</div>
+        <div class="metric-sub" id="user-shares-sub">Saved in this browser</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">Vanity Redirects</div>
+        <div class="metric-label">Short links</div>
         <div class="metric-val" id="user-total-redirects">0</div>
-        <div class="metric-sub">Up to 24hr (Guest) / 30d (User)</div>
+        <div class="metric-sub">Up to 6 months when signed in</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">File / Batch Shares</div>
+        <div class="metric-label">Files</div>
         <div class="metric-val" id="user-total-files">0</div>
-        <div class="metric-sub">Up to 6hr (Guest) / 7d (User)</div>
+        <div class="metric-sub">Up to 7 days when signed in</div>
       </div>
     </div>
 
     <!-- Toolbar -->
     <div class="toolbar">
-      <input type="text" id="user-search" class="search-input" placeholder="Search your shares by slug or URL..." oninput="filterUserShares()">
-      <div class="filter-pills">
-        <div class="filter-pill active" data-filter="all" onclick="setUserFilter('all')">All</div>
-        <div class="filter-pill" data-filter="redirect" onclick="setUserFilter('redirect')">Redirects</div>
-        <div class="filter-pill" data-filter="files" onclick="setUserFilter('files')">Files</div>
+      <div style="flex: 1; min-width: 220px;">
+        <label class="search-label" for="user-search">Search</label>
+        <input type="search" id="user-search" class="search-input" placeholder="Name or web address" oninput="filterUserShares()">
+      </div>
+      <div class="filter-pills" role="group" aria-label="Filter links">
+        <button type="button" class="filter-pill active" data-filter="all" aria-pressed="true" onclick="setUserFilter('all')">All</button>
+        <button type="button" class="filter-pill" data-filter="redirect" aria-pressed="false" onclick="setUserFilter('redirect')">Short links</button>
+        <button type="button" class="filter-pill" data-filter="files" aria-pressed="false" onclick="setUserFilter('files')">Files</button>
       </div>
     </div>
 
     <!-- Shares Table Container -->
     <div class="table-container">
       <table id="user-shares-table">
+        <caption class="visually-hidden">Links saved in this browser</caption>
         <thead>
           <tr>
-            <th>Link / Slug</th>
-            <th>Type</th>
-            <th>Expiration</th>
-            <th style="text-align: right;">Actions</th>
+            <th scope="col">Link</th>
+            <th scope="col">Type</th>
+            <th scope="col">Time left</th>
+            <th scope="col" style="text-align: right;">Actions</th>
           </tr>
         </thead>
         <tbody id="user-shares-tbody">
@@ -2577,50 +2514,43 @@ function renderUserPortalHtml(origin) {
         </tbody>
       </table>
       <div id="user-empty-state" class="empty-state" style="display: none;">
-        <div class="empty-icon">\u{1F4C2}</div>
-        <div class="empty-title">No Active Shares on This Device</div>
-        <div class="empty-desc">You have not created any shares or vanity short links from this browser yet, or your past items have expired.</div>
-        <a href="/#upload-wizard" class="btn btn-primary">\u{1F680} Create Your First Share</a>
+        <div class="empty-title" id="user-empty-title">No links on this device yet</div>
+        <div class="empty-desc" id="user-empty-desc">When you share a file or make a short link in this browser, it shows up here until it expires.</div>
+        <a href="/#upload-wizard" class="btn btn-primary" id="user-empty-action">Share something</a>
       </div>
     </div>
 
     <!-- Storage Quotas & Limits Callout -->
     <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-top: 2rem;">
-      <h4 style="margin: 0 0 0.5rem 0; font-size: 0.95rem; color: #1e293b;">\u{1F4A1} Storage Quotas &amp; Tier Allowances</h4>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; font-size: 0.85rem; color: #475569;">
+      <h4 style="margin: 0 0 0.5rem 0; font-size: 0.95rem; color: #1e293b;">How much you can share</h4>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; font-size: 0.9rem; color: #1f2937;">
         <div style="background: white; border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem;">
-          <strong style="color: #b45309;">Guest (No Account):</strong>
-          <div style="margin-top: 0.3rem;">\u2022 20 MB total batch, 40 files max</div>
-          <div>\u2022 6 hours max retention (24hr for links)</div>
-          <div>\u2022 Up to 3 lease renewals (restarts clock)</div>
-          <div>\u2022 Auto-generated random slugs only</div>
-          <div>\u2022 60 MB / 120 files browser active cap</div>
+          <strong style="color: #713f12;">No account</strong>
+          <div style="margin-top: 0.3rem;">Sharing on the website requires a sign-in.</div>
+          <div>If a share is ever accepted without one: 10 files, 5 MB each, 10 MB together, 1 hour for files, 6 hours for short links.</div>
         </div>
         <div style="background: white; border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem;">
-          <strong style="color: #2563eb;">Free User Account:</strong>
-          <div style="margin-top: 0.3rem;">\u2022 300 MB batch limit, 500 files max</div>
-          <div>\u2022 7-day retention for files; 30 days for links</div>
-          <div>\u2022 Custom vanity slugs &amp; slug renaming</div>
-          <div>\u2022 Up to 3 agent tokens on free tier</div>
-          <div>\u2022 Request higher limits after 3 shares</div>
+          <strong style="color: #1e3a8a;">Signed in</strong>
+          <div style="margin-top: 0.3rem;">Files: up to 100 MB each, 500 MB together, 50 files, 7 days.</div>
+          <div>Short links: up to 6 months.</div>
         </div>
         <div style="background: white; border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem;">
-          <strong style="color: #065f46;">Agent Token / Admin:</strong>
-          <div style="margin-top: 0.3rem;">\u2022 Agent: 100 MB / 500 MB / 7 days</div>
-          <div>\u2022 Admin: 300 MB / 1 GB / Permanent</div>
-          <div>\u2022 Full API, CLI, and MCP access</div>
+          <strong style="color: #14532d;">Account owner</strong>
+          <div style="margin-top: 0.3rem;">Up to 300 MB per file and 1 GB together.</div>
+          <div>An upload under 500 MB can stay until you delete it.</div>
         </div>
       </div>
     </div>
 
     <!-- Admin Login Modal -->
-    <div id="admin-login-modal" class="modal-backdrop">
-      <div class="modal-card">
-        <h3>Operator / Admin Sign In</h3>
-        <p>Enter your <strong>Admin Secret Token</strong> to view global R2 bucket storage utilization, inspect all fleet shares, and manage system assets.</p>
-        <div id="admin-login-error" class="modal-error"></div>
+    <div id="admin-login-modal" class="modal-backdrop" role="presentation">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="owner-signin-title">
+        <h3 id="owner-signin-title">Account owner sign-in</h3>
+        <p>Enter the account owner sign-in code to see every link and how much storage is in use.</p>
+        <div id="admin-login-error" class="modal-error" role="alert"></div>
         <form onsubmit="handleAdminLogin(event)">
-          <input type="password" id="admin-secret-input" placeholder="Enter FLEET_ADMIN_SECRET" required autofocus>
+          <label for="admin-secret-input" style="display:block;font-weight:600;font-size:0.88rem;margin-bottom:0.35rem;">Sign-in code</label>
+          <input type="password" id="admin-secret-input" placeholder="Sign-in code" autocomplete="current-password" required>
           <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
             <button type="button" class="btn" onclick="closeAdminModal()">Cancel</button>
             <button type="submit" id="admin-login-btn" class="btn btn-primary">Sign In</button>
@@ -2631,6 +2561,17 @@ function renderUserPortalHtml(origin) {
 
     <script>
       var currentFilter = "all";
+
+      function plainNotice(msg) {
+        return String(msg || "Try again.")
+          .replace(/Cloudflare R2/gi, "storage")
+          .replace(/\bR2\b/g, "storage")
+          .replace(/system assets?/gi, "site files")
+          .replace(/TTL/g, "time limit")
+          .replace(/slug/gi, "link name")
+          .replace(/agent token/gi, "sign-in code")
+          .replace(/admin token/gi, "account owner sign-in");
+      }
 
       function getUserShares() {
         try {
@@ -2679,6 +2620,18 @@ function renderUserPortalHtml(origin) {
         tbody.innerHTML = "";
         if (filtered.length === 0) {
           empty.style.display = "block";
+          var emptyTitle = document.getElementById("user-empty-title");
+          var emptyDesc = document.getElementById("user-empty-desc");
+          var emptyAction = document.getElementById("user-empty-action");
+          if (shares.length === 0) {
+            if (emptyTitle) emptyTitle.textContent = "No links on this device yet";
+            if (emptyDesc) emptyDesc.textContent = "When you share a file or make a short link in this browser, it shows up here until it expires.";
+            if (emptyAction) emptyAction.style.display = "";
+          } else {
+            if (emptyTitle) emptyTitle.textContent = "Nothing matches";
+            if (emptyDesc) emptyDesc.textContent = "Try a different word, or choose All to see every link saved on this device.";
+            if (emptyAction) emptyAction.style.display = "none";
+          }
           document.getElementById("user-shares-table").style.display = shares.length === 0 ? "none" : "table";
         } else {
           empty.style.display = "none";
@@ -2701,7 +2654,7 @@ function renderUserPortalHtml(origin) {
             if (item.mode === "redirect") {
               meta.innerText = "\u21B3 " + (item.target_url || "Redirect link");
             } else {
-              meta.innerText = (item.files_count || 1) + " file(s) hosted";
+              meta.innerText = (item.files_count || 1) + (item.files_count === 1 ? " file" : " files");
             }
             tdLink.appendChild(meta);
             tr.appendChild(tdLink);
@@ -2710,13 +2663,13 @@ function renderUserPortalHtml(origin) {
             var tdType = document.createElement("td");
             var typeBadge = document.createElement("span");
             typeBadge.className = "badge " + (item.mode === "redirect" ? "badge-redirect" : "badge-files");
-            typeBadge.innerText = item.mode === "redirect" ? "\u{1F517} Redirect" : "\u{1F4C1} Files";
+            typeBadge.innerText = item.mode === "redirect" ? "Short link" : "Files";
             tdType.appendChild(typeBadge);
             tr.appendChild(tdType);
 
             // Col 3: Expiration
             var tdExp = document.createElement("td");
-            var expText = item.expires || "Standard TTL";
+            var expText = item.expires || "Time not recorded";
             var isExpired = item.expire_at && Date.now() > item.expire_at;
             var expBadge = document.createElement("span");
             expBadge.className = "badge " + (isExpired ? "badge-expired" : "badge-active");
@@ -2737,12 +2690,12 @@ function renderUserPortalHtml(origin) {
             var copyBtn = document.createElement("button");
             copyBtn.type = "button";
             copyBtn.className = "action-btn";
-            copyBtn.innerText = "Copy Link";
+            copyBtn.innerText = "Copy link";
             copyBtn.onclick = (function(url, btn) {
               return function() {
                 navigator.clipboard.writeText(url).then(function() {
                   btn.innerText = "Copied!";
-                  setTimeout(function() { btn.innerText = "Copy Link"; }, 1500);
+                  setTimeout(function() { btn.innerText = "Copy link"; }, 1500);
                 }).catch(function() {
                   prompt("Copy link:", url);
                 });
@@ -2757,7 +2710,7 @@ function renderUserPortalHtml(origin) {
             renewBtn.innerText = "Renew (" + renewalsUsed + "/3)";
             if (renewalsUsed >= 3) {
               renewBtn.disabled = true;
-              renewBtn.title = "Maximum 3 renewals reached for this share";
+              renewBtn.title = "This link has already been renewed 3 times.";
               renewBtn.style.opacity = "0.5";
             }
             renewBtn.onclick = (function(slug, btn) {
@@ -2780,16 +2733,16 @@ function renderUserPortalHtml(origin) {
                       match.renewals_used = res.data.renewals_used;
                       setUserShares(shares);
                     }
-                    alert("Lease renewed successfully!  New expiration: " + res.data.expires);
+                    alert("Renewed.  It now lasts until " + res.data.expires);
                     renderUserShares();
                   } else {
-                    alert("Renewal failed: " + ((res.data && res.data.error) ? res.data.error : "Server error"));
+                    alert("Could not renew this link.  " + plainNotice((res.data && res.data.error) ? res.data.error : "Try again."));
                     btn.disabled = false;
                     btn.innerText = "Renew (" + renewalsUsed + "/3)";
                   }
                 })
                 .catch(function(err) {
-                  alert("Renewal error: " + err.message);
+                  alert("Could not renew this link.  Check your connection and try again.");
                   btn.disabled = false;
                   btn.innerText = "Renew (" + renewalsUsed + "/3)";
                 });
@@ -2818,7 +2771,9 @@ function renderUserPortalHtml(origin) {
         currentFilter = mode;
         var pills = document.querySelectorAll(".filter-pill");
         pills.forEach(function(p) {
-          p.classList.toggle("active", p.getAttribute("data-filter") === mode);
+          var on = p.getAttribute("data-filter") === mode;
+          p.classList.toggle("active", on);
+          p.setAttribute("aria-pressed", on ? "true" : "false");
         });
         renderUserShares();
       }
@@ -2828,7 +2783,7 @@ function renderUserPortalHtml(origin) {
       }
 
       async function deleteUserShare(slug) {
-        if (!confirm("Are you sure you want to delete share /" + slug + "? This action is irreversible.")) return;
+        if (!confirm("Delete /" + slug + "?  This cannot be undone.")) return;
         try {
           var res = await fetch("/api/portal/delete", {
             method: "POST",
@@ -2841,7 +2796,7 @@ function renderUserPortalHtml(origin) {
             setUserShares(shares);
             renderUserShares();
           } else {
-            alert("Delete failed: " + (data.error || "Unknown error"));
+            alert("Could not delete that link.  " + plainNotice(data.error || "Try again."));
           }
         } catch (e) {
           var list = getUserShares().filter(function(s) { return s.slug !== slug; });
@@ -2878,13 +2833,13 @@ function renderUserPortalHtml(origin) {
           if (res.ok && data.role === "admin") {
             window.location.reload();
           } else {
-            errDiv.innerText = "Access denied: Admin secret required for global portal.";
+            errDiv.innerText = "That code does not open every link.  Use the account owner sign-in code.";
             errDiv.style.display = "block";
             btn.disabled = false;
             btn.innerText = "Sign In";
           }
         } catch (err) {
-          errDiv.innerText = "Network error signing in.";
+          errDiv.innerText = "The network request failed.  Check your connection and try again.";
           errDiv.style.display = "block";
           btn.disabled = false;
           btn.innerText = "Sign In";
@@ -2893,6 +2848,7 @@ function renderUserPortalHtml(origin) {
 
       renderUserShares();
     <\/script>
+    </main>
 </body></html>`;
 }
 __name(renderUserPortalHtml, "renderUserPortalHtml");
@@ -2901,7 +2857,7 @@ function renderPortalHtml(overview, origin) {
   const gbUsed = (overview.totalStorageBytes / (1024 * 1024 * 1024)).toFixed(2);
   const gbPercent = Math.min(100, overview.totalStorageBytes / (10 * 1024 * 1024 * 1024) * 100).toFixed(1);
   return `<!DOCTYPE html><html lang="en"><head>
-  <title>FleetLink Admin Portal \u2014 Storage & Shares</title>
+  <title>All links &bull; FleetLink</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
@@ -3041,75 +2997,87 @@ function renderPortalHtml(overview, origin) {
     .modal-warning { color: var(--danger); font-size: 0.82rem; font-weight: 500; margin-top: 0.75rem; line-height: 1.4; }
     .modal-footer { padding: 1rem 1.5rem; background: #f8fafc; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.6rem; }
 
-    .notice-box { margin-top: 2rem; padding: 1rem 1.25rem; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; font-size: 0.82rem; color: #64748b; line-height: 1.5; }
+    .notice-box { margin-top: 2rem; padding: 1rem 1.25rem; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; color: #334155; line-height: 1.5; }
+    .skip-link { position: absolute; left: 0.75rem; top: -4rem; background: #111827; color: #fff; padding: 0.55rem 0.8rem; border-radius: 6px; z-index: 10001; font-weight: 700; text-decoration: none; }
+    .skip-link:focus { top: 0.75rem; }
+    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+    .btn, .filter-pill, .action-btn { min-height: 44px; font-family: inherit; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+    @media (prefers-reduced-motion: reduce) {
+      .modal-card { animation: none; }
+      * { transition: none !important; }
+    }
   </style></head><body>
 
-    <nav class="top-nav">
+    <a href="#all-links" class="skip-link">Skip to content</a>
+    <nav class="top-nav" aria-label="Primary">
       <div style="display: flex; align-items: center; gap: 0.75rem;">
         <a href="/" class="brand">
           <div class="brand-logo">Fleet<span>Link</span></div>
         </a>
-        <span class="portal-pill">Admin Portal</span>
+        <span class="portal-pill">All links</span>
       </div>
       <div class="nav-actions">
-        <a href="/" class="btn">&larr; Main Site</a>
-        <a href="/api/shortcut/download" class="btn" style="background: #fdf4ff; border-color: #f0abfc; color: #86198f;" title="Download iOS Shortcut (it asks for your secret when you add it)">\u{1F4F2} iOS Shortcut</a>
-        <button type="button" class="btn" onclick="window.location.reload()">\u{1F504} Refresh</button>
+        <a href="/" class="btn">Home</a>
+        <a href="/instructions/" class="btn">Instructions</a>
+        <a href="/api/shortcut/download" class="btn" style="background: #fdf4ff; border-color: #e9d5ff; color: #6b21a8;">iPhone shortcut</a>
+        <button type="button" class="btn" onclick="window.location.reload()">Refresh</button>
         <button type="button" class="btn btn-danger" onclick="handleSignOut()">Sign Out</button>
       </div>
     </nav>
 
-    <!-- Metrics Grid -->
+    <main id="all-links">
     <div class="metrics-grid">
       <div class="metric-card">
-        <div class="metric-label">R2 Storage Utilization</div>
+        <div class="metric-label">Storage used</div>
         <div class="metric-val" id="metric-storage">${overview.formattedTotalStorage}</div>
         <div class="storage-bar-wrap">
           <div class="storage-bar-fill" id="metric-storage-bar" style="width: ${gbPercent}%;"></div>
         </div>
-        <div class="metric-sub" id="metric-storage-sub">${gbUsed} GB used &bull; ${gbPercent}% of 10 GB free tier</div>
+        <div class="metric-sub" id="metric-storage-sub">${gbUsed} GB used &bull; ${gbPercent}% of 10 GB</div>
       </div>
 
       <div class="metric-card">
-        <div class="metric-label">Active Slugs / Batches</div>
+        <div class="metric-label">Links</div>
         <div class="metric-val" id="metric-slugs">${overview.totalSlugs}</div>
-        <div class="metric-sub" id="metric-slugs-sub">${overview.permanentCount} permanent &bull; ${overview.expiringCount} expiring</div>
+        <div class="metric-sub" id="metric-slugs-sub">${overview.permanentCount} kept &bull; ${overview.expiringCount} expiring</div>
       </div>
 
       <div class="metric-card">
-        <div class="metric-label">Total Stored Objects</div>
+        <div class="metric-label">Files stored</div>
         <div class="metric-val" id="metric-files">${overview.totalFiles.toLocaleString()}</div>
-        <div class="metric-sub">Across all batches and root files</div>
+        <div class="metric-sub">Every file currently stored</div>
       </div>
 
       <div class="metric-card">
-        <div class="metric-label">Largest Share</div>
+        <div class="metric-label">Largest link</div>
         <div class="metric-val" id="metric-largest-slug" style="font-size: 1.35rem; word-break: break-all;">${overview.largestShare ? escapeHtml(overview.largestShare.slug) : "None"}</div>
-        <div class="metric-sub" id="metric-largest-sub">${overview.largestShare ? overview.largestShare.formattedSize + " (" + overview.largestShare.fileCount + " files)" : "Bucket is empty"}</div>
+        <div class="metric-sub" id="metric-largest-sub">${overview.largestShare ? overview.largestShare.formattedSize + " (" + overview.largestShare.fileCount + " files)" : "Nothing stored yet"}</div>
       </div>
     </div>
 
     <!-- Toolbar -->
     <div class="toolbar">
-      <input type="text" id="slug-search" class="search-input" placeholder="Search by slug, filename, or title..." oninput="filterTable()">
-      <div class="filter-pills">
-        <span class="filter-pill active" data-filter="all" onclick="setFilter('all')">All Shares (<span id="pill-all-count">${overview.userSlugCount}</span>)</span>
-        <span class="filter-pill" data-filter="perm" onclick="setFilter('perm')">Permanent (<span id="pill-perm-count">${overview.permanentCount}</span>)</span>
-        <span class="filter-pill" data-filter="expiring" onclick="setFilter('expiring')">Expiring (<span id="pill-expiring-count">${overview.expiringCount}</span>)</span>
-        <span class="filter-pill" data-filter="redirect" onclick="setFilter('redirect')" style="color: #7e22ce;">\u{1F517} Redirects (<span id="pill-redirect-count">${overview.redirectCount || 0}</span>)</span>
-        ${overview.expiredCount > 0 ? `<span class="filter-pill" data-filter="expired" onclick="setFilter('expired')" style="color: #b91c1c;">Expired (<span id="pill-expired-count">${overview.expiredCount}</span>)</span>` : ""}
-        <span class="filter-pill" data-filter="large" onclick="setFilter('large')">&gt; 50 MB</span>
+      <label class="visually-hidden" for="slug-search">Search links</label>
+      <input type="search" id="slug-search" class="search-input" placeholder="Search by name or file" oninput="filterTable()">
+      <div class="filter-pills" role="group" aria-label="Filter links">
+        <button type="button" class="filter-pill active" data-filter="all" aria-pressed="true" onclick="setFilter('all')">All (<span id="pill-all-count">${overview.userSlugCount}</span>)</button>
+        <button type="button" class="filter-pill" data-filter="perm" aria-pressed="false" onclick="setFilter('perm')">Kept (<span id="pill-perm-count">${overview.permanentCount}</span>)</button>
+        <button type="button" class="filter-pill" data-filter="expiring" aria-pressed="false" onclick="setFilter('expiring')">Expiring (<span id="pill-expiring-count">${overview.expiringCount}</span>)</button>
+        <button type="button" class="filter-pill" data-filter="redirect" aria-pressed="false" onclick="setFilter('redirect')">Short links (<span id="pill-redirect-count">${overview.redirectCount || 0}</span>)</button>
+        ${overview.expiredCount > 0 ? `<button type="button" class="filter-pill" data-filter="expired" aria-pressed="false" onclick="setFilter('expired')">Expired (<span id="pill-expired-count">${overview.expiredCount}</span>)</button>` : ""}
+        <button type="button" class="filter-pill" data-filter="large" aria-pressed="false" onclick="setFilter('large')">Over 50 MB</button>
       </div>
     </div>
 
     <!-- Batch Actions Toolbar -->
     <div id="batch-bar" class="batch-bar">
       <div class="batch-info">
-        <span>\u26A1 <strong><span id="batch-count">0</span></strong> slug(s) selected (<span id="batch-files">0</span> files, <span id="batch-size">0 B</span>)</span>
+        <span><strong><span id="batch-count">0</span></strong> selected (<span id="batch-files">0</span> files, <span id="batch-size">0 B</span>)</span>
       </div>
       <div class="batch-actions">
-        <button type="button" class="btn-batch-delete" onclick="promptBatchDelete()">\u{1F5D1}\uFE0F Delete Selected (<span id="batch-delete-btn-count">0</span>)</button>
-        <button type="button" class="btn-batch-clear" onclick="clearSelection()">Clear Selection</button>
+        <button type="button" class="btn-batch-delete" onclick="promptBatchDelete()">Delete selected (<span id="batch-delete-btn-count">0</span>)</button>
+        <button type="button" class="btn-batch-clear" onclick="clearSelection()">Clear selection</button>
       </div>
     </div>
 
@@ -3118,11 +3086,11 @@ function renderPortalHtml(overview, origin) {
       <table>
         <thead>
           <tr>
-            <th class="th-checkbox"><input type="checkbox" id="select-all-slugs" class="slug-checkbox" onchange="toggleSelectAll(this)" title="Select all visible"></th>
-            <th class="sortable" onclick="handleSort('slug')">Slug & Details <span id="sort-icon-slug" class="sort-icon"></span></th>
+            <th class="th-checkbox"><input type="checkbox" id="select-all-slugs" class="slug-checkbox" onchange="toggleSelectAll(this)" aria-label="Select all visible links"></th>
+            <th class="sortable" onclick="handleSort('slug')">Link <span id="sort-icon-slug" class="sort-icon"></span></th>
             <th class="sortable" onclick="handleSort('size')">Size <span id="sort-icon-size" class="sort-icon"></span></th>
             <th class="sortable" onclick="handleSort('files')">Files <span id="sort-icon-files" class="sort-icon"></span></th>
-            <th class="sortable" onclick="handleSort('exp')">Retention / Expiration <span id="sort-icon-exp" class="sort-icon"></span></th>
+            <th class="sortable" onclick="handleSort('exp')">Time left <span id="sort-icon-exp" class="sort-icon"></span></th>
             <th class="sortable" onclick="handleSort('sec')">Security <span id="sort-icon-sec" class="sort-icon"></span></th>
             <th class="sortable" onclick="handleSort('date')">Uploaded <span id="sort-icon-date" class="sort-icon active">\u25BC</span></th>
             <th style="text-align: right;">Actions</th>
@@ -3138,22 +3106,22 @@ function renderPortalHtml(overview, origin) {
     <details class="system-assets-details" id="system-assets-details">
       <summary class="system-assets-summary">
         <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-          <span>\u2699\uFE0F <strong>System Assets</strong> (<span id="system-asset-count">${overview.systemAssetCount}</span> root files: previews, manifests, icons)</span>
+          <span><strong>Site files</strong> (<span id="system-asset-count">${overview.systemAssetCount}</span> previews and icons)</span>
           <span style="font-size: 0.8rem; color: #64748b; font-weight: normal;">Click to expand / collapse</span>
         </div>
       </summary>
       <div class="system-assets-content">
         <div style="padding: 0.75rem 1rem; background: #fffbeb; border: 1px solid #fef3c7; border-radius: 6px; font-size: 0.84rem; color: #92400e; margin-bottom: 1rem; line-height: 1.45;">
-          \u{1F6E1}\uFE0F <strong>Protected System Assets:</strong> These files power root domain link previews (Slack, iMessage, Twitter/X), crawler rules, and iOS App Clip domain verification. Deleting any system asset requires explicit two-step confirmation by typing the asset name.
+          <strong>These files run the site.</strong> They include link pictures and the files that let iPhone open FleetLink links.&nbsp; Deleting one asks you to type its name first.
         </div>
         <div class="table-container">
           <table>
             <thead>
               <tr>
-                <th>System Asset</th>
+                <th scope="col">File</th>
                 <th>Size</th>
                 <th>Type</th>
-                <th>Retention</th>
+                <th scope="col">How long</th>
                 <th>Uploaded</th>
                 <th style="text-align: right;">Actions</th>
               </tr>
@@ -3167,31 +3135,43 @@ function renderPortalHtml(overview, origin) {
     </details>
 
     <div class="notice-box">
-      <strong>\u26A0\uFE0F FleetLink Administrative Notice & Policy:</strong>
-      All storage quotas, file allowances, and retention durations are provided on a best-effort, non-binding basis. FleetLink reserves the right to prune, expire, or delete content and batches at any time without notice to prevent excessive utilization, avoid R2 threshold overages, or enforce platform security.
+      <strong>About storage:</strong>
+      How long a link stays up can change if storage runs short or a share is misused.&nbsp; You can delete a link sooner from this page.
     </div>
 
     <!-- Delete Confirmation Modal Popup -->
-    <div id="delete-modal" class="modal-overlay">
-      <div class="modal-card">
+    <div id="delete-modal" class="modal-overlay" role="presentation">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
         <div class="modal-header">
-          <h3><span>\u{1F5D1}\uFE0F</span> <span id="delete-modal-title">Confirm Deletion</span></h3>
+          <h3 id="delete-modal-title">Delete this link?</h3>
         </div>
         <div class="modal-body">
           <p id="delete-modal-msg" style="margin-top: 0; font-weight: 500;"></p>
           <div id="delete-modal-list" class="modal-list"></div>
-          <p class="modal-warning">\u26A0\uFE0F This action will immediately purge the object(s) from Cloudflare R2 and cannot be undone.</p>
+          <p class="modal-warning">This deletes the files now and cannot be undone.</p>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn" onclick="closeDeleteModal()">Cancel</button>
-          <button type="button" class="btn btn-danger" id="delete-modal-confirm-btn">Yes, Permanently Delete</button>
+          <button type="button" class="btn btn-danger" id="delete-modal-confirm-btn">Delete</button>
         </div>
       </div>
     </div>
+    </main>
 
     <script>
       var allSlugs = ${JSON.stringify(overview.slugs)};
       var currentFilter = "all";
+
+      function plainNotice(msg) {
+        return String(msg || "Try again.")
+          .replace(/Cloudflare R2/gi, "storage")
+          .replace(/\bR2\b/g, "storage")
+          .replace(/system assets?/gi, "site files")
+          .replace(/TTL/g, "time limit")
+          .replace(/slug/gi, "link name")
+          .replace(/agent token/gi, "sign-in code")
+          .replace(/admin token/gi, "account owner sign-in");
+      }
       var currentSort = { col: "date", dir: "desc" };
       var selectedSlugs = new Set();
       var pendingDeleteSlugs = [];
@@ -3222,9 +3202,11 @@ function renderPortalHtml(overview, origin) {
           if (currentSort.col === c) {
             icon.innerText = currentSort.dir === "asc" ? "\u25B2" : "\u25BC";
             icon.className = "sort-icon active";
+            if (icon.parentElement) icon.parentElement.setAttribute("aria-sort", currentSort.dir === "asc" ? "ascending" : "descending");
           } else {
             icon.innerText = "";
             icon.className = "sort-icon";
+            if (icon.parentElement) icon.parentElement.removeAttribute("aria-sort");
           }
         });
       }
@@ -3349,7 +3331,7 @@ function renderPortalHtml(overview, origin) {
         });
 
         if (filtered.length === 0) {
-          tbody.innerHTML = "<tr><td colspan='8' style='text-align: center; color: #94a3b8; padding: 2rem;'>No matching shares found.</td></tr>";
+          tbody.innerHTML = "<tr><td colspan='8' style='text-align: center; color: #334155; padding: 2rem;'>Nothing matches.</td></tr>";
         } else {
           filtered.forEach(function(s) {
             var tr = document.createElement("tr");
@@ -3366,6 +3348,7 @@ function renderPortalHtml(overview, origin) {
             chk.type = "checkbox";
             chk.className = "slug-checkbox";
             chk.checked = isChecked;
+            chk.setAttribute("aria-label", "Select " + s.slug);
             chk.onclick = function(e) {
               e.stopPropagation();
               toggleSelectSlug(s.slug);
@@ -3410,7 +3393,7 @@ function renderPortalHtml(overview, origin) {
               badgeRedir.className = "badge";
               badgeRedir.style.background = "#ede9fe";
               badgeRedir.style.color = "#5b21b6";
-              badgeRedir.innerText = "\u{1F517} Redirect";
+              badgeRedir.innerText = "Short link";
               tdFiles.appendChild(badgeRedir);
             } else {
               tdFiles.innerText = s.fileCount + (s.fileCount === 1 ? " file" : " files");
@@ -3429,7 +3412,7 @@ function renderPortalHtml(overview, origin) {
             var tdSec = document.createElement("td");
             var badgeSec = document.createElement("span");
             badgeSec.className = "badge " + (s.isPasswordProtected ? "badge-locked" : "badge-public");
-            badgeSec.innerText = s.isPasswordProtected ? "\u{1F512} Password" : "\u{1F310} Public";
+            badgeSec.innerText = s.isPasswordProtected ? "Password" : "No password";
             tdSec.appendChild(badgeSec);
             tr.appendChild(tdSec);
 
@@ -3446,26 +3429,29 @@ function renderPortalHtml(overview, origin) {
 
             var btnOpen = document.createElement("button");
             btnOpen.className = "action-btn";
-            btnOpen.title = "Open share";
-            btnOpen.innerText = "\u2197 Open";
+            btnOpen.title = "Open";
+            btnOpen.setAttribute("aria-label", "Open " + s.slug);
+            btnOpen.innerText = "Open";
             btnOpen.onclick = function() { window.open(shareUrl, "_blank"); };
             tdAct.appendChild(btnOpen);
 
             var btnCopy = document.createElement("button");
             btnCopy.className = "action-btn";
             btnCopy.title = "Copy link";
-            btnCopy.innerText = "\u{1F4CB} Copy";
+            btnCopy.setAttribute("aria-label", "Copy link for " + s.slug);
+            btnCopy.innerText = "Copy";
             btnCopy.onclick = function() {
               navigator.clipboard.writeText(shareUrl);
-              btnCopy.innerText = "\u2713 Copied";
-              setTimeout(function() { btnCopy.innerText = "\u{1F4CB} Copy"; }, 1500);
+              btnCopy.innerText = "Copied";
+              setTimeout(function() { btnCopy.innerText = "Copy"; }, 1500);
             };
             tdAct.appendChild(btnCopy);
 
             var btnDel = document.createElement("button");
             btnDel.className = "action-btn btn-del";
-            btnDel.title = "Delete share and free storage";
-            btnDel.innerText = "\u{1F5D1}\uFE0F Delete";
+            btnDel.title = "Delete";
+            btnDel.setAttribute("aria-label", "Delete " + s.slug);
+            btnDel.innerText = "Delete";
             btnDel.onclick = function() { promptSingleDelete(s); };
             tdAct.appendChild(btnDel);
 
@@ -3476,7 +3462,7 @@ function renderPortalHtml(overview, origin) {
 
         // Render System Assets Section
         if (systemSlugs.length === 0) {
-          systemTbody.innerHTML = "<tr><td colspan='6' style='text-align: center; color: #94a3b8; padding: 1.5rem;'>No system assets currently present in R2.</td></tr>";
+          systemTbody.innerHTML = "<tr><td colspan='6' style='text-align: center; color: #334155; padding: 1.5rem;'>No site files yet.</td></tr>";
         } else {
           systemSlugs.forEach(function(s) {
             var tr = document.createElement("tr");
@@ -3505,14 +3491,14 @@ function renderPortalHtml(overview, origin) {
             var tdType = document.createElement("td");
             var badgeType = document.createElement("span");
             badgeType.className = "badge badge-system";
-            badgeType.innerText = "System Asset";
+            badgeType.innerText = "Site file";
             tdType.appendChild(badgeType);
             tr.appendChild(tdType);
 
             var tdExp = document.createElement("td");
             var badgeExp = document.createElement("span");
             badgeExp.className = "badge badge-perm";
-            badgeExp.innerText = "Permanent";
+            badgeExp.innerText = "Until deleted";
             tdExp.appendChild(badgeExp);
             tr.appendChild(tdExp);
 
@@ -3567,7 +3553,9 @@ function renderPortalHtml(overview, origin) {
       function setFilter(filt) {
         currentFilter = filt;
         document.querySelectorAll(".filter-pill").forEach(function(p) {
-          p.classList.toggle("active", p.getAttribute("data-filter") === filt);
+          var on = p.getAttribute("data-filter") === filt;
+          p.classList.toggle("active", on);
+          if (p.tagName === "BUTTON") p.setAttribute("aria-pressed", on ? "true" : "false");
         });
         renderTable();
       }
@@ -3595,7 +3583,7 @@ function renderPortalHtml(overview, origin) {
         var confirmBtn = document.getElementById("delete-modal-confirm-btn");
         confirmBtn.onclick = executePendingDelete;
         confirmBtn.disabled = false;
-        confirmBtn.innerText = "Yes, Permanently Delete (" + slugsToConfirm.length + ")";
+        confirmBtn.innerText = "Delete (" + slugsToConfirm.length + ")";
 
         modal.classList.add("active");
       }
@@ -3611,8 +3599,8 @@ function renderPortalHtml(overview, origin) {
           return confirmDeleteSystemAsset(s.slug, s.formattedSize);
         }
         openDeleteModal(
-          "Delete Share: '" + s.slug + "'",
-          "Are you sure you want to permanently delete this share? This will remove " + s.fileCount + " file(s) (" + s.formattedSize + ") from Cloudflare R2 and immediately free storage.",
+          "Delete " + s.slug + "?",
+          "This removes " + s.fileCount + " file(s) (" + s.formattedSize + ") and cannot be undone.",
           [s]
         );
       }
@@ -3631,8 +3619,8 @@ function renderPortalHtml(overview, origin) {
         });
 
         openDeleteModal(
-          "Batch Delete " + slugsToConfirm.length + " Slugs",
-          "Are you sure you want to permanently delete " + slugsToConfirm.length + " selected slug(s)? This will remove " + totalFiles + " total file(s) (" + formatBytes(totalBytes) + ") from Cloudflare R2 and immediately reclaim storage.",
+          "Delete " + slugsToConfirm.length + " links?",
+          "This removes " + slugsToConfirm.length + " links and " + totalFiles + " file(s) (" + formatBytes(totalBytes) + ") and cannot be undone.",
           slugsToConfirm
         );
       }
@@ -3664,18 +3652,18 @@ function renderPortalHtml(overview, origin) {
             renderTable();
             updateMetricsAfterDelete();
           } else {
-            alert("Delete failed: " + (data.error || "Server error"));
+            alert("Could not delete that link.  " + plainNotice(data.error || "Try again."));
             btn.disabled = false;
-            btn.innerText = "Retry Delete";
+            btn.innerText = "Try again";
             slugNames.forEach(function(slug) {
               var row = document.getElementById("row-" + encodeURIComponent(slug));
               if (row) row.classList.remove("deleting");
             });
           }
         } catch (err) {
-          alert("Network error deleting slug(s).");
+          alert("Could not delete those links.  Check your connection and try again.");
           btn.disabled = false;
-          btn.innerText = "Retry Delete";
+          btn.innerText = "Try again";
           slugNames.forEach(function(slug) {
             var row = document.getElementById("row-" + encodeURIComponent(slug));
             if (row) row.classList.remove("deleting");
@@ -3711,7 +3699,7 @@ function renderPortalHtml(overview, origin) {
         if (filesElem) filesElem.innerText = totalFiles.toLocaleString();
 
         var slugsSub = document.getElementById("metric-slugs-sub");
-        if (slugsSub) slugsSub.innerText = permCount + " permanent \u2022 " + expCount + " expiring";
+        if (slugsSub) slugsSub.innerText = permCount + " kept \u2022 " + expCount + " expiring";
 
         var pillAll = document.getElementById("pill-all-count");
         if (pillAll) pillAll.innerText = userSlugs.length;
@@ -3722,14 +3710,14 @@ function renderPortalHtml(overview, origin) {
       }
 
       async function confirmDeleteSystemAsset(slug, formattedSize) {
-        var warnMsg = "\u26A0\uFE0F WARNING: '" + slug + "' is a core SYSTEM ASSET (such as a root social preview card or Apple App Clip association file).\\n\\n" +
-                      "Deleting this will break link previews or system discovery on FleetLink root domains.\\n\\n" +
-                      "Are you ABSOLUTELY sure you want to proceed?";
+        var warnMsg = "'" + slug + "' is a site file, such as a link picture or a file that lets iPhone open FleetLink links.\\n\\n" +
+                      "Deleting it can stop those pictures or that iPhone opening from working.\\n\\n" +
+                      "Delete it anyway?";
         if (!confirm(warnMsg)) return;
 
-        var typed = prompt("To confirm deletion of system asset '" + slug + "', please type '" + slug + "' below:");
+        var typed = prompt("Type " + slug + " to confirm.");
         if (typed !== slug) {
-          alert("Deletion aborted. You must type the exact asset name to delete a system asset.");
+          alert("Nothing was deleted.  Type the file name exactly to delete a site file.");
           return;
         }
 
@@ -3747,13 +3735,13 @@ function renderPortalHtml(overview, origin) {
             allSlugs = allSlugs.filter(function(s) { return s.slug !== slug; });
             renderTable();
             updateMetricsAfterDelete();
-            alert("System asset '" + slug + "' was deleted.");
+            alert(slug + " was deleted.");
           } else {
-            alert("Delete failed: " + (data.error || "Server error"));
+            alert("Could not delete that file.  " + plainNotice(data.error || "Try again."));
             if (row) row.classList.remove("deleting");
           }
         } catch (err) {
-          alert("Network error deleting system asset.");
+          alert("Could not delete that file.  Check your connection and try again.");
           if (row) row.classList.remove("deleting");
         }
       }
@@ -3762,6 +3750,16 @@ function renderPortalHtml(overview, origin) {
         window.location.href = "/logout";
       }
 
+      document.querySelectorAll(".sortable").forEach(function(th) {
+        th.setAttribute("tabindex", "0");
+        th.setAttribute("scope", "col");
+        th.addEventListener("keydown", function(e) {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            th.click();
+          }
+        });
+      });
       updateSortIcons();
       renderTable();
     <\/script>
@@ -4649,6 +4647,9 @@ var index_default = {
       if (key === "privacy" || key === "privacy-policy" || key === "privacy.html") {
         return new Response(renderPrivacyHtml(url.origin), { headers: { "content-type": "text/html; charset=utf-8" } });
       }
+      if (key === "instructions" || key === "instructions/" || key === "instructions/index.html") {
+        return new Response(renderInstructionsHtml(url.origin), { headers: { "content-type": "text/html; charset=utf-8" } });
+      }
       if (!key || key === "intro" || key === "help") {
         return new Response(renderHomeHtml(url.origin), { headers: { "content-type": "text/html; charset=utf-8" } });
       }
@@ -4689,9 +4690,10 @@ var index_default = {
             const anyImg = listed.objects.find((o) => /\.(png|jpe?g|webp|gif)$/i.test(o.key));
             if (anyImg) detectedPreview = `${url.origin}/${anyImg.key}`;
           }
-          const dirTitle = `Index of /${listPrefix}`;
-          const dirDesc = `Shared directory with ${listed.objects.length} files hosted on FleetLink.online.`;
-          let html = `<!DOCTYPE html><html><head><title>${escapeHtml(dirTitle)}</title>
+          const dirTitle = `Files in /${listPrefix}`;
+          const dirDesc = `${listed.objects.length} files shared on FleetLink.`;
+          let html = `<!DOCTYPE html><html lang="en"><head><title>${escapeHtml(dirTitle)}</title>
+          <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.Clip, app-clip-display=card">
           ${renderOgTags({
@@ -4701,21 +4703,24 @@ var index_default = {
             imageUrl: detectedPreview
           })}
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; color: #333; }
-            h2 { border-bottom: 1px solid #eaeaea; padding-bottom: 0.5rem; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 2rem 1.25rem; max-width: 800px; margin: 0 auto; color: #111827; line-height: 1.5; }
+            h1 { font-size: 1.5rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
             ul { list-style-type: none; padding: 0; }
-            li { margin: 0.5rem 0; padding: 0.5rem; background: #f9f9f9; border-radius: 6px; }
-            a { text-decoration: none; color: #0066cc; display: block; font-weight: 500; }
-            a:hover { text-decoration: underline; color: #004499; }
-          </style></head><body>`;
-          html += `<h2>Index of /${listPrefix}</h2><ul>`;
+            li { margin: 0.5rem 0; }
+            a { text-decoration: none; color: #1d4ed8; display: block; font-weight: 600; padding: 0.75rem 0.85rem; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; min-height: 44px; }
+            a:hover { text-decoration: underline; }
+            :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+            .back { color: #1f2937; font-size: 0.95rem; }
+          </style></head><body><main>`;
+          html += `<p class="back"><a href="/">FleetLink</a></p><h1>Files in /${escapeHtml(listPrefix)}</h1><ul>`;
           for (const obj of listed.objects) {
             const name = obj.key.replace(listPrefix, "");
             if (name) {
-              html += `<li><a href="/${obj.key}">\u{1F4C4} ${escapeHtml(name)}</a></li>`;
+              const size = obj.size != null ? ` <span style="color:#374151;font-weight:500;">(${formatBytes(obj.size)})</span>` : "";
+              html += `<li><a class="file-link" href="/${encodeURI(obj.key)}">${escapeHtml(name)}${size}</a></li>`;
             }
           }
-          html += `</ul></body></html>`;
+          html += `</ul></main></body></html>`;
           return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
         }
       }
@@ -4723,12 +4728,12 @@ var index_default = {
         if (key === "intro" || key === "index.html") {
           return new Response(renderHomeHtml(url.origin), { headers: { "content-type": "text/html; charset=utf-8" } });
         }
-        return new Response("Object Not Found", { status: 404 });
+        return new Response(renderStatusPage("Link not found", "That link does not match a file or a short link."), { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
       }
       const expireAt = object.customMetadata?.expire_at;
       if (expireAt && Date.now() > parseInt(expireAt)) {
         await env.FLEET_SHARES.delete(object.key);
-        return new Response("Link Expired", { status: 404 });
+        return new Response(renderStatusPage("This link has expired", "The file or short link was temporary, and the time is up."), { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
       }
       let ogImageUrl = null;
       if (object.customMetadata?.preview_image) {
@@ -4764,9 +4769,10 @@ var index_default = {
           if (lockedCand) {
             previewImgUrl = `${url.origin}/${baseSlug}preview-locked.png?preview=1`;
           }
-          const lockTitle = `Password Protected: ${itemTitle}`;
-          const lockDesc = `Authentication required to access ${itemTitle} on FleetLink.online.`;
-          const unlockHtml = `<!DOCTYPE html><html><head><title>${escapeHtml(lockTitle)}</title>
+          const lockTitle = `Password needed: ${itemTitle}`;
+          const lockDesc = `Enter the password to open ${itemTitle}.`;
+          const unlockHtml = `<!DOCTYPE html><html lang="en"><head><title>${escapeHtml(lockTitle)}</title>
+          <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.Clip, app-clip-display=card">
           ${renderOgTags({
@@ -4776,24 +4782,27 @@ var index_default = {
             imageUrl: previewImgUrl
           })}
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 80vh; margin: 0; background: #f9fafb; color: #1f2937; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 80vh; margin: 0; background: #f9fafb; color: #111827; }
+            :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
             .box { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 2rem; max-width: 380px; width: 100%; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
             h2 { margin-top: 0; font-size: 1.3rem; }
-            p { color: #6b7280; font-size: 0.9rem; }
+            p { color: #374151; font-size: 0.95rem; }
+            label { display: block; font-weight: 600; margin-bottom: 0.35rem; }
             .preview-thumb { width: 100%; max-height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #e5e7eb; display: block; }
-            input[type="password"] { width: 100%; box-sizing: border-box; padding: 0.6rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem; margin-bottom: 1rem; }
-            button { width: 100%; background: #2563eb; color: white; border: none; border-radius: 6px; padding: 0.65rem; font-size: 1rem; font-weight: 500; cursor: pointer; }
-            button:hover { background: #1d4ed8; }
+            input[type="password"] { width: 100%; box-sizing: border-box; padding: 0.7rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem; margin-bottom: 1rem; }
+            button { width: 100%; background: #1d4ed8; color: white; border: none; border-radius: 6px; padding: 0.75rem; font-size: 1rem; font-weight: 600; cursor: pointer; min-height: 44px; }
+            button:hover { background: #1e40af; }
           </style></head><body>
-            <div class="box">
-              ${previewImgUrl ? `<img src="${escapeHtml(previewImgUrl)}" class="preview-thumb" alt="Preview">` : ""}
-              <h2>\u{1F512} Password Required</h2>
-              <p>This artifact is password protected. Enter the password to unlock.</p>
+            <main class="box">
+              ${previewImgUrl ? `<img src="${escapeHtml(previewImgUrl)}" class="preview-thumb" alt="">` : ""}
+              <h2>Password needed</h2>
+              <p>This link is locked.&nbsp; Enter the password to open it.</p>
               <form method="GET">
-                <input type="password" name="password" placeholder="Enter password" required autofocus>
-                <button type="submit">Unlock Artifact</button>
+                <label for="share-password">Password</label>
+                <input type="password" id="share-password" name="password" autocomplete="current-password" required autofocus>
+                <button type="submit">Open</button>
               </form>
-            </div>
+            </main>
           </body></html>`;
           return new Response(unlockHtml, {
             status: 200,
@@ -4843,7 +4852,7 @@ var index_default = {
           url: `${url.origin}/${key}`,
           imageUrl: ogImageUrl
         })}
-        </head><body><p>Artifact: <a href="${url.origin}/${key}">${escapeHtml(itemTitle)}</a></p></body></html>`;
+        </head><body><p>File: <a href="${url.origin}/${key}">${escapeHtml(itemTitle)}</a></p></body></html>`;
         return new Response(cardHtml, { headers: { "content-type": "text/html; charset=utf-8" } });
       }
       const headers = new Headers();
@@ -4897,7 +4906,7 @@ var index_default = {
       if (contentType && contentType.includes("text/markdown")) {
         const rawMarkdown = await object.text();
         const html = `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -4910,16 +4919,32 @@ var index_default = {
           imageUrl: ogImageUrl
         })}
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.0/github-markdown.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"><\/script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"><\/script>
   <style>
     body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
     @media (max-width: 767px) { body { padding: 15px; } }
+    h1, h2, h3, h4, h5, h6 { scroll-margin-top: 1rem; }
+    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
   </style>
 </head>
-<body class="markdown-body">
-  <div id="content"></div>
+<body>
+  <main id="content" class="markdown-body"></main>
   <script>
-    document.getElementById("content").innerHTML = marked.parse(${JSON.stringify(rawMarkdown)});
+    var seenHeadings = Object.create(null);
+    function headingSlug(text) {
+      var base = String(text || "").trim().toLowerCase().replace(/[^\\w\\s-]/g, "").trim().replace(/\\s+/g, "-").replace(/-+/g, "-");
+      if (!base) base = "section";
+      var n = seenHeadings[base] || 0;
+      seenHeadings[base] = n + 1;
+      return n === 0 ? base : base + "-" + n;
+    }
+    var parsed = marked.parse(${JSON.stringify(rawMarkdown)});
+    var holder = document.createElement("div");
+    holder.innerHTML = parsed;
+    holder.querySelectorAll("h1,h2,h3,h4,h5,h6").forEach(function(heading) {
+      if (!heading.id) heading.id = headingSlug(heading.textContent || "");
+    });
+    document.getElementById("content").innerHTML = holder.innerHTML;
   <\/script>
 </body>
 </html>`;

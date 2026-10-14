@@ -16,9 +16,9 @@ public struct PortalView: View {
 
     enum ShareFilter: String, CaseIterable, Identifiable {
         case all = "All"
-        case redirects = "Redirects"
+        case redirects = "Short links"
         case files = "Files"
-        case expiring = "Expiring Soon"
+        case expiring = "Expiring soon"
 
         var id: String { rawValue }
     }
@@ -55,35 +55,35 @@ public struct PortalView: View {
                 // Analytics Dashboard Section
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Fleet Analytics")
+                        Text("At a glance")
                             .font(.caption.bold())
-                            .foregroundColor(.secondary)
-                            .textCase(.uppercase)
+                            .foregroundStyle(.secondary)
+                            .accessibilityAddTraits(.isHeader)
 
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                             StatCard(
-                                title: "Active Shares",
+                                title: "Links",
                                 value: "\(portalManager.analytics.totalShares)",
                                 systemImage: "link.circle.fill",
                                 color: .blue
                             )
 
                             StatCard(
-                                title: "Total Storage",
+                                title: "Storage",
                                 value: portalManager.analytics.formattedTotalBytes,
                                 systemImage: "internaldrive.fill",
                                 color: .purple
                             )
 
                             StatCard(
-                                title: "Redirects",
+                                title: "Short links",
                                 value: "\(portalManager.analytics.totalRedirects)",
                                 systemImage: "arrow.triangle.turn.up.right.circle.fill",
                                 color: .green
                             )
 
                             StatCard(
-                                title: "File Shares",
+                                title: "Files",
                                 value: "\(portalManager.analytics.totalFileShares)",
                                 systemImage: "doc.fill",
                                 color: .orange
@@ -93,8 +93,9 @@ public struct PortalView: View {
                         if portalManager.analytics.expiringSoonCount > 0 {
                             HStack {
                                 Image(systemName: "exclamationmark.clock.fill")
-                                    .foregroundColor(.yellow)
-                                Text("\(portalManager.analytics.expiringSoonCount) share(s) expiring within 24 hours")
+                                    .foregroundColor(.orange)
+                                    .accessibilityHidden(true)
+                                Text("\(portalManager.analytics.expiringSoonCount) \(portalManager.analytics.expiringSoonCount == 1 ? "link expires" : "links expire") within 24 hours")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -115,12 +116,14 @@ public struct PortalView: View {
                                     Text(filter.rawValue)
                                         .font(.subheadline.bold())
                                         .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
+                                        .padding(.vertical, 8)
                                         .background(filterMode == filter ? Color.accentColor : Color(UIColor.secondarySystemFill))
                                         .foregroundColor(filterMode == filter ? .white : .primary)
                                         .cornerRadius(16)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityAddTraits(filterMode == filter ? .isSelected : [])
+                                .accessibilityLabel(filter.rawValue)
                             }
                         }
                         .padding(.vertical, 4)
@@ -128,11 +131,20 @@ public struct PortalView: View {
                 }
 
                 // Slugs List
+                if let error = portalManager.errorMessage {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .accessibilityLabel("Error.  \(error)")
+                    }
+                }
+
                 Section {
                     if portalManager.isLoading && portalManager.shares.isEmpty {
                         HStack {
                             Spacer()
-                            ProgressView("Loading active shares...")
+                            ProgressView("Loading your links…")
                             Spacer()
                         }
                         .padding()
@@ -141,11 +153,12 @@ public struct PortalView: View {
                             Image(systemName: "tray")
                                 .font(.largeTitle)
                                 .foregroundColor(.secondary)
-                            Text("No shares found")
+                            Text(emptyTitle)
                                 .font(.headline)
-                            Text(searchText.isEmpty ? "No active shares registered." : "Try a different search query.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            Text(emptyDetail)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
@@ -171,7 +184,7 @@ public struct PortalView: View {
                     }
                 } header: {
                     HStack {
-                        Text("Active Shares (\(filteredShares.count))")
+                        Text("Links (\(filteredShares.count))")
                         Spacer()
                         if portalManager.isLoading {
                             ProgressView()
@@ -180,11 +193,11 @@ public struct PortalView: View {
                     }
                 }
             }
-            .searchable(text: $searchText, prompt: "Search by slug or target URL")
+            .searchable(text: $searchText, prompt: "Search by name or address")
             .refreshable {
                 await portalManager.fetchShares(host: serverHost, token: session.bearerSecret, sessionCookie: session.sessionCookieHeader)
             }
-            .navigationTitle("Portal & Analytics")
+            .navigationTitle("Links")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -194,10 +207,11 @@ public struct PortalView: View {
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
+                    .accessibilityLabel("Refresh links")
                 }
             }
             .confirmationDialog(
-                "Delete Share",
+                "Delete this link?",
                 isPresented: $showDeleteConfirmation,
                 titleVisibility: .visible,
                 presenting: shareToDelete
@@ -209,7 +223,7 @@ public struct PortalView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { share in
-                Text("Are you sure you want to delete '\(share.slug)'? This will permanently remove the files from R2 storage.")
+                Text("Delete \(share.slug)?  This cannot be undone.")
             }
             .task {
                 if portalManager.shares.isEmpty {
@@ -228,6 +242,20 @@ public struct PortalView: View {
                 copiedSlug = nil
             }
         }
+    }
+
+    private var emptyTitle: String {
+        if !searchText.isEmpty || filterMode != .all {
+            return "Nothing matches"
+        }
+        return "No links yet"
+    }
+
+    private var emptyDetail: String {
+        if !searchText.isEmpty || filterMode != .all {
+            return "Try a different word, or show every link."
+        }
+        return "Use New link to share a file or a web address.  Links you make on the website show up here after you sign in."
     }
 
     private func renewShare(_ share: PortalShare) {
@@ -255,16 +283,18 @@ private struct StatCard: View {
             }
             Text(value)
                 .font(.title2.bold())
-                .foregroundColor(.primary)
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text(title)
-                .font(.caption2)
-                .foregroundColor(.secondary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(10)
         .background(Color(UIColor.secondarySystemGroupedBackground))
         .cornerRadius(12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(value)")
     }
 }
 
@@ -287,7 +317,7 @@ private struct ShareRowView: View {
                             .foregroundColor(.primary)
 
                         if share.isRedirect {
-                            Text("Redirect")
+                            Text("Short link")
                                 .font(.caption2.bold())
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -306,8 +336,9 @@ private struct ShareRowView: View {
 
                         if share.password_protected {
                             Image(systemName: "lock.fill")
-                                .font(.caption2)
-                                .foregroundColor(.orange)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .accessibilityLabel("Password protected")
                         }
                     }
 
@@ -333,12 +364,13 @@ private struct ShareRowView: View {
                         Text(share.timeRemainingString)
                             .font(.caption2.bold())
                     }
-                    .foregroundColor(share.isExpiringSoon ? .yellow : .secondary)
+                    .foregroundStyle(share.isExpiringSoon ? Color.orange : Color.secondary)
+                    .accessibilityLabel(share.isExpiringSoon ? "Expires soon.  \(share.timeRemainingString)" : share.timeRemainingString)
 
                     if let renewals = share.renewals_used, renewals > 0 {
                         Text("\(renewals) renewal\(renewals == 1 ? "" : "s")")
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -357,6 +389,7 @@ private struct ShareRowView: View {
                     .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(copiedSlug == share.slug ? "Copied link for \(share.slug)" : "Copy link for \(share.slug)")
 
                 Button(action: onView) {
                     HStack(spacing: 4) {
@@ -370,6 +403,7 @@ private struct ShareRowView: View {
                     .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("View \(share.slug)")
 
                 Button(action: onRenew) {
                     HStack(spacing: 4) {
@@ -389,6 +423,7 @@ private struct ShareRowView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isRenewing)
+                .accessibilityLabel("Renew \(share.slug)")
 
                 Spacer()
 
@@ -401,6 +436,7 @@ private struct ShareRowView: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Delete \(share.slug)")
             }
             .padding(.top, 2)
         }

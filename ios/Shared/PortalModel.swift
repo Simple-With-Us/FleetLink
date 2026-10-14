@@ -23,7 +23,7 @@ public struct PortalShare: Identifiable, Codable, Hashable, Sendable {
     }
 
     public var formattedBytes: String {
-        if isRedirect { return "Redirect URL" }
+        if isRedirect { return "Short link" }
         if bytes < 1024 { return "\(bytes) B" }
         let kb = Double(bytes) / 1024.0
         if kb < 1024.0 { return String(format: "%.1f KB", kb) }
@@ -54,16 +54,20 @@ public struct PortalShare: Identifiable, Codable, Hashable, Sendable {
     }
 
     public var timeRemainingString: String {
-        guard let exp = expiresDate else { return "Unknown" }
+        if expires_at.isEmpty { return "Until you delete it" }
+        guard let exp = expiresDate else { return "Time unavailable" }
         let remaining = exp.timeIntervalSinceNow
         if remaining <= 0 { return "Expired" }
         let days = Int(remaining / 86400)
         let hours = Int((remaining.truncatingRemainder(dividingBy: 86400)) / 3600)
         if days > 0 {
-            return "\(days)d \(hours)h"
+            return "\(days) \(days == 1 ? "day" : "days"), \(hours) \(hours == 1 ? "hour" : "hours")"
         }
         let mins = Int((remaining.truncatingRemainder(dividingBy: 3600)) / 60)
-        return "\(hours)h \(mins)m"
+        if hours > 0 {
+            return "\(hours) \(hours == 1 ? "hour" : "hours"), \(mins) \(mins == 1 ? "minute" : "minutes")"
+        }
+        return "\(mins) \(mins == 1 ? "minute" : "minutes")"
     }
 
     public var isExpiringSoon: Bool {
@@ -120,7 +124,7 @@ public final class PortalManager: ObservableObject {
 
         let endpoint = "\(host)/api/shares"
         guard let url = URL(string: endpoint) else {
-            errorMessage = "Invalid endpoint URL"
+            errorMessage = "That server address is not valid."
             isLoading = false
             return
         }
@@ -137,20 +141,20 @@ public final class PortalManager: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
-                errorMessage = "Invalid server response"
+                errorMessage = "FleetLink sent a response the app could not read."
                 isLoading = false
                 return
             }
 
             if httpResponse.statusCode == 401 {
-                errorMessage = "Authentication required or token expired. Add your token in Settings."
+                errorMessage = "Sign in to see your links.  Add your sign-in code in Settings."
                 isLoading = false
                 return
             }
 
             guard (200...299).contains(httpResponse.statusCode) else {
                 let errText = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-                errorMessage = "Failed to load shares: \(errText)"
+                errorMessage = FleetLinkCopy.explain("Could not load links.  \(errText)")
                 isLoading = false
                 return
             }
@@ -160,7 +164,7 @@ public final class PortalManager: ObservableObject {
             computeAnalytics()
             isLoading = false
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = FleetLinkCopy.explain(error.localizedDescription)
             isLoading = false
         }
     }
@@ -197,14 +201,14 @@ public final class PortalManager: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
                 let errText = String(data: data, encoding: .utf8) ?? "Error"
-                errorMessage = "Delete failed: \(errText)"
+                errorMessage = FleetLinkCopy.explain("Could not delete that link.  \(errText)")
                 return false
             }
             shares.removeAll { $0.slug == slug }
             computeAnalytics()
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = FleetLinkCopy.explain(error.localizedDescription)
             return false
         }
     }
@@ -221,16 +225,36 @@ public final class PortalManager: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
                 let errText = String(data: data, encoding: .utf8) ?? "Error"
-                errorMessage = "Renew failed: \(errText)"
+                errorMessage = FleetLinkCopy.explain("Could not renew that link.  \(errText)")
                 return false
             }
             await fetchShares(host: host, token: token)
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = FleetLinkCopy.explain(error.localizedDescription)
             return false
         }
     }
+
+public enum FleetLinkCopy {
+    public static func explain(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Something went wrong.  Try again." }
+        let lower = trimmed.lowercased()
+        if lower.contains("authentication required") || lower.contains("invalid secret") || lower.contains("unauthorized") {
+            return "Sign in before you continue.  Add your sign-in code in Settings."
+        }
+        if lower.contains("invalid url") || lower.contains("invalid endpoint") {
+            return "That web address is not valid."
+        }
+        return trimmed
+            .replacingOccurrences(of: "Cloudflare R2", with: "storage", options: .caseInsensitive)
+            .replacingOccurrences(of: "R2", with: "storage")
+            .replacingOccurrences(of: "system asset", with: "site file", options: .caseInsensitive)
+            .replacingOccurrences(of: "slug", with: "link name", options: .caseInsensitive)
+            .replacingOccurrences(of: "TTL", with: "time limit")
+    }
+}
 
 public enum PortalError: LocalizedError, Sendable {
     case invalidURL
@@ -240,10 +264,10 @@ public enum PortalError: LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidURL: return "Invalid URL"
-        case .unauthorized: return "Unauthorized: Invalid or missing token"
-        case .serverError(let msg): return msg
-        case .encodingFailed: return "Encoding failed"
+        case .invalidURL: return "That web address is not valid."
+        case .unauthorized: return "Sign in before you continue.  Add your sign-in code in Settings."
+        case .serverError(let msg): return FleetLinkCopy.explain(msg)
+        case .encodingFailed: return "That text could not be saved.  Try again."
         }
     }
 }
@@ -357,7 +381,7 @@ public enum PortalError: LocalizedError, Sendable {
         }
 
         // Add file
-        let cleanName = fileName.isEmpty ? "artifact.md" : fileName
+        let cleanName = fileName.isEmpty ? "notes.md" : fileName
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(cleanName)\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)

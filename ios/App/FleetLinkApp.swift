@@ -24,7 +24,7 @@ struct FleetLinkApp: App {
                     }
                 }
                 .tabItem {
-                    Label("Portal", systemImage: "chart.bar.xaxis")
+                    Label("Links", systemImage: "link")
                 }
                 .tag(0)
 
@@ -37,7 +37,7 @@ struct FleetLinkApp: App {
                     }
                 }
                 .tabItem {
-                    Label("Make Slug", systemImage: "plus.circle.fill")
+                    Label("New link", systemImage: "plus.circle.fill")
                 }
                 .tag(1)
 
@@ -48,12 +48,13 @@ struct FleetLinkApp: App {
                         HStack(spacing: 8) {
                             Image(systemName: "link")
                                 .foregroundColor(.secondary)
-                            TextField("Paste fleetlink.online URL...", text: $inputURLString)
+                            TextField("Paste a fleetlink.online link", text: $inputURLString)
                                 .textFieldStyle(.plain)
-                                .font(.subheadline)
+                                .font(.body)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
-                            Button("Load") {
+                                .accessibilityLabel("Link address")
+                            Button("Open") {
                                 if let url = URL(string: inputURLString.trimmingCharacters(in: .whitespacesAndNewlines)) {
                                     Task { await loader.load(url: url) }
                                 }
@@ -72,11 +73,11 @@ struct FleetLinkApp: App {
 
                         ArtifactContainerView(loader: loader, isClip: false)
                     }
-                    .navigationTitle("Artifact Viewer")
+                    .navigationTitle("View")
                     .navigationBarTitleDisplayMode(.inline)
                 }
                 .tabItem {
-                    Label("Viewer", systemImage: "doc.text.magnifyingglass")
+                    Label("View", systemImage: "doc.text.magnifyingglass")
                 }
                 .tag(2)
 

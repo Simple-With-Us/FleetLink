@@ -10,8 +10,8 @@ public struct CreateSlugView: View {
     @State private var creationMode: CreationMode = .redirect
     @State private var customSlug: String = ""
     @State private var targetURL: String = ""
-    @State private var textFileName: String = "artifact.md"
-    @State private var textContent: String = "# FleetLink Artifact\n\nShared from FleetLink iOS."
+    @State private var textFileName: String = "notes.md"
+    @State private var textContent: String = "# Notes\n\nShared from FleetLink."
     @State private var selectedTTLSeconds: Int = 15552000 // 180 days default for redirects
     @State private var password: String = ""
     @State private var selectedDomain: String = "fleetlink.online"
@@ -22,8 +22,8 @@ public struct CreateSlugView: View {
     @State private var hasCopied: Bool = false
 
     enum CreationMode: String, CaseIterable, Identifiable {
-        case redirect = "Redirect URL"
-        case upload = "Text / Artifact"
+        case redirect = "Short link"
+        case upload = "Text file"
 
         var id: String { rawValue }
     }
@@ -64,8 +64,9 @@ public struct CreateSlugView: View {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundColor(.green)
                                     .font(.title3)
-                                Text("Slug Created Successfully!")
+                                Text("Your link is ready")
                                     .font(.headline)
+                                    .accessibilityAddTraits(.isHeader)
                             }
 
                             Text(urlString)
@@ -87,7 +88,7 @@ public struct CreateSlugView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: hasCopied ? "checkmark" : "doc.on.doc")
-                                        Text(hasCopied ? "Copied" : "Copy Link")
+                                        Text(hasCopied ? "Copied" : "Copy link")
                                     }
                                     .font(.subheadline.bold())
                                     .frame(maxWidth: .infinity)
@@ -115,19 +116,16 @@ public struct CreateSlugView: View {
 
                 if let err = errorMessage {
                     Section {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text(err)
-                                .font(.subheadline)
-                                .foregroundColor(.red)
-                        }
+                        Label(err, systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .accessibilityLabel("Error.  \(err)")
                     }
                 }
 
                 // Mode Picker
-                Section("Mode") {
-                    Picker("Creation Mode", selection: $creationMode) {
+                Section("What to share") {
+                    Picker("What to share", selection: $creationMode) {
                         ForEach(CreationMode.allCases) { mode in
                             Text(mode.rawValue).tag(mode)
                         }
@@ -144,15 +142,16 @@ public struct CreateSlugView: View {
 
                 // Configuration Fields
                 if creationMode == .redirect {
-                    Section("Destination") {
-                        TextField("Target URL (https://...)", text: $targetURL)
+                    Section("Web address") {
+                        TextField("https://example.com", text: $targetURL)
                             .keyboardType(.URL)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
+                            .accessibilityLabel("Web address to open")
                     }
                 } else {
-                    Section("File Name") {
-                        TextField("e.g. notes.md, index.html", text: $textFileName)
+                    Section("File name") {
+                        TextField("notes.md", text: $textFileName)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                     }
@@ -166,12 +165,14 @@ public struct CreateSlugView: View {
 
                 Section("Options") {
                     if creationMode == .redirect || !session.bearerSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        TextField("Custom Slug (optional)", text: $customSlug)
+                        TextField("Short name (optional)", text: $customSlug)
+                            .accessibilityLabel("Short name")
+                            .accessibilityHint("Leave blank and FleetLink picks a name.")
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                     }
 
-                    Picker("Expiration", selection: $selectedTTLSeconds) {
+                    Picker("How long it stays up", selection: $selectedTTLSeconds) {
                         if creationMode == .redirect {
                             ForEach(redirectTTLs) { opt in
                                 Text(opt.label).tag(opt.seconds)
@@ -183,7 +184,8 @@ public struct CreateSlugView: View {
                         }
                     }
 
-                    SecureField("Password Protection (optional)", text: $password)
+                    SecureField("Password (optional)", text: $password)
+                        .accessibilityHint("Leave blank if anyone with the link may open it.")
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
 
@@ -204,7 +206,7 @@ public struct CreateSlugView: View {
                                 ProgressView()
                                     .padding(.trailing, 4)
                             }
-                            Text(creationMode == .redirect ? "Create Redirect Link" : "Upload & Create Slug")
+                            Text(creationMode == .redirect ? "Create short link" : "Share file")
                                 .bold()
                             Spacer()
                         }
@@ -212,7 +214,7 @@ public struct CreateSlugView: View {
                     .disabled(isSubmitting || !isFormValid)
                 }
             }
-            .navigationTitle("Make Slug")
+            .navigationTitle("New link")
         }
     }
 
@@ -249,11 +251,11 @@ public struct CreateSlugView: View {
                     targetURL = ""
                     customSlug = ""
                 case .failure(let err):
-                    errorMessage = err.localizedDescription
+                    errorMessage = FleetLinkCopy.explain(err.localizedDescription)
                 }
             } else {
                 guard let data = textContent.data(using: .utf8) else {
-                    errorMessage = "Failed to encode text data"
+                    errorMessage = "That text could not be saved.  Try again."
                     isSubmitting = false
                     return
                 }
@@ -272,7 +274,7 @@ public struct CreateSlugView: View {
                     createdURLString = url
                     customSlug = ""
                 case .failure(let err):
-                    errorMessage = err.localizedDescription
+                    errorMessage = FleetLinkCopy.explain(err.localizedDescription)
                 }
             }
             isSubmitting = false

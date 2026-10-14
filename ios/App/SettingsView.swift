@@ -19,73 +19,28 @@ public struct SettingsView: View {
                 AccountView(session: session, webAuth: webAuth, apple: apple)
 
                 Section {
-                    SecureField("Admin / Agent Secret Token", text: $session.bearerSecret)
+                    SecureField("Sign-in code", text: $session.bearerSecret)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .accessibilityIdentifier("bearerTokenField")
-
-                    Text("For Bots And Automation Only.  A Bearer Secret Is Sent As An Authorization Header, Which Is Separate From Your Account Session.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .accessibilityLabel("Automation sign-in code")
                 } header: {
-                    Text("Admin / Agent Token")
+                    Text("Automation")
                 } footer: {
-                    Text("The Fleet MCP Server And Agent Seats Sign In With A Bearer Secret.  Keep Using Them Here If You Automate FleetLink.")
+                    Text("Only for a script or shortcut that shares for you.  It is separate from Sign in with Apple.  Leave it blank if you only use the buttons above.")
                         .font(.caption)
                 }
 
-                Section("Server Endpoint") {
-                    Picker("Primary Host", selection: $serverHost) {
-                        Text("https://fleetlink.online (Default)").tag("https://fleetlink.online")
-                        Text("https://fleetlink.app (Secondary)").tag("https://fleetlink.app")
+                Section("Website") {
+                    Picker("Website", selection: $serverHost) {
+                        Text("fleetlink.online").tag("https://fleetlink.online")
+                        Text("fleetlink.app").tag("https://fleetlink.app")
                     }
                 }
 
-                Section("App Clip & Universal Links") {
-                    HStack {
-                        Text("App Clip Bundle")
-                        Spacer()
-                        Text("online.fleetlink.ios.Clip")
-                            .font(.caption.monospaced())
-                            .foregroundColor(.secondary)
-                    }
-
-                    HStack {
-                        Text("Associated Domains")
-                        Spacer()
-                        VStack(alignment: .trailing) {
-                            Text("fleetlink.online")
-                            Text("fleetlink.app")
-                        }
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    }
-                }
-
-                Section("Architecture & Fleet Coordination") {
-                    HStack {
-                        Text("Team ID")
-                        Spacer()
-                        Text("CC8UTF7ATG")
-                            .font(.caption.monospaced())
-                            .foregroundColor(.secondary)
-                    }
-
-                    HStack {
-                        Text("Main App Bundle")
-                        Spacer()
-                        Text("online.fleetlink.ios")
-                            .font(.caption.monospaced())
-                            .foregroundColor(.secondary)
-                    }
-
-                    HStack {
-                        Text("Storage Engine")
-                        Spacer()
-                        Text("Cloudflare R2 + D1")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                Section("Opens links from") {
+                    Text("fleetlink.online")
+                    Text("fleetlink.app")
                 }
 
                 Section("About") {
@@ -98,7 +53,7 @@ public struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("Settings & Info")
+            .navigationTitle("Settings")
         }
     }
 }

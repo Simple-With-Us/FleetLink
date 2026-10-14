@@ -20,6 +20,8 @@ public struct ImageView: View {
                     Image(uiImage: uiImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
+                        .accessibilityLabel("Shared picture")
+                        .accessibilityHint("Pinch to zoom.  Double-tap to zoom in or out.")
                         .scaleEffect(scale)
                         .offset(offset)
                         .gesture(
@@ -68,9 +70,10 @@ public struct ImageView: View {
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "photo.badge.exclamationmark")
-                        .font(.system(size: 48))
+                        .font(.largeTitle)
                         .foregroundColor(.secondary)
-                    Text("Unable to render image preview")
+                        .accessibilityHidden(true)
+                    Text("This picture could not be shown.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }

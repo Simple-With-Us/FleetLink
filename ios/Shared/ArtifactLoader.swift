@@ -33,13 +33,14 @@ public final class ArtifactLoader: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
-                state = .failure("Invalid response from server.")
+                state = .failure("The reply from FleetLink could not be read.")
                 return
             }
 
             if httpResponse.statusCode == 404 {
                 let bodyString = String(data: data, encoding: .utf8) ?? ""
-                if bodyString.contains("Link Expired") {
+                let folded = bodyString.lowercased()
+                if folded.contains("link expired") || folded.contains("has expired") {
                     state = .expired
                 } else {
                     state = .notFound
@@ -48,7 +49,7 @@ public final class ArtifactLoader: ObservableObject {
             }
 
             guard (200...299).contains(httpResponse.statusCode) else {
-                state = .failure("Server returned error \(httpResponse.statusCode).")
+                state = .failure("FleetLink could not open that link (error \(httpResponse.statusCode)).")
                 return
             }
 
@@ -58,7 +59,8 @@ public final class ArtifactLoader: ObservableObject {
             let slug = pathComponents.first ?? "share"
 
             // Check if response is a directory listing
-            if contentType.contains("text/html"), let htmlString = String(data: data, encoding: .utf8), htmlString.contains("Index of /") {
+            if contentType.contains("text/html"), let htmlString = String(data: data, encoding: .utf8),
+               htmlString.contains("Index of /") || htmlString.contains("class=\"file-link\"") || htmlString.contains("Files in /") {
                 let items = parseDirectoryListing(html: htmlString, baseURL: url)
                 let artifact = ShareArtifact(
                     sourceURL: url,
@@ -126,14 +128,17 @@ public final class ArtifactLoader: ObservableObject {
 
     private func parseDirectoryListing(html: String, baseURL: URL) -> [ArtifactItem] {
         var items: [ArtifactItem] = []
-        // Look for <li><a href="/...">📄 name</a></li>
-        let pattern = #"href="([^"]+)">📄\s*([^<]+)</a>"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return items
-        }
-
+        // Current pages use class="file-link".  Older pages put a document emoji in the link text.
+        let patterns = [
+            #"class="file-link" href="([^"]+)">([^<]+)"#,
+            #"href="([^"]+)">📄\s*([^<]+)</a>"#
+        ]
         let nsString = html as NSString
-        let matches = regex.matches(in: html, options: [], range: NSRange(location: 0, length: nsString.length))
+        var matches: [NSTextCheckingResult] = []
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
+            matches.append(contentsOf: regex.matches(in: html, options: [], range: NSRange(location: 0, length: nsString.length)))
+        }
 
         for match in matches {
             guard match.numberOfRanges == 3 else { continue }
