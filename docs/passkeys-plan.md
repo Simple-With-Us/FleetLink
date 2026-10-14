@@ -1,12 +1,31 @@
-# Passkeys as Default Login + User Dashboard
+# Passkeys (Primary) + GitHub/Apple/Google + Dashboard + iOS
 
-**Owner confirmation:** There should be a dashboard/portal for users too.
+## Endpoints implemented (stubs)
 
-## Alignment
-- Web dashboard at /dashboard (from prior PR #60): Account, Shares, Agent Tokens, Teams.
-- iOS PortalView already exists for analytics and share management, session-aware.
-- Passkeys auth feeds into the existing session/user model so the dashboard/portal works for signed-in users.
+**Public (sign-in):**
+- POST /auth/passkey/register/start
+- POST /auth/passkey/register/finish
+- POST /auth/passkey/login/start
+- POST /auth/passkey/login/finish
 
-Passkeys are the login method; the dashboard/portal is the management surface, matching the removed TS multi-user system and FL-1 plan.
+**Authenticated (dashboard / iOS management):**
+- POST /api/user/passkeys/register/start
+- POST /api/user/passkeys/register/finish
+- GET /api/user/passkeys
+- DELETE /api/user/passkeys/:id
 
-No deploy without cutover blockers addressed and owner go-ahead.
+## Dashboard
+- /dashboard Passkeys panel: list, register additional, revoke.
+- Shows linked GitHub / Apple / Google identities.
+
+## iOS
+- PortalView / AccountView: Passkeys section for list / register / revoke.
+- Sign-in buttons for Passkeys (native), GitHub, Apple, Google.
+
+## Next
+- Wire into worker router.
+- Add @simplewebauthn/server dependency.
+- D1 migration for passkeys table.
+- Full verification and session cookie issuance.
+
+Aligned with removed TS system and FL-1. Cutover blockers remain. No production deploy yet.

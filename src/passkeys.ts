@@ -1,80 +1,62 @@
-// Passkeys (WebAuthn) as primary login for FleetLink multi-user
-// Secondary: GitHub / Google / Apple OAuth
-// Use @simplewebauthn/server on the Worker + D1.
+// Passkeys (WebAuthn) — primary login + dashboard management
+// Supports public registration/login and authenticated management for signed-in users.
+// Use @simplewebauthn/server + D1.
 
 export interface PasskeyCredential {
   id: string;
   userId: string;
   credentialId: string;
-  publicKey: string; // base64
+  publicKey: string;
   counter: number;
   deviceType?: string;
   backedUp?: boolean;
   transports?: string;
   createdAt: string;
+  lastUsedAt?: string;
 }
 
-/** Start passkey registration for a signed-in or new user. */
-export async function startRegistration(env: any, userId: string, username: string) {
-  // TODO: generateRegistrationOptions from @simplewebauthn/server
-  // rpID = env.ADMIN_HOST || 'fleetlink.app'
-  // residentKey: 'required', userVerification: 'preferred'
-  // Store challenge in KV or D1 with short TTL
+// Public flows (initial sign-in / registration)
+export async function startPublicRegistration(env: any, username: string) {
   const challengeId = crypto.randomUUID();
-  return {
-    options: {
-      rp: { name: 'FleetLink', id: 'fleetlink.app' },
-      user: { id: userId, name: username, displayName: username },
-      challenge: challengeId,
-      pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
-      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
-      timeout: 60000,
-      attestation: 'none'
-    },
-    challengeId
-  };
+  // generateRegistrationOptions({ rpID: env.ADMIN_HOST, residentKey: 'required', userVerification: 'required' })
+  // Store challenge in KV/D1
+  return { options: { challenge: challengeId, rp: { name: 'FleetLink', id: 'fleetlink.app' } }, challengeId };
 }
 
-/** Finish passkey registration and issue session. */
-export async function finishRegistration(env: any, challengeId: string, attestation: any) {
-  // TODO: verifyRegistrationResponse
-  // Insert into passkeys table
-  // Create or link user, issue fl_session cookie
-  return { ok: true, userId: 'user_' + crypto.randomUUID().slice(0, 8) };
+export async function finishPublicRegistration(env: any, challengeId: string, attestation: any) {
+  // verifyRegistrationResponse, create user if needed, insert passkey, issue fl_session
+  return { ok: true, userId: crypto.randomUUID() };
 }
 
-/** Start passkey login (discoverable). */
 export async function startLogin(env: any) {
-  // TODO: generateAuthenticationOptions
-  // allowCredentials: [] for discoverable credentials
   const challengeId = crypto.randomUUID();
-  return {
-    options: {
-      challenge: challengeId,
-      rpId: 'fleetlink.app',
-      allowCredentials: [],
-      userVerification: 'preferred',
-      timeout: 60000
-    },
-    challengeId
-  };
+  // generateAuthenticationOptions (empty allowCredentials for discoverable)
+  return { options: { challenge: challengeId }, challengeId };
 }
 
-/** Finish passkey login and issue session. */
 export async function finishLogin(env: any, challengeId: string, assertion: any) {
-  // TODO: verifyAuthenticationResponse
-  // Update counter, issue fl_session cookie
-  return { ok: true, session: 'sess_' + crypto.randomUUID().slice(0, 16) };
+  // verifyAuthenticationResponse, update counter, issue fl_session
+  return { ok: true, sessionToken: crypto.randomUUID() };
 }
 
-/** List passkeys for a user (dashboard). */
-export async function listPasskeys(env: any, userId: string): Promise<PasskeyCredential[]> {
-  // TODO: SELECT from passkeys WHERE user_id = ?
+// Authenticated flows (dashboard / iOS management)
+export async function startAuthenticatedRegistration(env: any, userId: string) {
+  // exclude existing credentials for this user
+  const challengeId = crypto.randomUUID();
+  return { options: { challenge: challengeId }, challengeId };
+}
+
+export async function finishAuthenticatedRegistration(env: any, userId: string, challengeId: string, attestation: any) {
+  // verify and insert passkey for userId
+  return { ok: true };
+}
+
+export async function listUserPasskeys(env: any, userId: string): Promise<PasskeyCredential[]> {
+  // SELECT * FROM passkeys WHERE user_id = ?
   return [];
 }
 
-/** Revoke a passkey. */
-export async function revokePasskey(env: any, userId: string, passkeyId: string): Promise<boolean> {
-  // TODO: DELETE FROM passkeys WHERE id = ? AND user_id = ?
-  return true;
+export async function revokePasskey(env: any, userId: string, passkeyId: string) {
+  // DELETE FROM passkeys WHERE id = ? AND user_id = ?
+  return { ok: true };
 }
