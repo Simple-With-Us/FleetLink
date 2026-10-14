@@ -3,30 +3,97 @@
 <head>
   <title>FleetLink Dashboard</title>
   <style>
-    body { font-family: system-ui; margin: 2rem; }
-    .panel { border: 1px solid #ccc; padding: 1rem; margin: 1rem 0; }
-    button { margin: 0.5rem; }
+    :root {
+      color-scheme: light dark;
+      --bg: #f9f9f9;
+      --panel: #ffffff;
+      --text: #111;
+      --border: #ddd;
+      --accent: #0066cc;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1a1a;
+        --panel: #2a2a2a;
+        --text: #eee;
+        --border: #444;
+        --accent: #4da6ff;
+      }
+    }
+    [data-theme="light"] {
+      --bg: #f9f9f9;
+      --panel: #ffffff;
+      --text: #111;
+      --border: #ddd;
+      --accent: #0066cc;
+    }
+    [data-theme="dark"] {
+      --bg: #1a1a1a;
+      --panel: #2a2a2a;
+      --text: #eee;
+      --border: #444;
+      --accent: #4da6ff;
+    }
+    body { font-family: system-ui; margin: 2rem; background: var(--bg); color: var(--text); }
+    .panel { border: 1px solid var(--border); padding: 1rem; margin: 1rem 0; background: var(--panel); border-radius: 8px; }
+    button { margin: 0.5rem; padding: 0.4rem 0.8rem; }
+    input, select { margin: 0.3rem; padding: 0.3rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+    .admin { border-left: 4px solid var(--accent); }
+    .theme-toggle { position: absolute; top: 1rem; right: 1rem; }
   </style>
 </head>
 <body>
+  <div class="theme-toggle">
+    <label>Theme:
+      <select id="theme">
+        <option value="system" selected>System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
+  </div>
+
   <h1>FleetLink Dashboard</h1>
-  <div class="panel" id="account">Account panel</div>
+  <div class="panel" id="account">Account (name, email, role)</div>
   <div class="panel" id="passkeys">
     <h2>Passkeys</h2>
-    <ul id="passkey-list"></ul>
-    <button id="add-passkey">Add Passkey</button>
+    <ul id="passkey-list"><li>example-passkey</li></ul>
+    <button>Add Passkey</button>
   </div>
-  <div class="panel" id="tokens">Agent Tokens (create your own)</div>
+  <div class="panel" id="tokens">Agent Tokens</div>
   <div class="panel" id="teams">Teams</div>
+
+  <div class="panel admin" id="admin-settings">
+    <h2>Admin Settings (Infisical)</h2>
+    <h3>Usage Guards</h3>
+    <label>D1 Reads max: <input type="number" value="4000000"></label>
+    <label>D1 Writes max: <input type="number" value="80000"></label>
+    <label>File Writes max: <input type="number" value="10000"></label>
+    <label>Stop new files over limit: <input type="checkbox" checked></label>
+    <label>Stop D1 when over limit: <input type="checkbox" checked></label>
+    <h3>Storage</h3>
+    <label>Primary: <select><option>Cloudflare R2</option><option>Backblaze B2</option></select></label>
+    <button>Save to Infisical</button>
+  </div>
+
   <script>
-    // Wire to /api/auth/passkey/* and /api/user/passkeys
-    document.getElementById('add-passkey').onclick = async () => {
-      const res = await fetch('/api/auth/passkey/register/options', { method: 'POST' });
-      const { options } = await res.json();
-      // const attestation = await navigator.credentials.create({ publicKey: options });
-      // then POST to /verify
-      alert('Passkey registration flow (wire to SimpleWebAuthn browser)');
+    const themeSelect = document.getElementById('theme');
+    function applyTheme(theme) {
+      if (theme === 'system') {
+        document.documentElement.removeAttribute('data-theme');
+      } else {
+        document.documentElement.setAttribute('data-theme', theme);
+      }
+    }
+    themeSelect.onchange = () => {
+      const val = themeSelect.value;
+      localStorage.setItem('theme', val);
+      applyTheme(val);
     };
+    // Default to system
+    const saved = localStorage.getItem('theme') || 'system';
+    themeSelect.value = saved;
+    applyTheme(saved);
   </script>
 </body>
 </html>
