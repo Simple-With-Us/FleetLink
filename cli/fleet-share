@@ -1,0 +1,452 @@
+#!/bin/bash
+set -e
+
+# Remote installer pin.  The SHA-256 defaults are the integrity check: a
+# download that does not match is deleted and not executed.  The git SHA is
+# the raw URL of a commit that already published those bytes.  It is an
+# ancestor, not the commit that records this pin, because a commit cannot
+# contain its own id.  A shallow clone may not have that ancestor.
+# FLEETLINK_SKILL_GIT_SHA, FLEETLINK_INSTALLER_SHA256, and
+# FLEETLINK_SKILL_MD_SHA256 override the defaults.
+FLEETLINK_PINNED_GIT_SHA_DEFAULT='ecf854e2ae271c55ec1cc192f59a694307fa2ed4'
+FLEETLINK_INSTALLER_SHA256_DEFAULT='e8bf443e751ad50c5dd795c2348cdda28752afda9d9d42d55dd60deb5094d6ce'
+FLEETLINK_SKILL_MD_SHA256_DEFAULT='d8d18947b0a148dfd11ec22988bd32512b17ec923359870793599d9723b7bc9f'
+
+mime_of() {
+  local path="$1"
+  local mt=""
+  if command -v file >/dev/null 2>&1; then
+    mt=$(file -b --mime-type "$path" 2>/dev/null || true)
+  fi
+  if [ -z "$mt" ] || [ "$mt" = "inode/x-empty" ]; then
+    case "${path##*.}" in
+      md) mt="text/markdown; charset=utf-8" ;;
+      txt|log) mt="text/plain; charset=utf-8" ;;
+      html|htm) mt="text/html; charset=utf-8" ;;
+      json) mt="application/json; charset=utf-8" ;;
+      png) mt="image/png" ;;
+      jpg|jpeg) mt="image/jpeg" ;;
+      gif) mt="image/gif" ;;
+      webp) mt="image/webp" ;;
+      svg) mt="image/svg+xml" ;;
+      pdf) mt="application/pdf" ;;
+      zip) mt="application/zip" ;;
+      *) mt="application/octet-stream" ;;
+    esac
+  fi
+  printf '%s' "$mt"
+}
+
+usage() {
+  cat <<'EOF'
+Usage: fleet-share [--domain <url>] [--id <hash> | --slug <name>] [--password <pass>] [--preview <image>] [--agent] [--days <N> | --forever] <file-or-dir> [file-or-dir ...]
+       fleet-share skill install|update [--check] [--copy] [--copy-targets-only]
+
+Auth is FLEET_ADMIN_SECRET, or FLEET_AGENT_SECRET with --agent.  Otherwise set
+FLEETLINK_AUTH_FILE to a KEY=value file, or use ./fleet-link-auth.env in the
+current directory.  The value is never printed.  See skills/fleetlink/SKILL.md.
+EOF
+}
+
+fleet_share_realpath() {
+  if python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1" 2>/dev/null; then
+    return 0
+  fi
+  if readlink -f "$1" >/dev/null 2>&1; then
+    readlink -f "$1"
+    return 0
+  fi
+  printf '%s\n' "$1"
+}
+
+fleet_share_repo_root() {
+  local script_path script_dir candidate
+  script_path=$(fleet_share_realpath "$0")
+  script_dir=$(dirname -- "$script_path")
+  candidate=$(dirname -- "$script_dir")
+  if [ -f "$candidate/scripts/install-skill.sh" ] && [ -f "$candidate/skills/fleetlink/SKILL.md" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  if [ -n "${FLEETLINK_REPO_ROOT:-}" ] && [ -f "${FLEETLINK_REPO_ROOT}/scripts/install-skill.sh" ] && [ -f "${FLEETLINK_REPO_ROOT}/skills/fleetlink/SKILL.md" ]; then
+    printf '%s\n' "${FLEETLINK_REPO_ROOT}"
+    return 0
+  fi
+  return 1
+}
+
+fleet_share_curl() {
+  local url=$1 dest=$2
+  if ! curl -fsSL "$url" -o "$dest"; then
+    echo "Could not download $url" >&2
+    echo "Run fleet-share from a FleetLink checkout, or set FLEETLINK_SKILL_RAW_BASE to a raw base URL that serves skills/fleetlink/SKILL.md and scripts/install-skill.sh." >&2
+    exit 1
+  fi
+}
+
+fleet_share_sha256() {
+  local file=$1
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+    return 0
+  fi
+  echo "Refusing to run: sha256sum or shasum is required to verify the downloaded skill." >&2
+  exit 1
+}
+
+fleet_share_require_hash() {
+  local file=$1 expected=$2 label=$3 actual
+  expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f' | tr -d '[:space:]')
+  if [ -z "$expected" ]; then
+    echo "Refusing to run: no pinned SHA-256 for $label." >&2
+    exit 1
+  fi
+  actual=$(fleet_share_sha256 "$file" | tr 'A-F' 'a-f' | tr -d '[:space:]')
+  if [ "$actual" != "$expected" ]; then
+    rm -f "$file"
+    echo "Refusing to run: $label hash mismatch." >&2
+    echo "expected $expected" >&2
+    echo "actual   $actual" >&2
+    exit 1
+  fi
+}
+
+fleet_share_fetch_and_install() {
+  local base cache pin installer_expected skill_expected
+  if [ -z "${HOME:-}" ] || [ "$HOME" = "/" ]; then
+    echo "Refusing to download the FleetLink skill: HOME is unset or /." >&2
+    exit 1
+  fi
+  pin=${FLEETLINK_SKILL_GIT_SHA:-$FLEETLINK_PINNED_GIT_SHA_DEFAULT}
+  base=${FLEETLINK_SKILL_RAW_BASE:-https://raw.githubusercontent.com/Simple-With-Us/FleetLink/${pin}}
+  base=${base%/}
+  cache=${FLEETLINK_SKILL_CACHE:-$HOME/.cache/fleetlink}
+  installer_expected=${FLEETLINK_INSTALLER_SHA256:-$FLEETLINK_INSTALLER_SHA256_DEFAULT}
+  skill_expected=${FLEETLINK_SKILL_MD_SHA256:-$FLEETLINK_SKILL_MD_SHA256_DEFAULT}
+  mkdir -p "$cache/skills/fleetlink" "$cache/scripts"
+  fleet_share_curl "$base/skills/fleetlink/SKILL.md" "$cache/skills/fleetlink/SKILL.md"
+  fleet_share_curl "$base/scripts/install-skill.sh" "$cache/scripts/install-skill.sh"
+  fleet_share_require_hash "$cache/skills/fleetlink/SKILL.md" "$skill_expected" "SKILL.md"
+  fleet_share_require_hash "$cache/scripts/install-skill.sh" "$installer_expected" "install-skill.sh"
+  chmod +x "$cache/scripts/install-skill.sh"
+  bash "$cache/scripts/install-skill.sh" "$@"
+}
+
+fleet_share_skill() {
+  local sub repo
+  sub=${1:-}
+  if [ "$sub" != "install" ] && [ "$sub" != "update" ]; then
+    echo "Usage: fleet-share skill install|update [--check] [--copy] [--copy-targets-only]" >&2
+    exit 1
+  fi
+  shift
+  if repo=$(fleet_share_repo_root); then
+    bash "$repo/scripts/install-skill.sh" "$@"
+    return 0
+  fi
+  fleet_share_fetch_and_install "$@"
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "help" ]; then
+  usage
+  exit 0
+fi
+
+if [ "${1:-}" = "skill" ]; then
+  shift
+  fleet_share_skill "$@"
+  exit 0
+fi
+
+DOMAIN="${FLEETLINK_DOMAIN:-https://fleetlink.online}"
+
+ID=""
+SLUG=""
+DAYS=""
+FOREVER=0
+PASSWORD=""
+PREVIEW=""
+USE_AGENT=0
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --domain)
+      DOMAIN="$2"
+      shift 2
+      ;;
+    --id)
+      ID="$2"
+      shift 2
+      ;;
+    --slug)
+      SLUG="$2"
+      shift 2
+      ;;
+    --days)
+      DAYS="$2"
+      shift 2
+      ;;
+    --password)
+      PASSWORD="$2"
+      shift 2
+      ;;
+    --preview)
+      PREVIEW="$2"
+      shift 2
+      ;;
+    --agent)
+      USE_AGENT=1
+      shift
+      ;;
+    --forever)
+      FOREVER=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [ "$#" -eq 0 ]; then
+  usage
+  exit 1
+fi
+
+strip_wrapping_quotes() {
+  local val=$1
+  case "$val" in
+    \"*\") val=${val#\"}; val=${val%\"} ;;
+    \'*\') val=${val#\'}; val=${val%\'} ;;
+  esac
+  printf '%s' "$val"
+}
+
+secret_from_file() {
+  local file=$1 pattern=$2 line val
+  line=$(grep -E "$pattern" "$file" | head -n1 || true)
+  if [ -z "$line" ]; then
+    printf ''
+    return 0
+  fi
+  val=${line#*=}
+  strip_wrapping_quotes "$val"
+}
+
+secret_from_auth_files() {
+  local pattern=$1 f
+  if [ -n "${FLEETLINK_AUTH_FILE:-}" ]; then
+    if [ ! -f "$FLEETLINK_AUTH_FILE" ]; then
+      echo "❌ Error: FLEETLINK_AUTH_FILE is set but the file does not exist." >&2
+      exit 1
+    fi
+    secret_from_file "$FLEETLINK_AUTH_FILE" "$pattern"
+    return 0
+  fi
+  for f in "./fleet-link-auth.env" "./.fleet-link-auth.env"; do
+    if [ -f "$f" ]; then
+      secret_from_file "$f" "$pattern"
+      return 0
+    fi
+  done
+  printf ''
+}
+
+first_env() {
+  local name val
+  for name in "$@"; do
+    val=${!name-}
+    if [ -n "$val" ]; then
+      printf '%s' "$val"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [ "$USE_AGENT" -eq 1 ]; then
+  AUTH_HEADER_NAME="X-Fleet-Agent"
+  AUTH_SECRET=$(first_env FLEET_AGENT_SECRET AGENT_SECRET || true)
+  if [ -z "$AUTH_SECRET" ]; then
+    AUTH_SECRET=$(secret_from_auth_files '^(FLEET_AGENT_SECRET|AGENT_SECRET)=')
+  fi
+else
+  AUTH_HEADER_NAME="X-Fleet-Admin"
+  AUTH_SECRET=$(first_env FLEET_ADMIN_SECRET ADMIN_SECRET FLEET_AUTH_SECRET AUTH_SECRET || true)
+  if [ -z "$AUTH_SECRET" ]; then
+    AUTH_SECRET=$(secret_from_auth_files '^(FLEET_ADMIN_SECRET|ADMIN_SECRET|FLEET_AUTH_SECRET|AUTH_SECRET)=')
+  fi
+fi
+
+if [ -z "$AUTH_SECRET" ]; then
+  echo "❌ Error: Set FLEET_ADMIN_SECRET, or FLEET_AGENT_SECRET with --agent." >&2
+  echo "Or set FLEETLINK_AUTH_FILE to a KEY=value file.  The CLI does not search home directories." >&2
+  exit 1
+fi
+
+EXPIRE_HEADER="X-Expire-Days: 3"
+if [ "$FOREVER" -eq 1 ]; then
+  EXPIRE_HEADER="X-Expire-Days: forever"
+elif [ -n "$DAYS" ]; then
+  EXPIRE_HEADER="X-Expire-Days: $DAYS"
+fi
+
+MAX_FILE_BYTES=$((100 * 1024 * 1024))   # 100MB
+MAX_TOTAL_BYTES=$((500 * 1024 * 1024))  # 500MB
+
+# Pre-validate file sizes and calculate total
+TOTAL_BYTES=0
+for TARGET in "$@"; do
+  TARGET="${TARGET%/}"
+  if [ ! -e "$TARGET" ]; then
+    echo "Error: '$TARGET' not found, aborting."
+    exit 1
+  fi
+  if [ -d "$TARGET" ]; then
+    while read -r FILE; do
+      FSIZE=$(stat -f%z "$FILE" 2>/dev/null || stat -c%s "$FILE" 2>/dev/null || echo 0)
+      if [ "$FSIZE" -gt "$MAX_FILE_BYTES" ]; then
+        SIZE_MB=$((FSIZE / 1024 / 1024))
+        echo "❌ Upload rejected: '$FILE' is ${SIZE_MB}MB, exceeding the 100MB per-file limit."
+        exit 1
+      fi
+      TOTAL_BYTES=$((TOTAL_BYTES + FSIZE))
+    done < <(find "$TARGET" -type f)
+  else
+    FSIZE=$(stat -f%z "$TARGET" 2>/dev/null || stat -c%s "$TARGET" 2>/dev/null || echo 0)
+    if [ "$FSIZE" -gt "$MAX_FILE_BYTES" ]; then
+      SIZE_MB=$((FSIZE / 1024 / 1024))
+      echo "❌ Upload rejected: '$TARGET' is ${SIZE_MB}MB, exceeding the 100MB per-file limit."
+      exit 1
+    fi
+    TOTAL_BYTES=$((TOTAL_BYTES + FSIZE))
+  fi
+done
+
+if [ "$TOTAL_BYTES" -gt "$MAX_TOTAL_BYTES" ]; then
+  TOTAL_MB=$((TOTAL_BYTES / 1024 / 1024))
+  echo "❌ Upload rejected: Total batch size is ${TOTAL_MB}MB, exceeding the 500MB total limit."
+  exit 1
+fi
+
+upload_file() {
+  local TARGET_URL="$1"
+  local FILE_PATH="$2"
+  local CONTENT_TYPE="$3"
+
+  local EXTRA_HEADERS=()
+  if [ -n "$PASSWORD" ]; then
+    EXTRA_HEADERS+=(-H "X-Fleet-Password: $PASSWORD")
+  fi
+  if [ -n "$PREVIEW" ]; then
+    EXTRA_HEADERS+=(-H "X-Fleet-Preview: $PREVIEW")
+  fi
+
+  local RESPONSE
+  RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT "$TARGET_URL" \
+       -T "$FILE_PATH" \
+       -H "${AUTH_HEADER_NAME}: ${AUTH_SECRET}" \
+       -H "Content-Type: $CONTENT_TYPE" \
+       -H "$EXPIRE_HEADER" \
+       "${EXTRA_HEADERS[@]}") || true
+
+  local HTTP_CODE
+  HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+  local BODY
+  BODY=$(echo "$RESPONSE" | sed '$d')
+  case "$HTTP_CODE" in
+    ''|*[!0-9]*) HTTP_CODE=000 ;;
+  esac
+
+  if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+    echo ""
+    echo "❌ Upload rejected (HTTP $HTTP_CODE):"
+    echo "$BODY"
+    exit 1
+  fi
+}
+
+if [ -n "$SLUG" ]; then
+  if [ "$#" -eq 1 ] && [ -f "$1" ]; then
+    TARGET="$1"
+    TARGET="${TARGET%/}"
+    EXT="${TARGET##*.}"
+    CTYPE=$(mime_of "$TARGET")
+    if [ "$EXT" = "md" ]; then CTYPE="text/markdown; charset=utf-8"; fi
+    if [ "$EXT" = "txt" ]; then CTYPE="text/plain; charset=utf-8"; fi
+    if [ "$EXT" = "html" ]; then CTYPE="text/html; charset=utf-8"; fi
+    if [ "$EXT" = "json" ]; then CTYPE="application/json; charset=utf-8"; fi
+    
+    echo "Uploading '$TARGET' as custom slug '/$SLUG'..."
+    upload_file "$DOMAIN/$SLUG" "$TARGET" "$CTYPE"
+    
+    echo ""
+    echo "✅ Shared successfully!"
+    echo "Public URL: $DOMAIN/$SLUG"
+    exit 0
+  else
+    SHARE_ID="$SLUG"
+  fi
+elif [ -n "$ID" ]; then
+  SHARE_ID="$ID"
+else
+  SHARE_ID=$(openssl rand -hex 16)
+fi
+
+BASE_URL="$DOMAIN/$SHARE_ID"
+echo "Uploading to batch: $SHARE_ID..."
+
+for TARGET in "$@"; do
+  TARGET="${TARGET%/}"
+  if [ ! -e "$TARGET" ]; then
+    echo "Error: '$TARGET' not found, skipping."
+    continue
+  fi
+  
+  if [ -d "$TARGET" ]; then
+    find "$TARGET" -type f | while read -r FILE; do
+      REL_PATH=${FILE#"$TARGET"/}
+      CTYPE=$(mime_of "$FILE")
+      EXT="${FILE##*.}"
+      if [ "$EXT" = "md" ]; then CTYPE="text/markdown; charset=utf-8"; fi
+      if [ "$EXT" = "txt" ]; then CTYPE="text/plain; charset=utf-8"; fi
+      if [ "$EXT" = "html" ]; then CTYPE="text/html; charset=utf-8"; fi
+      if [ "$EXT" = "json" ]; then CTYPE="application/json; charset=utf-8"; fi
+      
+      echo "Uploading '$FILE'..."
+      upload_file "$DOMAIN/$SHARE_ID/$(basename "$TARGET")/$REL_PATH" "$FILE" "$CTYPE"
+    done
+  else
+    FILENAME=$(basename -- "$TARGET")
+    EXT="${FILENAME##*.}"
+    CTYPE=$(mime_of "$TARGET")
+    if [ "$EXT" = "md" ]; then CTYPE="text/markdown; charset=utf-8"; fi
+    if [ "$EXT" = "txt" ]; then CTYPE="text/plain; charset=utf-8"; fi
+    if [ "$EXT" = "html" ]; then CTYPE="text/html; charset=utf-8"; fi
+    if [ "$EXT" = "json" ]; then CTYPE="application/json; charset=utf-8"; fi
+    
+    echo "Uploading '$TARGET'..."
+    upload_file "$DOMAIN/$SHARE_ID/$FILENAME" "$TARGET" "$CTYPE"
+  fi
+done
+
+echo ""
+echo "✅ Shared successfully!"
+echo "Base Directory URL: $BASE_URL/"
+echo "Direct links:"
+for TARGET in "$@"; do
+  TARGET="${TARGET%/}"
+  if [ -d "$TARGET" ]; then
+    find "$TARGET" -type f | while read -r FILE; do
+      REL_PATH=${FILE#"$TARGET"/}
+      echo "- $BASE_URL/$(basename "$TARGET")/$REL_PATH"
+    done
+  elif [ -e "$TARGET" ]; then
+    echo "- $BASE_URL/$(basename "$TARGET")"
+  fi
+done
+echo ""

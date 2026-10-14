@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# After git pull / merge, refresh FleetLink skill copies.
+# Symlinked installs already point at this checkout and are left alone.
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+exec "$ROOT/scripts/install-skill.sh" --copy-targets-only
