@@ -28,15 +28,15 @@ public final class AppleSignInCoordinator: NSObject, ObservableObject {
         public var errorDescription: String? {
             switch self {
             case .canceled:
-                return "Sign-In Was Cancelled."
+                return "Sign-in was cancelled."
             case .notConfigured:
-                return "Sign In With Apple Is Not Available On This Build."
+                return "Sign in with Apple is not available in this version of the app."
             case .providerError(let detail):
-                return detail.isEmpty ? "Apple Could Not Complete The Sign-In." : detail
+                return detail.isEmpty ? "Apple could not finish signing in.\u{00A0} Try again." : detail
             case .exchangeUnavailable:
-                return "Sign In With Apple Is Not Enabled On The Server Yet.  Please Use GitHub Or Google For Now."
+                return "Sign in with Apple is not available yet.\u{00A0} Use GitHub or Google for now."
             case .rejected:
-                return "This Account Is Disabled."
+                return "This account is turned off."
             }
         }
     }

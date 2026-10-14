@@ -49,38 +49,43 @@ public struct ArtifactContainerView: View {
     private var idleView: some View {
         VStack(spacing: 16) {
             Image(systemName: "link.badge.plus")
-                .font(.system(size: 56))
-                .foregroundColor(.accentColor)
-            Text("FleetLink Artifact Hosting")
+                .font(.largeTitle)
+                .imageScale(.large)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
+            Text("Open a FleetLink link")
                 .font(.title2.bold())
-            Text("Open an artifact link via fleetlink.online or fleetlink.app to instantly preview it.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            Text("Paste a fleetlink.online or fleetlink.app link to read it here.")
+                .font(.body)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
-                .scaleEffect(1.3)
-            Text("Loading FleetLink Artifact...")
+                .controlSize(.large)
+            Text("Opening the link…")
                 .font(.headline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private func lockedView(_ url: URL) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "lock.fill")
-                .font(.system(size: 56))
-                .foregroundColor(.orange)
-            Text("Password Required")
+                .font(.largeTitle)
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text("This link is locked")
                 .font(.title2.bold())
-            Text("This share is locked.  Enter the password to open it.")
+            Text("Enter the password to open it.")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -111,9 +116,10 @@ public struct ArtifactContainerView: View {
     private func redirectView(source: URL, target: URL) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
-                .font(.system(size: 56))
-                .foregroundColor(.green)
-            Text("Redirect Link")
+                .font(.largeTitle)
+                .foregroundStyle(.green)
+                .accessibilityHidden(true)
+            Text("Short link")
                 .font(.title2.bold())
             Text(target.absoluteString)
                 .font(.subheadline)
@@ -121,11 +127,11 @@ public struct ArtifactContainerView: View {
                 .multilineTextAlignment(.center)
                 .textSelection(.enabled)
                 .padding(.horizontal, 32)
-            Button("Open Destination") {
+            Button("Open the web address") {
                 UIApplication.shared.open(target)
             }
             .buttonStyle(.borderedProminent)
-            Button("Copy Short Link") {
+            Button("Copy short link") {
                 UIPasteboard.general.url = source
             }
             .buttonStyle(.bordered)
@@ -136,41 +142,46 @@ public struct ArtifactContainerView: View {
     private var expiredView: some View {
         VStack(spacing: 16) {
             Image(systemName: "clock.badge.exclamationmark")
-                .font(.system(size: 64))
-                .foregroundColor(.orange)
-            Text("Link Expired")
+                .font(.largeTitle)
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text("This link has expired")
                 .font(.title2.bold())
-            Text("This FleetLink share was temporary and has reached its expiration time.")
+            Text("It was temporary, and the time is up.")
                 .font(.body)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private var notFoundView: some View {
         VStack(spacing: 16) {
             Image(systemName: "questionmark.folder")
-                .font(.system(size: 64))
-                .foregroundColor(.red)
-            Text("Artifact Not Found")
+                .font(.largeTitle)
+                .foregroundStyle(.red)
+                .accessibilityHidden(true)
+            Text("Link not found")
                 .font(.title2.bold())
-            Text("The requested artifact or share could not be found.")
+            Text("That address does not match a file or a short link.")
                 .font(.body)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private func failureView(_ message: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "wifi.exclamationmark")
-                .font(.system(size: 64))
-                .foregroundColor(.red)
-            Text("Connection Error")
+                .font(.largeTitle)
+                .foregroundStyle(.red)
+                .accessibilityHidden(true)
+            Text("Could not connect")
                 .font(.title2.bold())
             Text(message)
                 .font(.body)
@@ -221,11 +232,12 @@ public struct ArtifactContainerView: View {
                         }
                     }) {
                         Image(systemName: viewMode == .content ? "list.bullet" : "doc.text")
-                            .font(.system(size: 15, weight: .semibold))
-                            .padding(7)
+                            .font(.body.weight(.semibold))
+                            .padding(10)
                             .background(Color(UIColor.tertiarySystemFill))
                             .clipShape(Circle())
                     }
+                    .accessibilityLabel(viewMode == .content ? "Show the file list" : "Show the file")
                 }
 
                 Button(action: {
@@ -236,32 +248,35 @@ public struct ArtifactContainerView: View {
                     }
                 }) {
                     Image(systemName: linkCopied ? "checkmark" : "link")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(linkCopied ? .green : .primary)
-                        .padding(7)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(linkCopied ? Color.green : Color.primary)
+                        .padding(10)
                         .background(Color(UIColor.tertiarySystemFill))
                         .clipShape(Circle())
                 }
+                .accessibilityLabel(linkCopied ? "Link copied" : "Copy link")
 
                 Button(action: {
                     showingShareSheet = true
                 }) {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
-                        .padding(7)
+                        .font(.body.weight(.semibold))
+                        .padding(10)
                         .background(Color(UIColor.tertiarySystemFill))
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Share")
 
                 Button(action: {
                     UIApplication.shared.open(artifact.sourceURL)
                 }) {
                     Image(systemName: "safari")
-                        .font(.system(size: 15, weight: .semibold))
-                        .padding(7)
+                        .font(.body.weight(.semibold))
+                        .padding(10)
                         .background(Color(UIColor.tertiarySystemFill))
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Open in Safari")
             }
             .padding(.horizontal)
             .padding(.vertical, 10)
@@ -361,8 +376,9 @@ public struct ArtifactContainerView: View {
     private func downloadCard(name: String, message: String, url: URL) -> some View {
         VStack(spacing: 12) {
             Image(systemName: "arrow.down.doc.fill")
-                .font(.system(size: 56))
-                .foregroundColor(.secondary)
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text(name)
                 .font(.headline)
                 .multilineTextAlignment(.center)
@@ -401,9 +417,9 @@ public struct ArtifactContainerView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("FleetLink for iOS")
                         .font(.caption.bold())
-                    Text("Share files and short links")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                    Text("Share a file from your iPhone.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Get App") {

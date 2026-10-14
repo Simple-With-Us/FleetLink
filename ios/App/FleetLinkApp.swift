@@ -24,11 +24,11 @@ struct FleetLinkApp: App {
                     }
                 }
                 .tabItem {
-                    Label("Portal", systemImage: "chart.bar.xaxis")
+                    Label("Links", systemImage: "link")
                 }
                 .tag(0)
 
-                // Tab 1: New share
+                // Tab 1: New link
                 CreateSlugView(portalManager: portalManager) { targetURL in
                     inputURLString = targetURL.absoluteString
                     selectedTab = 2
@@ -37,23 +37,24 @@ struct FleetLinkApp: App {
                     }
                 }
                 .tabItem {
-                    Label("New Share", systemImage: "plus.circle.fill")
+                    Label("New link", systemImage: "plus.circle.fill")
                 }
                 .tag(1)
 
-                // Tab 2: Artifact Viewer
+                // Tab 2: View
                 NavigationStack {
                     VStack(spacing: 0) {
                         // Quick input bar
                         HStack(spacing: 8) {
                             Image(systemName: "link")
                                 .foregroundColor(.secondary)
-                            TextField("Paste fleetlink.online URL...", text: $inputURLString)
+                            TextField("Paste a fleetlink.online link", text: $inputURLString)
                                 .textFieldStyle(.plain)
-                                .font(.subheadline)
+                                .font(.body)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
-                            Button("Load") {
+                                .accessibilityLabel("Link address")
+                            Button("Open") {
                                 if let url = URL(string: inputURLString.trimmingCharacters(in: .whitespacesAndNewlines)) {
                                     Task { await loader.load(url: url) }
                                 }
@@ -72,11 +73,11 @@ struct FleetLinkApp: App {
 
                         ArtifactContainerView(loader: loader, isClip: false)
                     }
-                    .navigationTitle("Artifact Viewer")
+                    .navigationTitle("View")
                     .navigationBarTitleDisplayMode(.inline)
                 }
                 .tabItem {
-                    Label("Viewer", systemImage: "doc.text.magnifyingglass")
+                    Label("View", systemImage: "doc.text.magnifyingglass")
                 }
                 .tag(2)
 

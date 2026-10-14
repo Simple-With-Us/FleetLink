@@ -19,10 +19,10 @@ public final class PasskeyCoordinator: NSObject, ObservableObject {
     public func createPasskey(displayName: String, email: String) async {
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
-            owner?.report(error: "Enter A Display Name To Create A Passkey.")
+            owner?.report(error: "Enter a name to create a passkey.")
             return
         }
-        await run(errorPrefix: "Passkey Creation Failed.") { [self] in
+        await run(errorPrefix: "Could not create the passkey.") { [self] in
             let started = try await post(
                 path: "api/auth/passkey/register/options",
                 body: ["displayName": name, "email": email.trimmingCharacters(in: .whitespacesAndNewlines)]
@@ -59,7 +59,7 @@ public final class PasskeyCoordinator: NSObject, ObservableObject {
     }
 
     public func signIn(email: String) async {
-        await run(errorPrefix: "Passkey Sign-In Failed.") { [self] in
+        await run(errorPrefix: "Could not sign in with the passkey.") { [self] in
             var body: [String: String] = [:]
             let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { body["email"] = trimmed }
@@ -100,9 +100,9 @@ public final class PasskeyCoordinator: NSObject, ObservableObject {
         } catch let error as Failure {
             owner?.report(error: error.message)
         } catch let error as ASAuthorizationError where error.code == .canceled {
-            owner?.report(error: "Passkey Sign-In Was Cancelled.")
+            owner?.report(error: "Passkey sign-in was cancelled.")
         } catch {
-            owner?.report(error: "\(errorPrefix)  \(error.localizedDescription)")
+            owner?.report(error: "\(errorPrefix)\u{00A0} \(error.localizedDescription)")
         }
     }
 

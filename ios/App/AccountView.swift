@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The account card.  Passkeys are the only account login.  Operator secrets
-/// stay in the separate admin-token field.
+/// The account card.  Passkeys are the account login.  The automation
+/// sign-in code stays in the field below this card.
 struct AccountView: View {
     @ObservedObject var session: SessionManager
     @ObservedObject var passkeys: PasskeyCoordinator
@@ -37,7 +37,7 @@ struct AccountView: View {
                     .accessibilityIdentifier("accountName")
                 Spacer()
                 if user.isAdmin {
-                    Text("Admin")
+                    Text("Account owner")
                         .font(.caption2.bold())
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -51,7 +51,7 @@ struct AccountView: View {
                     .foregroundColor(.secondary)
                     .accessibilityIdentifier("accountEmail")
             }
-            Text("Signed In With A Passkey.  The Session Token Is Stored In The Keychain.")
+            Text("Signed in with a passkey.\u{00A0} This sign-in stays on this device.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -60,7 +60,7 @@ struct AccountView: View {
         Button(role: .destructive) {
             Task { await session.signOut() }
         } label: {
-            Text("Sign Out")
+            Text("Sign out")
         }
         .disabled(isBusy)
         .accessibilityIdentifier("signOutButton")
@@ -68,14 +68,14 @@ struct AccountView: View {
 
     @ViewBuilder
     private var signedOut: some View {
-        Text("Create A Passkey Or Sign In With One You Already Have.  FleetLink Does Not Store A Password For This Account.")
+        Text("Create a passkey, or sign in with one you already have.\u{00A0} FleetLink does not store a password for this account.")
             .font(.caption)
             .foregroundColor(.secondary)
 
-        TextField("Display Name", text: $displayName)
+        TextField("Name", text: $displayName)
             .textContentType(.name)
             .accessibilityIdentifier("passkeyDisplayName")
-        TextField("Email (Optional)", text: $email)
+        TextField("Email (optional)", text: $email)
             .textContentType(.emailAddress)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
@@ -84,7 +84,7 @@ struct AccountView: View {
         Button {
             Task { await passkeys.createPasskey(displayName: displayName, email: email) }
         } label: {
-            Text("Create A Passkey")
+            Text("Create a passkey")
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
@@ -94,7 +94,7 @@ struct AccountView: View {
         Button {
             Task { await passkeys.signIn(email: email) }
         } label: {
-            Text("Sign In With A Passkey")
+            Text("Sign in with a passkey")
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)

@@ -119,14 +119,14 @@ public final class SessionManager: ObservableObject {
                 return false
             }
             guard (200...299).contains(http.statusCode) else {
-                lastError = "Could Not Reach The Account Service.  Please Try Again."
+                lastError = "Could not reach FleetLink.\u{00A0} Try again."
                 return false
             }
             user = try JSONDecoder().decode(SessionUser.self, from: data)
             lastError = nil
             return true
         } catch {
-            lastError = "Could Not Reach The Account Service.  Please Check Your Connection."
+            lastError = "Could not reach FleetLink.\u{00A0} Check your connection."
             return false
         }
     }

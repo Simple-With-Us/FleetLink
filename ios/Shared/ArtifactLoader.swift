@@ -61,7 +61,8 @@ public final class ArtifactLoader: ObservableObject {
             }
             if http.statusCode == 404 {
                 let bodyString = String(data: data, encoding: .utf8) ?? ""
-                if bodyString.contains("Link Expired") {
+                let folded = bodyString.lowercased()
+                if folded.contains("link expired") || folded.contains("has expired") {
                     state = .expired
                 } else {
                     state = .notFound
@@ -69,14 +70,14 @@ public final class ArtifactLoader: ObservableObject {
                 return
             }
             guard (200...299).contains(http.statusCode) else {
-                state = .failure("Server returned error \(http.statusCode).")
+                state = .failure("FleetLink could not open that link (error \(http.statusCode)).")
                 return
             }
 
             let bodyString = String(data: data, encoding: .utf8) ?? ""
             if bodyString.contains("Password Required"), bodyString.contains("password") {
                 if providedPassword != nil {
-                    lockMessage = "That password did not unlock this share.  Try again."
+                    lockMessage = "That password did not unlock this link.\u{00A0} Try again."
                 }
                 state = .locked(url)
                 return
@@ -87,7 +88,10 @@ public final class ArtifactLoader: ObservableObject {
             let pathComponents = url.pathComponents.filter { $0 != "/" && !$0.isEmpty }
             let slug = pathComponents.first ?? "share"
 
-            if contentType.contains("text/html"), bodyString.contains("Index of /") {
+            // Current pages use class="file-link" and "Files in /".  Older pages
+            // used "Index of /" and a document emoji in the link text.
+            if contentType.contains("text/html"),
+               bodyString.contains("Index of /") || bodyString.contains("class=\"file-link\"") || bodyString.contains("Files in /") {
                 let items = parseDirectoryListing(html: bodyString, baseURL: url)
                 let artifact = ShareArtifact(
                     sourceURL: url,
@@ -127,7 +131,7 @@ public final class ArtifactLoader: ObservableObject {
             itemContent = bodyString.isEmpty ? nil : bodyString
             itemData = data
         } catch {
-            state = .failure(error.localizedDescription)
+            state = .failure(FleetLinkCopy.explain(error.localizedDescription))
         }
     }
 
@@ -194,19 +198,24 @@ public final class ArtifactLoader: ObservableObject {
 
     private func parseDirectoryListing(html: String, baseURL: URL) -> [ArtifactItem] {
         var items: [ArtifactItem] = []
-        let pattern = #"href="([^"]+)">\u{1F4C4}\s*([^<]+)</a>(?:\s*<span class="file-size">([^<]*)</span>)?"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return items
-        }
-
+        // Current pages use class="file-link" and a size span.  Older pages put a
+        // document emoji in the link text, with or without a size label.
+        let patterns = [
+            #"class="file-link" href="([^"]+)">([^<]+)(?:\s*<span class="file-size">([^<]*)</span>)?</a>"#,
+            #"href="([^"]+)">📄\s*([^<]+)</a>(?:\s*<span class="file-size">([^<]*)</span>)?"#
+        ]
         let nsString = html as NSString
-        let matches = regex.matches(in: html, options: [], range: NSRange(location: 0, length: nsString.length))
+        var matches: [NSTextCheckingResult] = []
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
+            matches.append(contentsOf: regex.matches(in: html, options: [], range: NSRange(location: 0, length: nsString.length)))
+        }
 
         for match in matches {
             guard match.numberOfRanges >= 3 else { continue }
             let href = nsString.substring(with: match.range(at: 1))
             let name = nsString.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
-            let sizeLabel = match.range(at: 3).location != NSNotFound
+            let sizeLabel = match.numberOfRanges > 3 && match.range(at: 3).location != NSNotFound
                 ? nsString.substring(with: match.range(at: 3)).trimmingCharacters(in: .whitespacesAndNewlines)
                 : ""
             let size = parseByteLabel(sizeLabel)

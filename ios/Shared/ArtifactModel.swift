@@ -28,11 +28,11 @@ public enum ArtifactKind: String, CaseIterable, Sendable {
         switch self {
         case .markdown: return "Markdown"
         case .image: return "Image"
-        case .html: return "Interactive HTML"
-        case .code: return "Source Code"
-        case .text: return "Plain Text"
-        case .pdf: return "PDF Document"
-        case .directory: return "Batch Share"
+        case .html: return "HTML file"
+        case .code: return "Code"
+        case .text: return "Text"
+        case .pdf: return "PDF"
+        case .directory: return "Folder"
         case .binary: return "File"
         }
     }

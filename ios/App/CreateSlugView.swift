@@ -13,7 +13,7 @@ public struct CreateSlugView: View {
     @State private var customSlug: String = ""
     @State private var targetURL: String = ""
     @State private var textFileName: String = "notes.md"
-    @State private var textContent: String = ""
+    @State private var textContent: String = "# Notes\n\nShared from FleetLink."
     @State private var titleText: String = ""
     @State private var descriptionText: String = ""
     @State private var selectedTTLSeconds: Int = 15552000
@@ -31,8 +31,8 @@ public struct CreateSlugView: View {
     @State private var hasCopied: Bool = false
 
     enum CreationMode: String, CaseIterable, Identifiable {
-        case redirect = "Redirect"
-        case note = "Note"
+        case redirect = "Short link"
+        case note = "Text file"
         case files = "Files"
 
         var id: String { rawValue }
@@ -58,7 +58,7 @@ public struct CreateSlugView: View {
         TTLOption(label: "7 Days", seconds: 604800),
         TTLOption(label: "30 Days", seconds: 2592000),
         TTLOption(label: "180 Days (6 Months)", seconds: 15552000),
-        TTLOption(label: "No Expiry", seconds: 0)
+        TTLOption(label: "Until you delete it", seconds: 0)
     ]
 
     let uploadTTLs: [TTLOption] = [
@@ -67,7 +67,7 @@ public struct CreateSlugView: View {
         TTLOption(label: "24 Hours", seconds: 86400),
         TTLOption(label: "3 Days", seconds: 259200),
         TTLOption(label: "7 Days", seconds: 604800),
-        TTLOption(label: "No Expiry", seconds: 0)
+        TTLOption(label: "Until you delete it", seconds: 0)
     ]
 
     public init(portalManager: PortalManager, onSelectArtifact: @escaping (URL) -> Void) {
@@ -85,8 +85,9 @@ public struct CreateSlugView: View {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundColor(.green)
                                     .font(.title3)
-                                Text("Link Ready")
+                                Text("Your link is ready")
                                     .font(.headline)
+                                    .accessibilityAddTraits(.isHeader)
                             }
 
                             Text(urlString)
@@ -108,7 +109,7 @@ public struct CreateSlugView: View {
                                 } label: {
                                     HStack {
                                         Image(systemName: hasCopied ? "checkmark" : "doc.on.doc")
-                                        Text(hasCopied ? "Copied" : "Copy Link")
+                                        Text(hasCopied ? "Copied" : "Copy link")
                                     }
                                     .font(.subheadline.bold())
                                     .frame(maxWidth: .infinity)
@@ -136,18 +137,15 @@ public struct CreateSlugView: View {
 
                 if let err = errorMessage {
                     Section {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text(err)
-                                .font(.subheadline)
-                                .foregroundColor(.red)
-                        }
+                        Label(err, systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .accessibilityLabel("Error.\u{00A0} \(err)")
                     }
                 }
 
-                Section("Mode") {
-                    Picker("Creation Mode", selection: $creationMode) {
+                Section("What to share") {
+                    Picker("What to share", selection: $creationMode) {
                         ForEach(CreationMode.allCases) { mode in
                             Text(mode.rawValue).tag(mode)
                         }
@@ -163,14 +161,15 @@ public struct CreateSlugView: View {
                 }
 
                 if creationMode == .redirect {
-                    Section("Destination") {
-                        TextField("Target URL (https://...)", text: $targetURL)
+                    Section("Web address") {
+                        TextField("https://example.com", text: $targetURL)
                             .keyboardType(.URL)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
+                            .accessibilityLabel("Web address to open")
                     }
                 } else if creationMode == .note {
-                    Section("File Name") {
+                    Section("File name") {
                         TextField("notes.md", text: $textFileName)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
@@ -183,15 +182,15 @@ public struct CreateSlugView: View {
                 } else {
                     Section("Files") {
                         PhotosPicker(selection: $photoItems, maxSelectionCount: 20, matching: .images) {
-                            Label("Choose Photos", systemImage: "photo.on.rectangle")
+                            Label("Choose photos", systemImage: "photo.on.rectangle")
                         }
                         Button {
                             showFileImporter = true
                         } label: {
-                            Label("Choose Files", systemImage: "folder")
+                            Label("Choose files", systemImage: "folder")
                         }
                         if pendingFiles.isEmpty {
-                            Text("Add one or more files.  A token in Settings is required to publish.")
+                            Text("Add one or more files.\u{00A0} A sign-in code in Settings is required to publish.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         } else {
@@ -212,6 +211,7 @@ public struct CreateSlugView: View {
                                             .foregroundColor(.secondary)
                                     }
                                     .buttonStyle(.plain)
+                                    .accessibilityLabel("Remove \(file.name)")
                                 }
                             }
                         }
@@ -225,10 +225,10 @@ public struct CreateSlugView: View {
                         .autocorrectionDisabled()
                     if creationMode != .redirect {
                         PhotosPicker(selection: $previewItem, matching: .images) {
-                            Label(previewFile == nil ? "Preview Image (optional)" : "Preview: \(previewFile?.name ?? "image")", systemImage: "photo")
+                            Label(previewFile == nil ? "Preview picture (optional)" : "Preview: \(previewFile?.name ?? "image")", systemImage: "photo")
                         }
                         if previewFile != nil {
-                            Button("Remove Preview Image", role: .destructive) {
+                            Button("Remove preview picture", role: .destructive) {
                                 previewFile = nil
                                 previewItem = nil
                             }
@@ -237,17 +237,20 @@ public struct CreateSlugView: View {
                 }
 
                 Section {
-                    TextField("Custom Name (optional)", text: $customSlug)
+                    TextField("Short name (optional)", text: $customSlug)
+                        .accessibilityLabel("Short name")
+                        .accessibilityHint("Leave blank and FleetLink picks a name.")
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
 
-                    Picker("Expiration", selection: $selectedTTLSeconds) {
+                    Picker("How long it stays up", selection: $selectedTTLSeconds) {
                         ForEach(creationMode == .redirect ? redirectTTLs : uploadTTLs) { opt in
                             Text(opt.label).tag(opt.seconds)
                         }
                     }
 
                     SecureField("Password (optional)", text: $password)
+                        .accessibilityHint("Leave blank if anyone with the link may open it.")
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
 
@@ -258,7 +261,7 @@ public struct CreateSlugView: View {
                 } header: {
                     Text("Options")
                 } footer: {
-                    Text("Publishing uses the token in Settings.  A custom name on a file share needs an admin token.  Redirects can use a custom name with either token.  No Expiry is kept only for an admin token.")
+                    Text("Publishing uses the sign-in code in Settings.\u{00A0} A custom name on a file share needs an account-owner sign-in.\u{00A0} Short links can use a custom name with either sign-in.\u{00A0} Until you delete it is kept only for an account owner.")
                         .font(.caption)
                 }
 
@@ -280,7 +283,7 @@ public struct CreateSlugView: View {
                     .disabled(isSubmitting || !isFormValid)
                 }
             }
-            .navigationTitle("New Share")
+            .navigationTitle("New link")
             .onAppear {
                 if let host = URL(string: serverHost)?.host {
                     selectedDomain = host
@@ -324,9 +327,9 @@ public struct CreateSlugView: View {
 
     private var buttonTitle: String {
         switch creationMode {
-        case .redirect: return "Create Redirect Link"
-        case .note: return "Share Note"
-        case .files: return "Upload Files"
+        case .redirect: return "Create short link"
+        case .note: return "Share file"
+        case .files: return "Share files"
         }
     }
 
@@ -371,7 +374,7 @@ public struct CreateSlugView: View {
             case .note:
                 let name = textFileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "notes.md" : textFileName.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard let data = textContent.data(using: .utf8) else {
-                    errorMessage = "The note could not be prepared."
+                    errorMessage = "That text could not be saved.\u{00A0} Try again."
                     isSubmitting = false
                     return
                 }
@@ -412,7 +415,7 @@ public struct CreateSlugView: View {
                 customSlug = ""
                 password = ""
             case .failure(let err):
-                errorMessage = err.localizedDescription
+                errorMessage = FleetLinkCopy.explain(err.localizedDescription)
             }
             isSubmitting = false
         }

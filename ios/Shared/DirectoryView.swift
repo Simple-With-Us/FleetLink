@@ -13,7 +13,7 @@ public struct DirectoryView: View {
 
     public var body: some View {
         List {
-            Section(header: Text("Batch Files (\(items.count))").font(.caption.bold())) {
+            Section(header: Text("Files (\(items.count))").font(.caption.bold())) {
                 ForEach(items) { item in
                     Button(action: {
                         onSelect(item)
@@ -59,6 +59,8 @@ public struct DirectoryView: View {
                         }
                         .padding(.vertical, 4)
                     }
+                    .accessibilityLabel("\(item.name), \(item.kind.displayName)\(item.formattedSize.map { ", \($0)" } ?? "")")
+                    .accessibilityAddTraits(selectedItem?.id == item.id ? .isSelected : [])
                 }
             }
         }
