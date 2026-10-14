@@ -2,7 +2,7 @@ import { appleAppSiteAssociation } from "./lib/aasa.mjs";
 import { handleAccountRoutes } from "./lib/account-routes.mjs";
 import { reapCostGuards } from "./lib/cost-guards.mjs";
 import { mustForceAttachment } from "./lib/html-safety.mjs";
-import { handleMcp } from "./lib/mcp.mjs";
+import { handleMcp, handleOAuthProtectedResource, mcpWwwAuthenticate } from "./lib/mcp.mjs";
 import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
 import { captureWorkerException } from "./lib/sentry-scrub.mjs";
 import { randomHex } from "./lib/bytes.mjs";
@@ -5185,6 +5185,9 @@ async function handleRequest(request, env, ctx) {
     if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/health/")) {
       return healthCheck(env);
     }
+    if ((request.method === "GET" || request.method === "HEAD") && (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/")) {
+      return handleOAuthProtectedResource(request);
+    }
     const hostname = url.hostname;
     let key = url.pathname.slice(1);
     const rawEnv = env;
@@ -5204,7 +5207,7 @@ async function handleRequest(request, env, ctx) {
     if (request.headers.get("X-Fleet-Auth")) {
       const legacyHeaders = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
       if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
-        legacyHeaders["WWW-Authenticate"] = 'Bearer realm="fleetlink"';
+        legacyHeaders["WWW-Authenticate"] = mcpWwwAuthenticate(request);
       }
       return new Response(JSON.stringify({
         error: "Upload rejected: Legacy 'X-Fleet-Auth' header is retired. Please authenticate using 'X-Fleet-Admin' (admin operations) or 'X-Fleet-Agent' (fleet agents)."

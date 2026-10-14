@@ -160,7 +160,10 @@ test("GET /mcp is 405 and POST without credentials is 401", async () => {
   const bogus = `fla_${"ab".repeat(32)}`;
   const denied = await mcp(env, { method: "ping", token: bogus });
   assert.equal(denied.status, 401);
-  assert.match(denied.headers.get("www-authenticate"), /Bearer realm="fleetlink"/);
+  assert.equal(
+    denied.headers.get("www-authenticate"),
+    'Bearer realm="fleetlink", resource_metadata="https://fleetlink.online/.well-known/oauth-protected-resource"'
+  );
   const deniedText = await denied.text();
   assert.equal(deniedText, JSON.stringify({ error: "Authentication required." }));
   assert.equal(deniedText.includes(bogus), false);

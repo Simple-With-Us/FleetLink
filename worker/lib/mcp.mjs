@@ -340,6 +340,32 @@ function shareFromPlain(text) {
   };
 }
 
+function requestHost(request) {
+  try {
+    return new URL(request.url).host;
+  } catch {
+    return "fleetlink.online";
+  }
+}
+
+export function mcpWwwAuthenticate(request) {
+  const host = requestHost(request);
+  return `Bearer realm="fleetlink", resource_metadata="https://${host}/.well-known/oauth-protected-resource"`;
+}
+
+export function oauthProtectedResourceBody(request) {
+  const host = requestHost(request);
+  return {
+    resource: `https://${host}/mcp`,
+    bearer_methods_supported: ["header"],
+    resource_name: "FleetLink MCP"
+  };
+}
+
+export function handleOAuthProtectedResource(request) {
+  return jsonResponse(oauthProtectedResourceBody(request), 200);
+}
+
 function jsonResponse(body, status, extra) {
   const headers = new Headers(extra);
   headers.set("content-type", "application/json");
@@ -355,9 +381,9 @@ function rpcError(id, code, message, status = 200) {
   return jsonResponse({ jsonrpc: "2.0", id, error: { code, message } }, status);
 }
 
-function unauthorized() {
+function unauthorized(request) {
   return jsonResponse({ error: "Authentication required." }, 401, {
-    "www-authenticate": 'Bearer realm="fleetlink"'
+    "www-authenticate": mcpWwwAuthenticate(request)
   });
 }
 
@@ -624,7 +650,7 @@ export async function handleMcp(request, env, deps) {
   try {
     if (request.method !== "POST") return methodNotAllowed();
     const caller = await resolveCaller(request, env, deps.authenticate);
-    if (!caller) return unauthorized();
+    if (!caller) return unauthorized(request);
     const version = (request.headers.get("mcp-protocol-version") || "").trim();
     if (version && version !== MCP_PROTOCOL_VERSION) {
       return jsonResponse({ error: "Unsupported protocol version." }, 400);
