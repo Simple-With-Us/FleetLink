@@ -55,7 +55,7 @@ Parent directories are created.  A stale symlink is replaced.  A real file or di
 
 `--copy` copies every target (`rsync -a --delete`, or `cp -a` when `rsync` is missing).  `FLEETLINK_SKILL_COPY_TARGETS` (comma or space separated names: `claude`, `cursor`, `codex`, `grok`, `agents`, `workflows`) copies those targets and leaves the rest as symlinks.  If the platform cannot follow symlinks, every target is copied.  `FLEETLINK_SKILL_SYMLINKS_OK=0` forces that fallback.
 
-Outside a checkout, `fleet-share skill install` downloads the skill and the installer from a commit pinned in `cli/fleet-share` (`FLEETLINK_SKILL_GIT_SHA` or `FLEETLINK_SKILL_RAW_BASE` override the source) into `~/.cache/fleetlink` (`FLEETLINK_SKILL_CACHE` overrides the cache).  It checks SHA-256 pins before it runs the installer and refuses a mismatch.
+Outside a checkout, `fleet-share skill install` downloads the skill and the installer from a commit SHA pinned in `cli/fleet-share` (`FLEETLINK_SKILL_GIT_SHA` or `FLEETLINK_SKILL_RAW_BASE` override the source) into `~/.cache/fleetlink` (`FLEETLINK_SKILL_CACHE` overrides the cache).  The SHA-256 pins are the integrity check: the CLI refuses to run the installer when either download differs.  The git SHA is the raw URL of a commit that already published those bytes.  It is not the commit that records the pin, because a commit cannot contain its own id.
 
 Symlinks track this checkout, so `git pull` is enough to update them.  Copies need a refresh.  Install the hook once per clone:
 

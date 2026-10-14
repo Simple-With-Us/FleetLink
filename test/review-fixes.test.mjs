@@ -53,15 +53,79 @@ test("pinned hashes match the installer and the skill", () => {
   assert.equal(assigned("FLEETLINK_SKILL_MD_SHA256_DEFAULT", cliSource), sha256File(join(repo, "skills/fleetlink/SKILL.md")));
 });
 
-test("pinned git sha is the commit that contains those files", () => {
+test("pinned git sha matches those files when that commit is in this clone", () => {
   const pin = assigned("FLEETLINK_PINNED_GIT_SHA_DEFAULT", cliSource);
   assert.match(pin, /^[0-9a-f]{40}$/);
+  // The pin is an ancestor.  A commit cannot record its own SHA, and a
+  // depth-1 checkout does not contain that ancestor.  The SHA-256 pins above
+  // are the integrity check when the object is absent.
+  const present = spawnSync("git", ["cat-file", "-e", `${pin}^{commit}`], { cwd: repo, encoding: "utf8" });
+  if (present.status !== 0) {
+    const shallow = spawnSync("git", ["rev-parse", "--is-shallow-repository"], { cwd: repo, encoding: "utf8" });
+    assert.equal(shallow.status, 0, shallow.stderr);
+    assert.equal(shallow.stdout.trim(), "true", `pinned commit ${pin} is missing and this clone is not shallow`);
+    return;
+  }
   for (const file of ["scripts/install-skill.sh", "skills/fleetlink/SKILL.md"]) {
     const atPin = spawnSync("git", ["rev-parse", `${pin}:${file}`], { cwd: repo, encoding: "utf8" });
     assert.equal(atPin.status, 0, atPin.stderr);
     const worktree = spawnSync("git", ["hash-object", file], { cwd: repo, encoding: "utf8" });
+    assert.equal(worktree.status, 0, worktree.stderr);
     assert.equal(atPin.stdout.trim(), worktree.stdout.trim());
   }
+});
+
+test("a remote install requests the pinned commit and not main", () => {
+  const home = mkdtempSync(join(tmpdir(), "fl-pin-url-"));
+  const outside = join(home, "outside");
+  mkdirSync(outside, { recursive: true });
+  const bin = join(home, "bin");
+  mkdirSync(bin, { recursive: true });
+  const log = join(home, "urls.log");
+  const pin = assigned("FLEETLINK_PINNED_GIT_SHA_DEFAULT", cliSource);
+  writeExec(join(bin, "curl"), `#!/bin/bash
+printf '%s\\n' "$@" >> ${JSON.stringify(log)}
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+url=""
+for arg in "$@"; do
+  case "$arg" in
+    http:*|https:*) url="$arg" ;;
+  esac
+done
+case "$url" in
+  *SKILL.md) cp ${JSON.stringify(join(repo, "skills/fleetlink/SKILL.md"))} "$out" ;;
+  *install-skill.sh) cp ${JSON.stringify(join(repo, "scripts/install-skill.sh"))} "$out" ;;
+  *) echo "unexpected $url" >&2; exit 1 ;;
+esac
+`);
+  const script = join(outside, "fleet-share");
+  writeFileSync(script, cliSource);
+  const result = spawnSync("bash", [script, "skill", "install", "--check"], {
+    cwd: outside,
+    env: {
+      PATH: `${bin}:${process.env.PATH}`,
+      HOME: home,
+      TMPDIR: process.env.TMPDIR || "/tmp",
+      LANG: "C",
+      FLEETLINK_SKILL_CACHE: join(home, "cache"),
+      FLEETLINK_SKILL_SYMLINKS_OK: "1"
+    },
+    encoding: "utf8"
+  });
+  assert.equal(result.stderr.includes("hash mismatch"), false, result.stderr);
+  assert.match(result.stdout, /missing claude/);
+  const urls = readFileSync(log, "utf8");
+  assert.match(urls, new RegExp(`FleetLink/${pin}/skills/fleetlink/SKILL.md`));
+  assert.match(urls, new RegExp(`FleetLink/${pin}/scripts/install-skill.sh`));
+  assert.equal(urls.includes("/main/"), false);
+  rmSync(home, { recursive: true, force: true });
 });
 
 function runShare(args, { home, cwd, env, bin }) {

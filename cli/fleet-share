@@ -1,9 +1,13 @@
 #!/bin/bash
 set -e
 
-# Remote installer pin.  FLEETLINK_PINNED_GIT_SHA_DEFAULT is the commit whose
-# scripts/install-skill.sh and skills/fleetlink/SKILL.md match the hashes below.
-# FLEETLINK_SKILL_GIT_SHA, FLEETLINK_INSTALLER_SHA256, and FLEETLINK_SKILL_MD_SHA256 override them.
+# Remote installer pin.  The SHA-256 defaults are the integrity check: a
+# download that does not match is deleted and not executed.  The git SHA is
+# the raw URL of a commit that already published those bytes.  It is an
+# ancestor, not the commit that records this pin, because a commit cannot
+# contain its own id.  A shallow clone may not have that ancestor.
+# FLEETLINK_SKILL_GIT_SHA, FLEETLINK_INSTALLER_SHA256, and
+# FLEETLINK_SKILL_MD_SHA256 override the defaults.
 FLEETLINK_PINNED_GIT_SHA_DEFAULT='ecf854e2ae271c55ec1cc192f59a694307fa2ed4'
 FLEETLINK_INSTALLER_SHA256_DEFAULT='e8bf443e751ad50c5dd795c2348cdda28752afda9d9d42d55dd60deb5094d6ce'
 FLEETLINK_SKILL_MD_SHA256_DEFAULT='d8d18947b0a148dfd11ec22988bd32512b17ec923359870793599d9723b7bc9f'
