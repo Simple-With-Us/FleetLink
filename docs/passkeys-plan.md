@@ -1,5 +1,11 @@
 # Passkeys (Primary) + GitHub/Apple/Google + Dashboard + iOS
 
+## Cloudflare account
+Must use the dedicated FleetLink Cloudflare account (worker `fleetlink-api`). Never touch the old `fleet-share-api` worker on the Usage.Jays.Services account. Deploys go through the Cloudflare Workers script-upload API, not wrangler from this repo until wrangler.jsonc is reconciled.
+
+## Owner direction (2026-10-14)
+Don’t worry about losing files. Nothing essential is stored there. Everyone already lost access too. Root-path compatibility and existing seat access are no longer hard blockers for cutover.
+
 ## Endpoints implemented (stubs)
 
 **Public (sign-in):**
@@ -28,4 +34,4 @@
 - D1 migration for passkeys table.
 - Full verification and session cookie issuance.
 
-Aligned with removed TS system and FL-1. Cutover blockers remain. No production deploy yet.
+Aligned with removed TS system and FL-1. Path/access blockers relaxed. Deploy only to the FleetLink account. No production deploy yet.
