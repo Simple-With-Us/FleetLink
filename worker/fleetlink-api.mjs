@@ -121,7 +121,8 @@ var RESERVED_SLUGS = /* @__PURE__ */ new Set([
   "app",
   "oauth",
   "webhook",
-  "assets"
+  "assets",
+  "settings"
 ]);
 var SYSTEM_ASSET_KEYS_LC = /* @__PURE__ */ new Set([...SYSTEM_ASSET_KEYS].map((k) => k.toLowerCase()));
 var RESERVED_SLUGS_LC = /* @__PURE__ */ new Set([...RESERVED_SLUGS].map((k) => k.toLowerCase()));
@@ -131,9 +132,17 @@ function normalizeProtectedKey(key) {
 }
 __name(normalizeProtectedKey, "normalizeProtectedKey");
 __name2(normalizeProtectedKey, "normalizeProtectedKey");
+function isSettingsStorageKey(key) {
+  const k = normalizeProtectedKey(key);
+  if (!k) return false;
+  return k === "settings" || k.startsWith("settings/") || k.startsWith("settings:");
+}
+__name(isSettingsStorageKey, "isSettingsStorageKey");
+__name2(isSettingsStorageKey, "isSettingsStorageKey");
 function isReservedTop(key) {
   const k = normalizeProtectedKey(key);
   if (!k) return false;
+  if (isSettingsStorageKey(k)) return true;
   return RESERVED_SLUGS_LC.has(k.split("/")[0]);
 }
 __name(isReservedTop, "isReservedTop");
@@ -141,6 +150,7 @@ __name2(isReservedTop, "isReservedTop");
 function isProtectedKey(key, isAdmin) {
   const k = normalizeProtectedKey(key);
   if (!k) return false;
+  if (isSettingsStorageKey(k)) return true;
   const top = k.split("/")[0];
   if (RESERVED_SLUGS_LC.has(k) || SYSTEM_ASSET_KEYS_LC.has(k) || RESERVED_SLUGS_LC.has(top)) return true;
   if (!isAdmin && SYSTEM_TOP_SEGMENTS_LC.has(top)) return true;
@@ -194,6 +204,7 @@ async function resolveR2Key(env, key) {
       }
     }
     for (const o of listRes.objects || []) {
+      if (!o || !o.key || isSettingsStorageKey(o.key)) continue;
       if (o.key.toLowerCase() === lowerSlug) {
         slugCaseCache.set(lowerSlug, o.key);
         return o.key;
@@ -2200,11 +2211,12 @@ async function getBucketOverview(env) {
       cursor,
       include: ["customMetadata"]
     });
-    objects = objects.concat(res.objects);
+    objects = objects.concat(res.objects || []);
     truncated = res.truncated;
     cursor = res.cursor;
     if (objects.length > 2e4) break;
   }
+  objects = objects.filter((obj) => !(obj && typeof obj.key === "string" && isSettingsStorageKey(obj.key)));
   const slugMap = /* @__PURE__ */ new Map();
   let totalStorageBytes = 0;
   const now = Date.now();
@@ -3042,6 +3054,19 @@ function renderPortalHtml(overview, origin) {
     .modal-footer { padding: 1rem 1.5rem; background: #f8fafc; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.6rem; }
 
     .notice-box { margin-top: 2rem; padding: 1rem 1.25rem; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; font-size: 0.82rem; color: #64748b; line-height: 1.5; }
+    .settings-card { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.15rem; margin-bottom: 0.75rem; }
+    .settings-head { display: flex; justify-content: space-between; gap: 0.75rem; align-items: baseline; flex-wrap: wrap; }
+    .settings-label { font-weight: 700; }
+    .settings-source { font-size: 0.75rem; color: var(--text-muted); }
+    .settings-input { width: 100%; box-sizing: border-box; margin-top: 0.55rem; padding: 0.5rem 0.7rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; background: #fff; color: inherit; }
+    .settings-help { font-size: 0.78rem; color: var(--text-muted); margin: 0.35rem 0 0; }
+    .settings-actions { display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap; }
+    .settings-reset { margin-top: 0.55rem; background: none; border: none; padding: 0; color: var(--primary); font-size: 0.78rem; font-weight: 600; cursor: pointer; }
+    .secret-row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 0; border-bottom: 1px solid #f1f5f9; }
+    .secret-status { font-weight: 700; }
+    .secret-status.set { color: var(--success); }
+    .secret-status.unset { color: var(--text-muted); }
+    #settings-status { min-height: 1.25rem; font-size: 0.88rem; color: #1e293b; margin: 0.5rem 0; }
   </style></head><body>
 
     <nav class="top-nav">
@@ -3053,12 +3078,14 @@ function renderPortalHtml(overview, origin) {
       </div>
       <div class="nav-actions">
         <a href="/" class="btn">&larr; Main Site</a>
+        <button type="button" class="btn" id="nav-settings-btn" onclick="showSettings()">Settings</button>
         <a href="/api/shortcut/download" class="btn" style="background: #fdf4ff; border-color: #f0abfc; color: #86198f;" title="Download iOS Shortcut (it asks for your secret when you add it)">\u{1F4F2} iOS Shortcut</a>
         <button type="button" class="btn" onclick="window.location.reload()">\u{1F504} Refresh</button>
         <button type="button" class="btn btn-danger" onclick="handleSignOut()">Sign Out</button>
       </div>
     </nav>
 
+    <div id="shares-root">
     <!-- Metrics Grid -->
     <div class="metrics-grid">
       <div class="metric-card">
@@ -3169,6 +3196,19 @@ function renderPortalHtml(overview, origin) {
     <div class="notice-box">
       <strong>\u26A0\uFE0F FleetLink Administrative Notice & Policy:</strong>
       All storage quotas, file allowances, and retention durations are provided on a best-effort, non-binding basis. FleetLink reserves the right to prune, expire, or delete content and batches at any time without notice to prevent excessive utilization, avoid R2 threshold overages, or enforce platform security.
+    </div>
+    </div>
+
+    <div id="settings-panel" style="display:none;">
+      <h2 style="margin:0 0 0.4rem;">Settings</h2>
+      <p class="settings-help">Choose where new files are kept and which addresses can host a share.&nbsp; Visitor limits can be lowered, and they cannot be raised past the built-in ceiling.&nbsp; Access keys are never shown.</p>
+      <div id="settings-status" role="status"></div>
+      <div id="settings-fields"></div>
+      <div id="settings-secrets"></div>
+      <div class="settings-actions">
+        <button type="button" class="btn" id="settings-save-btn" style="background:#2563eb;color:#fff;border-color:#2563eb;" onclick="saveSettings()">Save settings</button>
+        <button type="button" class="btn" onclick="showShares()">Back to shares</button>
+      </div>
     </div>
 
     <!-- Delete Confirmation Modal Popup -->
@@ -3762,6 +3802,217 @@ function renderPortalHtml(overview, origin) {
         window.location.href = "/logout";
       }
 
+      function showShares() {
+        var shares = document.getElementById("shares-root");
+        var panel = document.getElementById("settings-panel");
+        if (shares) shares.style.display = "block";
+        if (panel) panel.style.display = "none";
+      }
+
+      function showSettings() {
+        var shares = document.getElementById("shares-root");
+        var panel = document.getElementById("settings-panel");
+        if (shares) shares.style.display = "none";
+        if (panel) panel.style.display = "block";
+        loadSettingsPanel();
+      }
+
+      function sourceLabel(source) {
+        if (source === "override") return "Saved override";
+        if (source === "infisical") return "Deploy default";
+        return "Built-in default";
+      }
+
+      function setSettingsStatus(message) {
+        var status = document.getElementById("settings-status");
+        if (status) status.textContent = message || "";
+      }
+
+      function settingHelp(item) {
+        if (item.kind === "binding") return "Only storage that is already connected can be selected.";
+        if (item.kind === "hosts") return "Separate addresses with commas. Temporary addresses are refused.";
+        if (item.kind === "host") return "New share links use this address.";
+        if (item.kind === "integer" && item.unit === "seconds" && item.maximum) {
+          var hours = item.maximum / 3600;
+          return "From " + item.minimum + " to " + item.maximum + " seconds (" + hours + " hour ceiling).";
+        }
+        if (item.kind === "integer") return "From " + item.minimum + " to " + item.maximum + " " + (item.unit || "") + ".";
+        return "";
+      }
+
+      function renderSettingsForm(data) {
+        var fields = document.getElementById("settings-fields");
+        var secretsRoot = document.getElementById("settings-secrets");
+        if (!fields || !secretsRoot) return;
+        fields.textContent = "";
+        secretsRoot.textContent = "";
+        var sawLimits = false;
+        (data.settings || []).forEach(function(item) {
+          if (item.kind === "integer" && !sawLimits) {
+            sawLimits = true;
+            var limitHeading = document.createElement("h3");
+            limitHeading.textContent = "Visitor limits";
+            limitHeading.style.margin = "1.25rem 0 0.6rem";
+            fields.appendChild(limitHeading);
+          }
+          if (item.kind !== "integer" && fields.childNodes.length === 0) {
+            var shareHeading = document.createElement("h3");
+            shareHeading.textContent = "Sharing";
+            shareHeading.style.margin = "1.25rem 0 0.6rem";
+            fields.appendChild(shareHeading);
+          }
+          var card = document.createElement("div");
+          card.className = "settings-card";
+          var head = document.createElement("div");
+          head.className = "settings-head";
+          var label = document.createElement("div");
+          label.className = "settings-label";
+          label.textContent = item.label || item.key;
+          var source = document.createElement("div");
+          source.className = "settings-source";
+          source.textContent = sourceLabel(item.source);
+          head.appendChild(label);
+          head.appendChild(source);
+          card.appendChild(head);
+          var input;
+          if (item.kind === "binding") {
+            input = document.createElement("select");
+            var choices = (item.choices || []).slice();
+            if (item.value && choices.indexOf(item.value) === -1) choices.push(item.value);
+            choices.forEach(function(choice) {
+              var opt = document.createElement("option");
+              opt.value = choice;
+              opt.textContent = choice;
+              if (choice === item.value) opt.selected = true;
+              input.appendChild(opt);
+            });
+          } else {
+            input = document.createElement("input");
+            input.type = item.kind === "integer" ? "number" : "text";
+            if (item.kind === "integer") {
+              input.min = String(item.minimum);
+              input.max = String(item.maximum);
+              input.step = "1";
+            }
+            input.value = item.value == null ? "" : String(item.value);
+          }
+          input.className = "settings-input";
+          input.setAttribute("data-setting-key", item.key);
+          input.setAttribute("data-setting-kind", item.kind);
+          input.autocomplete = "off";
+          card.appendChild(input);
+          var help = document.createElement("p");
+          help.className = "settings-help";
+          help.textContent = settingHelp(item);
+          card.appendChild(help);
+          var reset = document.createElement("button");
+          reset.type = "button";
+          reset.className = "settings-reset";
+          reset.textContent = "Clear saved value";
+          reset.addEventListener("click", function() { resetSetting(item.key); });
+          card.appendChild(reset);
+          fields.appendChild(card);
+        });
+        var secretHeading = document.createElement("h3");
+        secretHeading.textContent = "Access keys";
+        secretHeading.style.margin = "1.25rem 0 0.6rem";
+        secretsRoot.appendChild(secretHeading);
+        var secretHelp = document.createElement("p");
+        secretHelp.className = "settings-help";
+        secretHelp.innerHTML = "These stay on the server.&nbsp; They are never shown or edited here.";
+        secretsRoot.appendChild(secretHelp);
+        (data.secrets || []).forEach(function(item) {
+          var row = document.createElement("div");
+          row.className = "secret-row";
+          var name = document.createElement("div");
+          name.textContent = item.name || "";
+          var status = document.createElement("div");
+          var isSet = item.status === "set";
+          status.className = "secret-status " + (isSet ? "set" : "unset");
+          status.textContent = isSet ? "Set" : "Not set";
+          row.appendChild(name);
+          row.appendChild(status);
+          secretsRoot.appendChild(row);
+        });
+      }
+
+      function loadSettingsPanel() {
+        setSettingsStatus("Loading settings…");
+        fetch("/api/admin/settings", { headers: { "Accept": "application/json" } }).then(function(res) {
+          if (res.status === 401) throw new Error("Sign in as an admin to view settings.");
+          if (!res.ok) throw new Error("Settings could not be loaded.");
+          return res.json();
+        }).then(function(data) {
+          renderSettingsForm(data);
+          setSettingsStatus("");
+        }).catch(function(err) {
+          setSettingsStatus(err.message || "Settings could not be loaded.");
+        });
+      }
+
+      function saveSettings() {
+        var inputs = document.querySelectorAll("[data-setting-key]");
+        var values = {};
+        for (var i = 0; i < inputs.length; i++) {
+          var el = inputs[i];
+          var key = el.getAttribute("data-setting-key");
+          var kind = el.getAttribute("data-setting-kind");
+          var raw = String(el.value || "").trim();
+          if (!raw) {
+            setSettingsStatus("Fill in every field, or clear the saved value.");
+            return;
+          }
+          if (kind === "integer") {
+            if (!/^[0-9]+$/.test(raw)) {
+              setSettingsStatus("Use whole numbers for limits.");
+              return;
+            }
+            values[key] = parseInt(raw, 10);
+          } else {
+            values[key] = raw;
+          }
+        }
+        putSettings(values, "Saved.");
+      }
+
+      function resetSetting(key) {
+        var values = {};
+        values[key] = null;
+        putSettings(values, "Saved value cleared.");
+      }
+
+      function putSettings(values, successMessage) {
+        var btn = document.getElementById("settings-save-btn");
+        if (btn) btn.disabled = true;
+        setSettingsStatus("Saving…");
+        fetch("/api/admin/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ values: values })
+        }).then(function(res) {
+          return res.json().then(function(data) {
+            return { ok: res.ok, data: data };
+          });
+        }).then(function(result) {
+          if (btn) btn.disabled = false;
+          if (!result.ok) {
+            var msg = (result.data && result.data.error) || "Settings were not saved.";
+            if (result.data && result.data.fields) {
+              var parts = [];
+              Object.keys(result.data.fields).forEach(function(k) { parts.push(result.data.fields[k]); });
+              if (parts.length) msg = parts.join(" ");
+            }
+            setSettingsStatus(msg);
+            return;
+          }
+          renderSettingsForm(result.data);
+          setSettingsStatus(successMessage);
+        }).catch(function() {
+          if (btn) btn.disabled = false;
+          setSettingsStatus("Settings could not be saved.");
+        });
+      }
+
       updateSortIcons();
       renderTable();
     <\/script>
@@ -3769,13 +4020,556 @@ function renderPortalHtml(overview, origin) {
 }
 __name(renderPortalHtml, "renderPortalHtml");
 __name2(renderPortalHtml, "renderPortalHtml");
+var SETTINGS_DOC_KEY = "settings:overrides";
+var HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+var BLOCKED_HOST_SUFFIXES = ["workers.dev", "pages.dev", "trycloudflare.com", "cloudflare.net"];
+var SETTING_FIELDS = {
+  storage_binding: { kind: "binding", label: "Where files are stored" },
+  share_hosts: { kind: "hosts", label: "Share addresses" },
+  default_share_host: { kind: "host", label: "Default address" },
+  guest_max_files: { kind: "integer", label: "Visitor file count", min: 1, max: GUEST_MAX_FILES, unit: "files" },
+  guest_max_file_bytes: { kind: "integer", label: "Largest visitor file", min: 1, max: GUEST_MAX_FILE_BYTES, unit: "bytes" },
+  guest_max_batch_bytes: { kind: "integer", label: "Largest visitor batch", min: 1, max: GUEST_MAX_BATCH_BYTES, unit: "bytes" },
+  guest_file_ttl_seconds: { kind: "integer", label: "Visitor file lifetime", min: 60, max: GUEST_FILE_MAX_TTL_MS / 1000, unit: "seconds" },
+  guest_redirect_ttl_seconds: { kind: "integer", label: "Visitor link lifetime", min: 60, max: GUEST_REDIRECT_MAX_TTL_MS / 1000, unit: "seconds" }
+};
+var SECRET_FIELDS = [
+  { name: "FLEET_ADMIN_SECRET", keys: ["FLEET_ADMIN_SECRET", "ADMIN_SECRET"] },
+  { name: "FLEET_AGENT_SECRET", keys: ["FLEET_AGENT_SECRET", "AGENT_SECRET"] },
+  { name: "SENTRY_DSN", keys: ["SENTRY_DSN"] },
+  { name: "SENTRY_FLEET_DSN", keys: ["SENTRY_FLEET_DSN"] },
+  { name: "SENTRY_AUTH_TOKEN", keys: ["SENTRY_AUTH_TOKEN"] }
+];
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+__name(jsonResponse, "jsonResponse");
+__name2(jsonResponse, "jsonResponse");
+function blankBag() {
+  return Object.create(null);
+}
+__name(blankBag, "blankBag");
+__name2(blankBag, "blankBag");
+function uniqueHosts(hosts) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const host of hosts) {
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    out.push(host);
+  }
+  return out;
+}
+__name(uniqueHosts, "uniqueHosts");
+__name2(uniqueHosts, "uniqueHosts");
+function hostIsBlocked(host) {
+  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+  for (const bad of BLOCKED_HOST_SUFFIXES) {
+    if (host === bad || host.endsWith("." + bad)) return true;
+  }
+  return false;
+}
+__name(hostIsBlocked, "hostIsBlocked");
+__name2(hostIsBlocked, "hostIsBlocked");
+function normalizeHost(value) {
+  let text = String(value == null ? "" : value).trim().toLowerCase();
+  if (!text) return "";
+  if (text.includes("://") || text.startsWith("//")) {
+    try {
+      const parsed = new URL(text.startsWith("//") ? "https:" + text : text);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+      if (parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash) return "";
+      if (parsed.pathname && parsed.pathname !== "/") return "";
+      text = parsed.hostname;
+    } catch {
+      return "";
+    }
+  }
+  if (text.endsWith(".")) text = text.slice(0, -1);
+  return text;
+}
+__name(normalizeHost, "normalizeHost");
+__name2(normalizeHost, "normalizeHost");
+function parseHostList(value) {
+  const parts = Array.isArray(value) ? value : String(value == null ? "" : value).split(/[\s,]+/);
+  const hosts = [];
+  for (const part of parts) {
+    const host = normalizeHost(part);
+    if (host) hosts.push(host);
+  }
+  return uniqueHosts(hosts);
+}
+__name(parseHostList, "parseHostList");
+__name2(parseHostList, "parseHostList");
+function builtinRoots() {
+  return ["fleetlink.online", "fleetlink.app"];
+}
+__name(builtinRoots, "builtinRoots");
+__name2(builtinRoots, "builtinRoots");
+function deployHostRoots(env) {
+  const roots = builtinRoots();
+  const raw = env && typeof env.SHARE_HOSTS === "string" ? env.SHARE_HOSTS : "";
+  for (const host of parseHostList(raw)) {
+    if (hostIsBlocked(host) || !HOSTNAME_RE.test(host)) continue;
+    roots.push(host);
+  }
+  return uniqueHosts(roots);
+}
+__name(deployHostRoots, "deployHostRoots");
+__name2(deployHostRoots, "deployHostRoots");
+function hostPermitted(host, roots) {
+  if (!host || hostIsBlocked(host) || !HOSTNAME_RE.test(host)) return false;
+  for (const root of roots) {
+    if (host === root || host.endsWith("." + root)) return true;
+  }
+  return false;
+}
+__name(hostPermitted, "hostPermitted");
+__name2(hostPermitted, "hostPermitted");
+function configuredStorageBindings(env) {
+  const names = [];
+  const seen = /* @__PURE__ */ new Set();
+  const hinted = ["FLEET_SHARES", "FILES"];
+  const extra = String(env && env.STORAGE_BINDINGS || "").split(/[\s,]+/);
+  for (const name of hinted.concat(extra)) {
+    const bindingName = String(name || "").trim();
+    if (!bindingName || seen.has(bindingName)) continue;
+    if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(bindingName)) continue;
+    seen.add(bindingName);
+    const binding = env ? env[bindingName] : null;
+    if (binding && typeof binding.get === "function" && typeof binding.put === "function") {
+      names.push(bindingName);
+    }
+  }
+  return names;
+}
+__name(configuredStorageBindings, "configuredStorageBindings");
+__name2(configuredStorageBindings, "configuredStorageBindings");
+function integerError(key) {
+  const field = SETTING_FIELDS[key];
+  if (key === "guest_max_files") return "Use a whole number of files from 1 to " + field.max + ".";
+  if (key === "guest_max_file_bytes" || key === "guest_max_batch_bytes") {
+    return "Use a whole number of bytes from 1 to " + field.max + ".";
+  }
+  return "Use a whole number of seconds from " + field.min + " to " + field.max + ".";
+}
+__name(integerError, "integerError");
+__name2(integerError, "integerError");
+function validateInteger(key, value) {
+  const field = SETTING_FIELDS[key];
+  let number = null;
+  if (typeof value === "number" && Number.isInteger(value)) number = value;
+  else if (typeof value === "string" && /^(0|[1-9]\d*)$/.test(value.trim())) number = parseInt(value.trim(), 10);
+  if (number == null || number < field.min || number > field.max) {
+    return { ok: false, error: integerError(key) };
+  }
+  return { ok: true, value: number, stored: number };
+}
+__name(validateInteger, "validateInteger");
+__name2(validateInteger, "validateInteger");
+function validateBinding(value, env) {
+  const name = String(value == null ? "" : value).trim();
+  if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) {
+    return { ok: false, error: "Choose a connected storage destination." };
+  }
+  const configured = configuredStorageBindings(env);
+  if (configured.includes(name) || configured.length === 0 && name === "FLEET_SHARES") {
+    return { ok: true, value: name, stored: name };
+  }
+  return { ok: false, error: "Choose a connected storage destination." };
+}
+__name(validateBinding, "validateBinding");
+__name2(validateBinding, "validateBinding");
+function validateHostList(value, env) {
+  const rawText = Array.isArray(value) ? value.join(",") : String(value == null ? "" : value);
+  if (rawText.length > 500) return { ok: false, error: "The share address list is too long." };
+  const hosts = parseHostList(value);
+  if (hosts.length === 0 || hosts.length > 8) {
+    return { ok: false, error: "Enter one to eight share addresses." };
+  }
+  const roots = deployHostRoots(env);
+  for (const host of hosts) {
+    if (!hostPermitted(host, roots)) return { ok: false, error: "That address is not allowed." };
+  }
+  return { ok: true, value: hosts, stored: hosts.join(",") };
+}
+__name(validateHostList, "validateHostList");
+__name2(validateHostList, "validateHostList");
+function validateSingleHost(value, env) {
+  const rawText = String(value == null ? "" : value);
+  if (rawText.length > 253) return { ok: false, error: "That address is not allowed." };
+  const hosts = parseHostList(value);
+  if (hosts.length !== 1) return { ok: false, error: "Enter one share address." };
+  if (!hostPermitted(hosts[0], deployHostRoots(env))) {
+    return { ok: false, error: "That address is not allowed." };
+  }
+  return { ok: true, value: hosts[0], stored: hosts[0] };
+}
+__name(validateSingleHost, "validateSingleHost");
+__name2(validateSingleHost, "validateSingleHost");
+function validateFieldValue(key, value, env) {
+  const field = SETTING_FIELDS[key];
+  if (!field) return { ok: false, error: "Unknown setting." };
+  if (field.kind === "integer") return validateInteger(key, value);
+  if (field.kind === "binding") return validateBinding(value, env);
+  if (field.kind === "hosts") return validateHostList(value, env);
+  if (field.kind === "host") return validateSingleHost(value, env);
+  return { ok: false, error: "Unknown setting." };
+}
+__name(validateFieldValue, "validateFieldValue");
+__name2(validateFieldValue, "validateFieldValue");
+function deployRaw(env, key) {
+  const names = {
+    storage_binding: ["STORAGE_BINDING"],
+    share_hosts: ["SHARE_HOSTS"],
+    default_share_host: ["DEFAULT_SHARE_HOST"],
+    guest_max_files: ["GUEST_MAX_FILES"],
+    guest_max_file_bytes: ["GUEST_MAX_FILE_BYTES"],
+    guest_max_batch_bytes: ["GUEST_MAX_BATCH_BYTES"],
+    guest_file_ttl_seconds: ["GUEST_FILE_TTL_SECONDS"],
+    guest_redirect_ttl_seconds: ["GUEST_REDIRECT_TTL_SECONDS"]
+  }[key];
+  if (!names || !env) return null;
+  for (const name of names) {
+    const value = env[name];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return null;
+}
+__name(deployRaw, "deployRaw");
+__name2(deployRaw, "deployRaw");
+function builtinRaw(key) {
+  if (key === "storage_binding") return "FLEET_SHARES";
+  if (key === "share_hosts") return "fleetlink.online,fleetlink.app";
+  if (key === "default_share_host") return "fleetlink.online";
+  if (key === "guest_max_files") return GUEST_MAX_FILES;
+  if (key === "guest_max_file_bytes") return GUEST_MAX_FILE_BYTES;
+  if (key === "guest_max_batch_bytes") return GUEST_MAX_BATCH_BYTES;
+  if (key === "guest_file_ttl_seconds") return GUEST_FILE_MAX_TTL_MS / 1000;
+  if (key === "guest_redirect_ttl_seconds") return GUEST_REDIRECT_MAX_TTL_MS / 1000;
+  return null;
+}
+__name(builtinRaw, "builtinRaw");
+__name2(builtinRaw, "builtinRaw");
+function chooseField(key, overrides, env) {
+  if (overrides && Object.prototype.hasOwnProperty.call(overrides, key)) {
+    const checked = validateFieldValue(key, overrides[key], env);
+    if (checked.ok) return { ok: true, value: checked.value, source: "override" };
+    return { ok: false, error: checked.error };
+  }
+  const deployed = deployRaw(env, key);
+  if (deployed != null) {
+    const checked = validateFieldValue(key, deployed, env);
+    if (checked.ok) return { ok: true, value: checked.value, source: "infisical" };
+  }
+  const checked = validateFieldValue(key, builtinRaw(key), env);
+  if (!checked.ok) return { ok: false, error: checked.error };
+  return { ok: true, value: checked.value, source: "default" };
+}
+__name(chooseField, "chooseField");
+__name2(chooseField, "chooseField");
+function materializeSettings(env, overrides, strict) {
+  const sources = blankBag();
+  const resolved = blankBag();
+  const errors = blankBag();
+  const safeOverrides = overrides || blankBag();
+  for (const key of Object.keys(SETTING_FIELDS)) {
+    const choice = chooseField(key, safeOverrides, env);
+    if (!choice.ok) {
+      if (strict && Object.prototype.hasOwnProperty.call(safeOverrides, key)) errors[key] = choice.error;
+      const fallback = chooseField(key, blankBag(), env);
+      resolved[key] = fallback.ok ? fallback.value : builtinRaw(key);
+      sources[key] = fallback.ok ? fallback.source : "default";
+    } else {
+      resolved[key] = choice.value;
+      sources[key] = choice.source;
+    }
+  }
+  if (!Array.isArray(resolved.share_hosts) || resolved.share_hosts.length === 0) {
+    resolved.share_hosts = parseHostList(builtinRaw("share_hosts"));
+    sources.share_hosts = "default";
+  }
+  if (!resolved.share_hosts.includes(resolved.default_share_host)) {
+    if (strict) errors.default_share_host = "The default address has to be one of the share addresses.";
+    else {
+      resolved.default_share_host = resolved.share_hosts[0];
+      sources.default_share_host = sources.share_hosts;
+    }
+  }
+  if (resolved.guest_max_file_bytes > resolved.guest_max_batch_bytes) {
+    if (strict) errors.guest_max_batch_bytes = "The visitor batch limit cannot be smaller than the visitor file limit.";
+    else resolved.guest_max_file_bytes = resolved.guest_max_batch_bytes;
+  }
+  if (strict && Object.keys(errors).length) return { ok: false, errors };
+  return {
+    ok: true,
+    state: {
+      storage_binding: resolved.storage_binding,
+      share_hosts: resolved.share_hosts.slice(),
+      default_share_host: resolved.default_share_host,
+      guest_max_files: resolved.guest_max_files,
+      guest_max_file_bytes: resolved.guest_max_file_bytes,
+      guest_max_batch_bytes: resolved.guest_max_batch_bytes,
+      guest_file_ttl_seconds: resolved.guest_file_ttl_seconds,
+      guest_redirect_ttl_seconds: resolved.guest_redirect_ttl_seconds,
+      guest_file_ttl_ms: resolved.guest_file_ttl_seconds * 1000,
+      guest_redirect_ttl_ms: resolved.guest_redirect_ttl_seconds * 1000,
+      sources
+    }
+  };
+}
+__name(materializeSettings, "materializeSettings");
+__name2(materializeSettings, "materializeSettings");
+async function readStorageText(env, key) {
+  const ns = env && env.FLEET_SHARES;
+  if (!ns || typeof ns.get !== "function") return null;
+  const raw = await ns.get(key);
+  if (raw == null) return null;
+  if (typeof raw === "string") return raw;
+  if (typeof raw.text === "function") return await raw.text();
+  return null;
+}
+__name(readStorageText, "readStorageText");
+__name2(readStorageText, "readStorageText");
+async function readOverrides(env) {
+  try {
+    const text = await readStorageText(env, SETTINGS_DOC_KEY);
+    if (!text) return blankBag();
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return blankBag();
+    const overrides = blankBag();
+    for (const key of Object.keys(SETTING_FIELDS)) {
+      if (Object.prototype.hasOwnProperty.call(parsed, key)) overrides[key] = parsed[key];
+    }
+    return overrides;
+  } catch {
+    return blankBag();
+  }
+}
+__name(readOverrides, "readOverrides");
+__name2(readOverrides, "readOverrides");
+async function writeOverrides(env, overrides) {
+  const ns = env && env.FLEET_SHARES;
+  if (!ns || typeof ns.put !== "function") throw new Error("storage unavailable");
+  const keys = Object.keys(overrides);
+  if (keys.length === 0) {
+    if (typeof ns.delete === "function") await ns.delete(SETTINGS_DOC_KEY);
+    return;
+  }
+  const payload = blankBag();
+  for (const key of keys) payload[key] = overrides[key];
+  await ns.put(SETTINGS_DOC_KEY, JSON.stringify(payload));
+}
+__name(writeOverrides, "writeOverrides");
+__name2(writeOverrides, "writeOverrides");
+async function loadEffectiveSettings(env) {
+  try {
+    const materialized = materializeSettings(env, await readOverrides(env), false);
+    if (materialized.ok) return materialized.state;
+  } catch {
+  }
+  return materializeSettings(env, blankBag(), false).state;
+}
+__name(loadEffectiveSettings, "loadEffectiveSettings");
+__name2(loadEffectiveSettings, "loadEffectiveSettings");
+function secretIsSet(env, keys) {
+  if (!env) return false;
+  for (const key of keys) {
+    const value = env[key];
+    if (typeof value === "string" && value.trim()) return true;
+  }
+  return false;
+}
+__name(secretIsSet, "secretIsSet");
+__name2(secretIsSet, "secretIsSet");
+function settingsPayload(env, state) {
+  const bindings = configuredStorageBindings(env);
+  const settings = Object.keys(SETTING_FIELDS).map((key) => {
+    const field = SETTING_FIELDS[key];
+    const item = {
+      key,
+      label: field.label,
+      secret: false,
+      editable: true,
+      kind: field.kind,
+      value: field.kind === "hosts" ? state.share_hosts.join(",") : state[key],
+      source: state.sources[key] || "default"
+    };
+    if (field.kind === "integer") {
+      item.minimum = field.min;
+      item.maximum = field.max;
+      item.unit = field.unit;
+    }
+    if (field.kind === "binding") item.choices = bindings.slice();
+    return item;
+  });
+  const secrets = SECRET_FIELDS.map((field) => ({
+    name: field.name,
+    secret: true,
+    editable: false,
+    status: secretIsSet(env, field.keys) ? "set" : "not set"
+  }));
+  return { settings, secrets };
+}
+__name(settingsPayload, "settingsPayload");
+__name2(settingsPayload, "settingsPayload");
+function isSecretSettingName(key) {
+  const name = String(key || "");
+  for (const field of SECRET_FIELDS) {
+    if (field.name === name || field.keys.includes(name)) return true;
+  }
+  return /secret|token|password|dsn|credential/i.test(name);
+}
+__name(isSecretSettingName, "isSecretSettingName");
+__name2(isSecretSettingName, "isSecretSettingName");
+function responseFieldKey(key) {
+  return /^[A-Za-z0-9_.:-]{1,64}$/.test(String(key || "")) ? String(key) : "value";
+}
+__name(responseFieldKey, "responseFieldKey");
+__name2(responseFieldKey, "responseFieldKey");
+async function putAdminSettings(request, env) {
+  const declared = Number(request.headers.get("content-length") || "0");
+  if (Number.isFinite(declared) && declared > 2e4) {
+    return jsonResponse(413, { error: "Settings document is too large." });
+  }
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse(400, { error: "The settings document could not be read." });
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body) || !body.values || typeof body.values !== "object" || Array.isArray(body.values)) {
+    return jsonResponse(400, { error: "Send a values object." });
+  }
+  const incoming = body.values;
+  const keys = Object.keys(incoming);
+  if (keys.length === 0 || keys.length > 20) {
+    return jsonResponse(400, { error: "Send between one and twenty settings." });
+  }
+  const fields = blankBag();
+  for (const key of keys) {
+    const reported = responseFieldKey(key);
+    if (!Object.prototype.hasOwnProperty.call(SETTING_FIELDS, key)) {
+      fields[reported] = isSecretSettingName(key) ? "Access keys cannot be changed here." : "Unknown setting.";
+      continue;
+    }
+    if (incoming[key] === null) continue;
+    const checked = validateFieldValue(key, incoming[key], env);
+    if (!checked.ok) fields[reported] = checked.error;
+  }
+  if (Object.keys(fields).length) {
+    return jsonResponse(400, { error: "Check the highlighted settings.", fields });
+  }
+  const next = blankBag();
+  const current = await readOverrides(env);
+  for (const key of Object.keys(SETTING_FIELDS)) {
+    if (!Object.prototype.hasOwnProperty.call(current, key)) continue;
+    const checked = validateFieldValue(key, current[key], env);
+    if (checked.ok) next[key] = checked.stored;
+  }
+  for (const key of keys) {
+    if (incoming[key] === null) {
+      delete next[key];
+      continue;
+    }
+    const checked = validateFieldValue(key, incoming[key], env);
+    next[key] = checked.stored;
+  }
+  const draft = materializeSettings(env, next, true);
+  if (!draft.ok) return jsonResponse(400, { error: "Check the highlighted settings.", fields: draft.errors });
+  try {
+    await writeOverrides(env, next);
+  } catch {
+    return jsonResponse(500, { error: "Settings could not be saved." });
+  }
+  return jsonResponse(200, settingsPayload(env, draft.state));
+}
+__name(putAdminSettings, "putAdminSettings");
+__name2(putAdminSettings, "putAdminSettings");
+async function handleAdminSettings(request, env, auth) {
+  if (!auth || !auth.isAdmin) {
+    if (auth && (auth.isAgent || auth.session && auth.session.role)) {
+      return jsonResponse(403, { error: "Admin access is required." });
+    }
+    return jsonResponse(401, { error: "Authentication required." });
+  }
+  if (request.method === "GET") {
+    return jsonResponse(200, settingsPayload(env, await loadEffectiveSettings(env)));
+  }
+  if (request.method === "PUT") return putAdminSettings(request, env);
+  return jsonResponse(405, { error: "Method not allowed." });
+}
+__name(handleAdminSettings, "handleAdminSettings");
+__name2(handleAdminSettings, "handleAdminSettings");
+function pickFileStore(env, name) {
+  const configured = configuredStorageBindings(env);
+  if (name && configured.includes(name)) return env[name];
+  if (configured.includes("FLEET_SHARES")) return env.FLEET_SHARES;
+  if (configured.length) return env[configured[0]];
+  return env.FLEET_SHARES;
+}
+__name(pickFileStore, "pickFileStore");
+__name2(pickFileStore, "pickFileStore");
+function withFileStore(env, state) {
+  const store = pickFileStore(env, state && state.storage_binding);
+  if (!store || store === env.FLEET_SHARES) return env;
+  return new Proxy(env, {
+    get(target, prop) {
+      if (prop === "FLEET_SHARES") return store;
+      return target[prop];
+    }
+  });
+}
+__name(withFileStore, "withFileStore");
+__name2(withFileStore, "withFileStore");
+function matchShareHost(hostname, shareHosts) {
+  const host = String(hostname || "").toLowerCase().replace(/\.$/, "");
+  const hosts = Array.isArray(shareHosts) ? shareHosts : [];
+  for (const apex of hosts) {
+    if (host === apex) return { apex, subdomain: null };
+  }
+  for (const apex of hosts) {
+    const suffix = "." + apex;
+    if (!host.endsWith(suffix) || host.length <= suffix.length) continue;
+    const first = host.slice(0, -suffix.length).split(".")[0];
+    if (first) return { apex, subdomain: first };
+  }
+  return null;
+}
+__name(matchShareHost, "matchShareHost");
+__name2(matchShareHost, "matchShareHost");
+function canonicalShareOrigin(requestUrl, state) {
+  const host = state && state.default_share_host;
+  const hosts = state && state.share_hosts || [];
+  if (host && hosts.includes(host) && !hostIsBlocked(host)) return "https://" + host;
+  return requestUrl.origin;
+}
+__name(canonicalShareOrigin, "canonicalShareOrigin");
+__name2(canonicalShareOrigin, "canonicalShareOrigin");
+
 var index_default = {
   async fetch(request, env) {
     const url = new URL(request.url);
     const hostname = url.hostname;
     let key = url.pathname.slice(1);
-    const adminSecret = (env.ADMIN_SECRET || env.FLEET_ADMIN_SECRET || "").trim();
-    const agentSecret = (env.AGENT_SECRET || env.FLEET_AGENT_SECRET || "").trim();
+    const rawEnv = env;
+    const effective = await loadEffectiveSettings(rawEnv);
+    env = withFileStore(rawEnv, effective);
+    const shareOrigin = canonicalShareOrigin(url, effective);
+    const guestMaxFiles = effective.guest_max_files;
+    const guestMaxFileBytes = effective.guest_max_file_bytes;
+    const guestMaxBatchBytes = effective.guest_max_batch_bytes;
+    const guestFileTtlMs = effective.guest_file_ttl_ms;
+    const guestRedirectTtlMs = effective.guest_redirect_ttl_ms;
+    const adminSecret = (rawEnv.ADMIN_SECRET || rawEnv.FLEET_ADMIN_SECRET || "").trim();
+    const agentSecret = (rawEnv.AGENT_SECRET || rawEnv.FLEET_AGENT_SECRET || "").trim();
     const secrets = { adminSecret, agentSecret };
     if (request.headers.get("X-Fleet-Auth")) {
       return new Response(JSON.stringify({
@@ -3785,11 +4579,11 @@ var index_default = {
         headers: { "Content-Type": "application/json; charset=utf-8" }
       });
     }
-    if (hostname !== "fleetlink.app" && hostname !== "fleetlink.online" && (hostname.endsWith(".fleetlink.app") || hostname.endsWith(".fleetlink.online"))) {
-      const subdomain = hostname.split(".")[0];
+    const hostMatch = matchShareHost(hostname, effective.share_hosts);
+    if (hostMatch && hostMatch.subdomain) {
       const exceptions = ["www", "api", "admin", "portal"];
-      if (!exceptions.includes(subdomain)) {
-        key = key ? `${subdomain}/${key}` : subdomain;
+      if (!exceptions.includes(hostMatch.subdomain)) {
+        key = key ? `${hostMatch.subdomain}/${key}` : hostMatch.subdomain;
       }
     }
     if ((url.pathname === "/login" || url.pathname === "/login/" || url.pathname === "/signin" || url.pathname === "/signin/") && (request.method === "GET" || request.method === "HEAD")) {
@@ -3930,6 +4724,9 @@ var index_default = {
         headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
       });
     }
+    if (url.pathname === "/api/admin/settings" || url.pathname === "/api/admin/settings/") {
+      return handleAdminSettings(request, rawEnv, await authenticate(request, secrets));
+    }
     if (url.pathname === "/api/shortcut/download" && (request.method === "GET" || request.method === "HEAD")) {
       const shortcutXml = generateShortcutXml();
       return new Response(shortcutXml, {
@@ -4036,7 +4833,7 @@ var index_default = {
         if (parsed2 > 1.01) {
           return new Response(JSON.stringify({ error: `Requested TTL (${parsed2} days) exceeds the allowed maximum of 24 hours (1 day) for unauthenticated guest redirects. Please sign in for up to 30 days.` }), { status: 403, headers: { "Content-Type": "application/json" } });
         }
-        expireAt = Date.now() + Math.min(parsed2 * 24 * 60 * 60 * 1e3, GUEST_REDIRECT_MAX_TTL_MS);
+        expireAt = Date.now() + Math.min(parsed2 * 24 * 60 * 60 * 1e3, guestRedirectTtlMs);
       } else {
         if (days === "forever") {
           return new Response(JSON.stringify({ error: "Upload rejected: Normal user and agent tokens are restricted to a maximum of 180 days (6 months) for redirect URLs ('forever' is reserved for Admin tokens)." }), { status: 403, headers: { "Content-Type": "application/json" } });
@@ -4072,7 +4869,7 @@ var index_default = {
         httpMetadata: { contentType: "text/html; charset=utf-8" },
         customMetadata
       });
-      const shareUrl = `${url.origin}/${slug}`;
+      const shareUrl = `${shareOrigin}/${slug}`;
       const resHeaders = new Headers({ "Content-Type": "application/json; charset=utf-8" });
       if (reqData.set_session_role && role) {
         const sessionToken = await signSession(role, Date.now() + 30 * 24 * 3600 * 1e3, secrets);
@@ -4155,7 +4952,13 @@ var index_default = {
         let totalDeleted = 0;
         const deletedSlugs = [];
         for (let targetSlug of targetSlugs) {
+          if (isSettingsStorageKey(targetSlug)) {
+            return jsonResponse(400, { error: "That name is reserved." });
+          }
           const resolvedSlug = (await resolveR2Key(env, targetSlug)).split("/")[0];
+          if (isSettingsStorageKey(resolvedSlug)) {
+            return jsonResponse(400, { error: "That name is reserved." });
+          }
           targetSlug = resolvedSlug;
           let keysToDelete = [];
           let truncated = true;
@@ -4165,6 +4968,7 @@ var index_default = {
             if (cursor) listOpts.cursor = cursor;
             const listRes = await env.FLEET_SHARES.list(listOpts);
             for (const o of listRes.objects) {
+              if (o && isSettingsStorageKey(o.key)) continue;
               keysToDelete.push(o.key);
             }
             truncated = listRes.truncated;
@@ -4290,7 +5094,7 @@ var index_default = {
       const isRedirect = meta.is_redirect === "true" || Boolean(meta.redirect_url || meta.target_url);
       let renewDurationMs;
       if (isGuest) {
-        renewDurationMs = isRedirect ? GUEST_REDIRECT_MAX_TTL_MS : GUEST_FILE_MAX_TTL_MS;
+        renewDurationMs = isRedirect ? guestRedirectTtlMs : guestFileTtlMs;
       } else if (isAdmin) {
         renewDurationMs = 7 * 24 * 60 * 60 * 1e3;
       } else {
@@ -4407,7 +5211,7 @@ var index_default = {
             if (parsed2 > 1.01) {
               return new Response(JSON.stringify({ error: `Requested TTL (${parsed2} days) exceeds the allowed maximum of 24 hours (1 day) for unauthenticated guest redirects. Please sign in for up to 30 days.` }), { status: 403, headers: { "Content-Type": "application/json" } });
             }
-            expireAt2 = Date.now() + Math.min(parsed2 * 24 * 60 * 60 * 1e3, GUEST_REDIRECT_MAX_TTL_MS);
+            expireAt2 = Date.now() + Math.min(parsed2 * 24 * 60 * 60 * 1e3, guestRedirectTtlMs);
           } else {
             if (days2 === "forever") {
               return new Response(JSON.stringify({ error: "Upload rejected: Normal user and agent tokens are restricted to a maximum of 180 days (6 months) for redirect URLs ('forever' is reserved for Admin tokens)." }), { status: 403, headers: { "Content-Type": "application/json" } });
@@ -4440,7 +5244,7 @@ var index_default = {
             httpMetadata: { contentType: "text/html; charset=utf-8" },
             customMetadata
           });
-          const shareUrl2 = `${url.origin}/${slug2}`;
+          const shareUrl2 = `${shareOrigin}/${slug2}`;
           const resHeaders2 = new Headers({ "Content-Type": "application/json; charset=utf-8" });
           if (setSessionRole) {
             const maxAge = 30 * 24 * 60 * 60;
@@ -4461,21 +5265,21 @@ var index_default = {
         if (!files || files.length === 0) {
           return new Response(JSON.stringify({ error: "No files uploaded." }), { status: 400, headers: { "Content-Type": "application/json" } });
         }
-        let maxFiles = isAdmin ? 1e3 : isGuest ? GUEST_MAX_FILES : 50;
+        let maxFiles = isAdmin ? 1e3 : isGuest ? guestMaxFiles : 50;
         const customMaxFiles = parseInt(request.headers.get("X-Fleet-Max-Files") || "");
         if (!isNaN(customMaxFiles) && customMaxFiles > 0) {
           maxFiles = Math.min(maxFiles, customMaxFiles);
         }
         if (files.length > maxFiles) {
-          const limitMsg = isGuest ? `Upload rejected: Batch contains ${files.length} files, exceeding guest limit of ${GUEST_MAX_FILES} files. Please sign in for up to 500 files.` : `Upload rejected: Batch contains ${files.length} files, exceeding limit of ${maxFiles} files.`;
+          const limitMsg = isGuest ? `Upload rejected: Batch contains ${files.length} files, exceeding guest limit of ${guestMaxFiles} files. Please sign in for up to 500 files.` : `Upload rejected: Batch contains ${files.length} files, exceeding limit of ${maxFiles} files.`;
           return new Response(JSON.stringify({ error: limitMsg }), { status: 400, headers: { "Content-Type": "application/json" } });
         }
-        let maxFileBytes = isAdmin ? 300 * 1024 * 1024 : isGuest ? GUEST_MAX_FILE_BYTES : 100 * 1024 * 1024;
+        let maxFileBytes = isAdmin ? 300 * 1024 * 1024 : isGuest ? guestMaxFileBytes : 100 * 1024 * 1024;
         const customMaxFileMb = parseFloat(request.headers.get("X-Fleet-Max-File-MB") || "");
         if (!isNaN(customMaxFileMb) && customMaxFileMb > 0) {
           maxFileBytes = Math.min(maxFileBytes, customMaxFileMb * 1024 * 1024);
         }
-        let maxBatchBytes = isAdmin ? 1024 * 1024 * 1024 : isGuest ? GUEST_MAX_BATCH_BYTES : 500 * 1024 * 1024;
+        let maxBatchBytes = isAdmin ? 1024 * 1024 * 1024 : isGuest ? guestMaxBatchBytes : 500 * 1024 * 1024;
         const customMaxBatchMb = parseFloat(request.headers.get("X-Fleet-Max-Batch-MB") || "");
         if (!isNaN(customMaxBatchMb) && customMaxBatchMb > 0) {
           maxBatchBytes = Math.min(maxBatchBytes, customMaxBatchMb * 1024 * 1024);
@@ -4540,7 +5344,7 @@ var index_default = {
           if (numDays > 0.26) {
             return new Response(JSON.stringify({ error: `Upload rejected: Requested retention (${numDays * 24} hours) exceeds the 6-hour limit for unauthenticated guests. Please sign in for 7-day retention.` }), { status: 403, headers: { "Content-Type": "application/json" } });
           }
-          expireAt = Date.now() + GUEST_FILE_MAX_TTL_MS;
+          expireAt = Date.now() + guestFileTtlMs;
         } else {
           if (days === "forever") {
             return new Response(JSON.stringify({ error: "Upload rejected: Non-admin uploads are restricted to a maximum TTL of 7 days ('forever' is reserved for Admin tokens)." }), { status: 403, headers: { "Content-Type": "application/json" } });
@@ -4592,7 +5396,7 @@ var index_default = {
             });
           }
         }
-        const shareUrl = files.length === 1 ? `${url.origin}/${slug}/${files[0].name}` : `${url.origin}/${slug}/`;
+        const shareUrl = files.length === 1 ? `${shareOrigin}/${slug}/${files[0].name}` : `${shareOrigin}/${slug}/`;
         const resHeaders = new Headers({ "Content-Type": "application/json; charset=utf-8" });
         if (setSessionRole) {
           const maxAge = 30 * 24 * 60 * 60;
@@ -4652,7 +5456,13 @@ var index_default = {
       if (!key || key === "intro" || key === "help") {
         return new Response(renderHomeHtml(url.origin), { headers: { "content-type": "text/html; charset=utf-8" } });
       }
+      if (isSettingsStorageKey(key)) {
+        return new Response("Not Found", { status: 404, headers: { "cache-control": "no-store" } });
+      }
       key = await resolveR2Key(env, key);
+      if (isSettingsStorageKey(key)) {
+        return new Response("Not Found", { status: 404, headers: { "cache-control": "no-store" } });
+      }
       if (!key.endsWith("/") && !key.includes(".")) {
         const indexObj = await env.FLEET_SHARES.get(key + "/index.html");
         if (indexObj) {
@@ -4969,7 +5779,7 @@ var index_default = {
           return new Response(`Upload rejected: Invalid redirect target URL "${redirectTarget}". Must begin with http:// or https://.`, { status: 400 });
         }
       }
-      let maxFileBytes = isAdmin ? 300 * 1024 * 1024 : isGuest ? GUEST_MAX_FILE_BYTES : 100 * 1024 * 1024;
+      let maxFileBytes = isAdmin ? 300 * 1024 * 1024 : isGuest ? guestMaxFileBytes : 100 * 1024 * 1024;
       const customMaxFileMb = parseFloat(request.headers.get("X-Fleet-Max-File-MB") || "");
       if (!isNaN(customMaxFileMb) && customMaxFileMb > 0) {
         maxFileBytes = Math.min(maxFileBytes, customMaxFileMb * 1024 * 1024);
@@ -5004,7 +5814,7 @@ var index_default = {
           if (days > 1.01) {
             return new Response(`Upload rejected: Requested TTL (${days} days) exceeds the allowed maximum of 24 hours (1 day) for unauthenticated guest redirects. Please sign in for up to 30 days.`, { status: 403 });
           }
-          expireAt = Date.now() + Math.min(days * 24 * 60 * 60 * 1e3, GUEST_REDIRECT_MAX_TTL_MS);
+          expireAt = Date.now() + Math.min(days * 24 * 60 * 60 * 1e3, guestRedirectTtlMs);
         } else {
           if (requestedDays === "forever") {
             return new Response("Upload rejected: Normal user and agent tokens are restricted to a maximum of 180 days (6 months) for redirect URLs ('forever' is reserved for Admin tokens).", { status: 403 });
@@ -5048,7 +5858,7 @@ var index_default = {
         if (days > 0.26) {
           return new Response(`Upload rejected: Requested retention (${days * 24} hours) exceeds the 6-hour limit for unauthenticated guests. Please sign in or use an agent token for 7-day retention.`, { status: 403 });
         }
-        expireAt = Date.now() + GUEST_FILE_MAX_TTL_MS;
+        expireAt = Date.now() + guestFileTtlMs;
       } else {
         if (requestedDays === "forever") {
           return new Response("Upload rejected: Non-admin uploads are restricted to a maximum TTL of 7 days ('forever' is reserved for Admin tokens).", { status: 403 });
@@ -5124,7 +5934,7 @@ var index_default = {
             httpMetadata: { contentType: "text/html; charset=utf-8" },
             customMetadata
           });
-          const shareUrl = `${url.origin}/${key}`;
+          const shareUrl = `${shareOrigin}/${key}`;
           return new Response(`Successfully created redirect ${shareUrl} -> ${normalized}
 (Expires: ${expireAt ? new Date(expireAt).toISOString() : "Never"})
 `, {
@@ -5145,7 +5955,7 @@ var index_default = {
           httpMetadata,
           customMetadata
         });
-        const shareUrl = `${url.origin}/${key}`;
+        const shareUrl = `${shareOrigin}/${key}`;
         return new Response(`Successfully uploaded to ${shareUrl}
 (Expires: ${expireAt ? new Date(expireAt).toISOString() : "Never"})
 `, {
@@ -5161,6 +5971,9 @@ var index_default = {
       const deleteMethodAuth = await authenticate(request, secrets);
       if (!deleteMethodAuth.isAdmin) {
         return new Response("Delete rejected: Unauthorized. Provide a valid X-Fleet-Admin header with an Admin secret.", { status: 401 });
+      }
+      if (isSettingsStorageKey(key)) {
+        return new Response("Delete rejected: That name is reserved.", { status: 400 });
       }
       if (!key) {
         return new Response("Delete rejected: Missing target key in request URL.", { status: 400 });
