@@ -5,8 +5,28 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { z } from "zod";
 
 const SITE = "https://app.infisical.com";
+
+// Infisical adds id, version, and folder fields beside secretKey and secretValue.
+// Unknown fields are ignored.  A strict object would reject a healthy response.
+const LoginResponseSchema = z.object({
+  accessToken: z.string().min(1)
+}).passthrough();
+
+const SecretsResponseSchema = z.object({
+  secrets: z.array(z.object({
+    secretKey: z.string().min(1),
+    secretValue: z.string()
+  }).passthrough())
+}).passthrough();
+
+function parseBody(schema, body, label) {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new Error(`${label} returned an unexpected shape.`);
+  return parsed.data;
+}
 
 export async function loadSigning({ env = process.env, fetchImpl = fetch, log = console.log, githubEnv = env.GITHUB_ENV } = {}) {
   const clientId = env.INFISICAL_CLIENT_ID?.trim();
@@ -73,8 +93,7 @@ async function login(fetchImpl, clientId, clientSecret) {
     body: JSON.stringify({ clientId, clientSecret })
   });
   if (!response.ok) throw new Error(`Infisical universal-auth login failed (HTTP ${response.status}).`);
-  const body = await response.json();
-  if (!body.accessToken) throw new Error("Infisical universal-auth login returned no access token.");
+  const body = parseBody(LoginResponseSchema, await response.json(), "Infisical universal-auth login");
   return body.accessToken;
 }
 
@@ -86,9 +105,9 @@ async function readSecrets(fetchImpl, token, projectId, secretPath) {
   url.searchParams.set("include_imports", "false");
   const response = await fetchImpl(url, { headers: { authorization: `Bearer ${token}` } });
   if (!response.ok) throw new Error(`Infisical read failed for ${secretPath} (HTTP ${response.status}).`);
-  const body = await response.json();
+  const body = parseBody(SecretsResponseSchema, await response.json(), `Infisical read ${secretPath}`);
   const map = new Map();
-  for (const secret of body.secrets || []) map.set(secret.secretKey, secret.secretValue ?? "");
+  for (const secret of body.secrets) map.set(secret.secretKey, secret.secretValue);
   return map;
 }
 

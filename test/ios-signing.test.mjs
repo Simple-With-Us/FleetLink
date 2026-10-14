@@ -163,4 +163,31 @@ test("ASC jwt and profile selection stay on the FleetLink App Store profiles", a
   };
   assert.equal(await buildAlreadyUploaded({ token: "t", bundleId: "online.fleetlink.ios", buildNumber: "202610141907", fetchImpl }), true);
   assert.equal(await buildAlreadyUploaded({ token: "t", bundleId: "online.fleetlink.ios", buildNumber: "1", fetchImpl }), false);
+  await assert.rejects(
+    () => buildAlreadyUploaded({
+      token: "t",
+      bundleId: "online.fleetlink.ios",
+      buildNumber: "1",
+      fetchImpl: async () => jsonResponse({ nope: true })
+    }),
+    /unexpected shape/
+  );
+});
+
+test("Infisical login and secret payloads are rejected when the shape is wrong", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "fl-sign-"));
+  await assert.rejects(
+    () => loadSigning({
+      env: {
+        INFISICAL_CLIENT_ID: "client",
+        INFISICAL_CLIENT_SECRET: "secret",
+        INFISICAL_PROJECT_ID: "fleetlink-project",
+        INFISICAL_ASC_PROJECT_ID: "ops-project"
+      },
+      fetchImpl: async () => jsonResponse({ token: "missing-access-token" }),
+      log() {},
+      githubEnv: join(dir, "github.env")
+    }),
+    /unexpected shape/
+  );
 });

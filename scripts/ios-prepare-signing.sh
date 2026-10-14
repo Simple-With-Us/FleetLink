@@ -22,11 +22,12 @@ fi
 : "${IOS_DIST_P12_PASSWORD:?IOS_DIST_P12_PASSWORD required}"
 
 umask 077
-SECRETS_DIR="${HOME}/.secrets"
-mkdir -p "$SECRETS_DIR"
-chmod 700 "$SECRETS_DIR"
+# Runner temp only.  ~/.secrets is a one-time handoff directory, not a signing store.
+STAGE_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ios-signing"
+mkdir -p "$STAGE_DIR"
+chmod 700 "$STAGE_DIR"
 
-KEY_PATH="${SECRETS_DIR}/AuthKey.p8"
+KEY_PATH="${STAGE_DIR}/AuthKey.p8"
 printf '%s\n' "$ASC_KEY_P8" > "$KEY_PATH"
 chmod 600 "$KEY_PATH"
 grep -q "BEGIN " "$KEY_PATH" || die "ASC p8 did not contain a PEM private key"
@@ -42,7 +43,7 @@ install_private_key "${HOME}/.private_keys"
 install_private_key "${HOME}/.appstoreconnect/private_keys"
 install_private_key "${HOME}/private_keys"
 
-P12_PATH="${SECRETS_DIR}/ios-distribution.p12"
+P12_PATH="${STAGE_DIR}/ios-distribution.p12"
 python3 - "$P12_PATH" <<'PY'
 import base64, os, pathlib, sys
 pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(os.environ["IOS_DIST_P12_BASE64"]))

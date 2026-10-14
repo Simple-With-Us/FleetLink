@@ -2,12 +2,35 @@
 // Prints profile names, bundle ids, and UUIDs only.  Never prints key material.
 import { createPrivateKey, createSign } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { z } from "zod";
 
 const API = "https://api.appstoreconnect.apple.com";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// App Store Connect returns links, relationships, and paging beside these fields.
+// Unknown fields are ignored so a healthy payload is not rejected.
+const AppsResponseSchema = z.object({
+  data: z.array(z.object({ id: z.string().min(1) }).passthrough())
+}).passthrough();
+
+const BuildsResponseSchema = z.object({
+  data: z.array(z.object({ id: z.string().min(1) }).passthrough())
+}).passthrough();
+
+const ProfilesResponseSchema = z.object({
+  data: z.array(z.object({
+    attributes: z.object({
+      name: z.string().min(1),
+      profileState: z.string().optional(),
+      profileType: z.string().optional(),
+      uuid: z.string().min(1),
+      profileContent: z.string().min(1)
+    }).passthrough()
+  }).passthrough())
+}).passthrough();
 
 export function signAscJwt(pem, keyId, issuerId, now = Math.floor(Date.now() / 1000)) {
   const header = base64url(JSON.stringify({ alg: "ES256", kid: keyId, typ: "JWT" }));
@@ -55,15 +78,16 @@ export function assertProfileBundle(xml, bundleId) {
 }
 
 export async function buildAlreadyUploaded({ token, bundleId, buildNumber, fetchImpl = fetch }) {
-  const apps = await ascGet(fetchImpl, token, `/v1/apps?filter[bundleId]=${encodeURIComponent(bundleId)}&limit=2`);
-  const app = (apps.data || [])[0];
+  const apps = await ascGet(fetchImpl, token, `/v1/apps?filter[bundleId]=${encodeURIComponent(bundleId)}&limit=2`, AppsResponseSchema);
+  const app = apps.data[0];
   if (!app) throw new Error(`App Store Connect has no app for ${bundleId}.`);
   const builds = await ascGet(
     fetchImpl,
     token,
-    `/v1/builds?filter[app]=${encodeURIComponent(app.id)}&filter[version]=${encodeURIComponent(buildNumber)}&limit=5`
+    `/v1/builds?filter[app]=${encodeURIComponent(app.id)}&filter[version]=${encodeURIComponent(buildNumber)}&limit=5`,
+    BuildsResponseSchema
   );
-  return (builds.data || []).length > 0;
+  return builds.data.length > 0;
 }
 
 function matchOne(text, pattern) {
@@ -101,16 +125,19 @@ function requireEnv(name) {
   return value;
 }
 
-async function ascGet(fetchImpl, token, path) {
+async function ascGet(fetchImpl, token, path, schema) {
   const response = await fetchImpl(`${API}${path}`, { headers: { authorization: `Bearer ${token}` } });
   if (!response.ok) throw new Error(`App Store Connect ${path.split("?")[0]} failed (HTTP ${response.status}).`);
-  return response.json();
+  const parsed = schema.safeParse(await response.json());
+  if (!parsed.success) throw new Error(`App Store Connect ${path.split("?")[0]} returned an unexpected shape.`);
+  return parsed.data;
 }
 
 async function tokenFromEnv() {
+  const staged = join(process.env.RUNNER_TEMP || tmpdir(), "ios-signing", "AuthKey.p8");
   const pem = process.env.ASC_KEY_P8?.includes("BEGIN ")
     ? process.env.ASC_KEY_P8
-    : readFileSync(join(homedir(), ".secrets", "AuthKey.p8"), "utf8");
+    : readFileSync(staged, "utf8");
   return signAscJwt(pem, requireEnv("ASC_KEY_ID"), requireEnv("ASC_ISSUER_ID"));
 }
 
@@ -118,8 +145,8 @@ async function install() {
   const token = await tokenFromEnv();
   const map = JSON.parse(readFileSync(join(ROOT, "ios", "appstore-profiles.json"), "utf8"));
   const wantedByName = Object.fromEntries(Object.entries(map).map(([bundleId, name]) => [name, bundleId]));
-  const listed = await ascGet(fetch, token, "/v1/profiles?filter[profileType]=IOS_APP_STORE&limit=200");
-  const chosen = selectProfiles(listed.data || [], wantedByName);
+  const listed = await ascGet(fetch, token, "/v1/profiles?filter[profileType]=IOS_APP_STORE&limit=200", ProfilesResponseSchema);
+  const chosen = selectProfiles(listed.data, wantedByName);
   const dest = join(homedir(), "Library", "MobileDevice", "Provisioning Profiles");
   mkdirSync(dest, { recursive: true });
   for (const [bundleId, profile] of chosen) {

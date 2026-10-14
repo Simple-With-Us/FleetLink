@@ -50,6 +50,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Node dependencies
+        run: npm ci
+
       - name: Reject a beta Xcode
         run: |
           xcodebuild -version
