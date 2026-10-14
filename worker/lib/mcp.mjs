@@ -82,6 +82,34 @@ const SlugSchema = z.object({
 
 const EmptySchema = z.object({}).strict();
 
+// One object per POST.  id may be omitted (notification), or a string, finite number, or null.
+export const McpRequestSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: z.union([z.string().min(1).max(256), z.number().finite(), z.null()]).optional(),
+  method: z.string().min(1).max(256),
+  params: z.record(z.unknown()).optional()
+}).strict();
+
+const InitializeParamsSchema = z.object({
+  protocolVersion: z.string().min(1).max(128).optional(),
+  capabilities: z.record(z.unknown()).optional(),
+  clientInfo: z.object({
+    name: z.string().min(1).max(256).optional(),
+    title: z.string().min(1).max(256).optional(),
+    version: z.string().min(1).max(256).optional()
+  }).passthrough().optional(),
+  _meta: z.record(z.unknown()).optional()
+}).passthrough();
+
+const ToolCallParamsSchema = z.object({
+  name: z.string().min(1).max(200),
+  arguments: z.record(z.unknown()).optional(),
+  _meta: z.record(z.unknown()).optional()
+}).strict();
+
+const UpstreamJsonSchema = z.union([z.record(z.unknown()), z.array(z.unknown())]);
+const UpstreamErrorSchema = z.object({ error: z.string() });
+
 const TOOLS = [
   {
     name: "fleetlink_create_share",
@@ -264,8 +292,9 @@ function safeClientMessage(status, raw) {
 
 function extractMessage(text) {
   try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed.error === "string") return parsed.error;
+    const raw = JSON.parse(text);
+    const parsed = UpstreamErrorSchema.safeParse(raw);
+    if (parsed.success) return parsed.data.error;
   } catch {
     /* plain text from PUT */
   }
@@ -275,8 +304,9 @@ function extractMessage(text) {
 function interpret(status, text) {
   if (status >= 200 && status < 300) {
     try {
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === "object") return { ok: true, status, data: scrub(parsed) };
+      const raw = JSON.parse(text);
+      const parsed = UpstreamJsonSchema.safeParse(raw);
+      if (parsed.success) return { ok: true, status, data: scrub(parsed.data) };
     } catch {
       /* upload and redirect replies are plain text */
     }
@@ -339,14 +369,6 @@ function toolResult(payload, isError = false) {
   const result = { content: [{ type: "text", text }] };
   if (isError) result.isError = true;
   return result;
-}
-
-function requestId(payload) {
-  if (!Object.prototype.hasOwnProperty.call(payload, "id")) return { absent: true };
-  const id = payload.id;
-  if (typeof id === "number" && Number.isFinite(id)) return { id };
-  if (typeof id === "string" && id.length > 0 && id.length <= 256) return { id };
-  return { invalid: true };
 }
 
 function forwardAuth(request, headers) {
@@ -564,16 +586,15 @@ async function dispatchTool(name, args, ctx) {
 }
 
 async function handleRpc(payload, ctx) {
-  const idState = requestId(payload);
-  if (payload.jsonrpc !== "2.0" || typeof payload.method !== "string" || idState.invalid) {
-    return rpcError(null, -32600, "Invalid request", 400);
-  }
-  if (idState.absent) {
+  const parsed = McpRequestSchema.safeParse(payload);
+  if (!parsed.success) return rpcError(null, -32600, "Invalid request", 400);
+  const message = parsed.data;
+  if (!Object.prototype.hasOwnProperty.call(message, "id")) {
     return new Response(null, { status: 202, headers: { "cache-control": "no-store" } });
   }
-  const id = idState.id;
-  if (payload.method === "initialize") {
-    if (payload.params != null && (typeof payload.params !== "object" || Array.isArray(payload.params))) {
+  const id = message.id;
+  if (message.method === "initialize") {
+    if (message.params !== undefined && !InitializeParamsSchema.safeParse(message.params).success) {
       return rpcError(id, -32602, "Invalid params");
     }
     return rpcResult(id, {
@@ -583,17 +604,12 @@ async function handleRpc(payload, ctx) {
       instructions: "FleetLink shares files and short links.  Call a tool to upload, renew, delete, or inspect the signed-in credential.  Tool errors are short messages and never include tokens."
     });
   }
-  if (payload.method === "ping") return rpcResult(id, {});
-  if (payload.method === "tools/list") return rpcResult(id, { tools: toolCatalog() });
-  if (payload.method === "tools/call") {
-    const params = payload.params;
-    if (!params || typeof params !== "object" || Array.isArray(params) || typeof params.name !== "string") {
-      return rpcError(id, -32602, "Invalid params");
-    }
-    if (params.arguments != null && (typeof params.arguments !== "object" || Array.isArray(params.arguments))) {
-      return rpcError(id, -32602, "Invalid params");
-    }
-    const result = await dispatchTool(params.name, params.arguments ?? {}, ctx);
+  if (message.method === "ping") return rpcResult(id, {});
+  if (message.method === "tools/list") return rpcResult(id, { tools: toolCatalog() });
+  if (message.method === "tools/call") {
+    const params = ToolCallParamsSchema.safeParse(message.params);
+    if (!params.success) return rpcError(id, -32602, "Invalid params");
+    const result = await dispatchTool(params.data.name, params.data.arguments ?? {}, ctx);
     return rpcResult(id, result);
   }
   return rpcError(id, -32601, "Method not found");
@@ -616,17 +632,18 @@ export async function handleMcp(request, env, deps) {
     if (!contentType.startsWith("application/json")) {
       return jsonResponse({ error: "Content-Type must be application/json." }, 415);
     }
-    let payload;
+    let raw;
     try {
-      payload = JSON.parse(await request.text());
+      raw = JSON.parse(await request.text());
     } catch {
       return rpcError(null, -32700, "Parse error", 400);
     }
-    if (Array.isArray(payload) || !payload || typeof payload !== "object") {
-      return rpcError(null, -32600, "Invalid request", 400);
-    }
+    // Batches are one Invalid request.  This server does not run any element of the array.
+    if (Array.isArray(raw)) return rpcError(null, -32600, "Invalid request", 400);
+    const parsed = McpRequestSchema.safeParse(raw);
+    if (!parsed.success) return rpcError(null, -32600, "Invalid request", 400);
     const origin = new URL(request.url).origin;
-    return await handleRpc(payload, {
+    return await handleRpc(parsed.data, {
       request,
       env,
       caller,

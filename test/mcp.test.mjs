@@ -242,7 +242,8 @@ test("malformed JSON-RPC does not echo the request body", async () => {
   const parse = await mcp(env, { token: ADMIN, raw: `{"nope":${secret}` });
   assert.equal(parse.status, 400);
   const parseBody = await parse.json();
-  assert.equal(parseBody.error.code, -32700);
+  assert.equal(parseBody.id, null);
+  assert.deepEqual(parseBody.error, { code: -32700, message: "Parse error" });
   assert.equal(JSON.stringify(parseBody).includes(secret), false);
 
   const batch = await mcp(env, {
@@ -250,10 +251,16 @@ test("malformed JSON-RPC does not echo the request body", async () => {
     raw: [{ jsonrpc: "2.0", id: 1, method: "ping", params: { token: secret } }]
   });
   assert.equal(batch.status, 400);
-  assert.equal((await batch.text()).includes(secret), false);
+  const batchText = await batch.text();
+  assert.equal(batchText.includes(secret), false);
+  const batchBody = JSON.parse(batchText);
+  assert.equal(Array.isArray(batchBody), false);
+  assert.equal(batchBody.id, null);
+  assert.deepEqual(batchBody.error, { code: -32600, message: "Invalid request" });
 
   const missing = await rpc(env, { method: "tools/missing", token: ADMIN });
-  assert.equal(missing.body.error.code, -32601);
+  assert.equal(missing.body.id, 1);
+  assert.deepEqual(missing.body.error, { code: -32601, message: "Method not found" });
 
   const typed = await mcp(env, {
     method: "ping",
@@ -261,6 +268,163 @@ test("malformed JSON-RPC does not echo the request body", async () => {
     headers: { "content-type": "text/plain" }
   });
   assert.equal(typed.status, 415);
+});
+
+test("JSON-RPC bodies must match McpRequestSchema before they are dispatched", async () => {
+  const { env, bucket } = await envWith();
+  const secret = `fla_${"ef".repeat(16)}`;
+  const cases = [
+    { name: "empty", raw: "", code: -32700, message: "Parse error" },
+    { name: "truncated", raw: "{\"jsonrpc\":", code: -32700, message: "Parse error" },
+    { name: "null", raw: "null", code: -32600, message: "Invalid request" },
+    { name: "string", raw: "\"ping\"", code: -32600, message: "Invalid request" },
+    { name: "number", raw: "1", code: -32600, message: "Invalid request" },
+    { name: "bool", raw: "true", code: -32600, message: "Invalid request" },
+    { name: "empty object", raw: {}, code: -32600, message: "Invalid request" },
+    { name: "wrong version", raw: { jsonrpc: "1.0", id: 1, method: "ping" }, code: -32600, message: "Invalid request" },
+    { name: "method type", raw: { jsonrpc: "2.0", id: secret, method: 1 }, code: -32600, message: "Invalid request" },
+    { name: "empty method", raw: { jsonrpc: "2.0", id: 1, method: "" }, code: -32600, message: "Invalid request" },
+    { name: "extra key", raw: { jsonrpc: "2.0", id: 1, method: "ping", token: secret }, code: -32600, message: "Invalid request" },
+    { name: "params array", raw: { jsonrpc: "2.0", id: 1, method: "ping", params: [secret] }, code: -32600, message: "Invalid request" },
+    { name: "params null", raw: { jsonrpc: "2.0", id: 1, method: "ping", params: null }, code: -32600, message: "Invalid request" },
+    { name: "id empty", raw: { jsonrpc: "2.0", id: "", method: "ping" }, code: -32600, message: "Invalid request" },
+    { name: "id bool", raw: { jsonrpc: "2.0", id: true, method: "ping" }, code: -32600, message: "Invalid request" },
+    { name: "id long", raw: { jsonrpc: "2.0", id: secret.repeat(20), method: "ping" }, code: -32600, message: "Invalid request" },
+    { name: "batch empty", raw: [], code: -32600, message: "Invalid request" },
+    { name: "batch one", raw: [{ jsonrpc: "2.0", id: 1, method: "ping", params: { token: secret } }], code: -32600, message: "Invalid request" },
+    {
+      name: "batch two",
+      raw: [
+        { jsonrpc: "2.0", id: 1, method: "ping" },
+        { jsonrpc: "2.0", id: 2, method: "tools/list" }
+      ],
+      code: -32600,
+      message: "Invalid request"
+    },
+    {
+      name: "notification params array",
+      raw: { jsonrpc: "2.0", method: "notifications/initialized", params: [secret] },
+      code: -32600,
+      message: "Invalid request"
+    }
+  ];
+
+  for (const item of cases) {
+    const response = await mcp(env, { token: ADMIN, raw: item.raw });
+    const text = await response.text();
+    assert.equal(response.status, 400, item.name);
+    assert.equal(text.includes(secret), false, item.name);
+    const body = JSON.parse(text);
+    assert.equal(Array.isArray(body), false, item.name);
+    assert.equal(body.jsonrpc, "2.0", item.name);
+    assert.equal(body.id, null, item.name);
+    assert.deepEqual(body.error, { code: item.code, message: item.message }, item.name);
+  }
+
+  const id256 = "y".repeat(256);
+  const maxId = await rpc(env, { method: "ping", token: ADMIN, id: id256 });
+  assert.equal(maxId.response.status, 200);
+  assert.equal(maxId.body.id, id256);
+  assert.deepEqual(maxId.body.result, {});
+
+  const nullId = await rpc(env, { method: "ping", token: ADMIN, id: null });
+  assert.equal(nullId.response.status, 200);
+  assert.equal(nullId.body.id, null);
+  assert.deepEqual(nullId.body.result, {});
+
+  const noted = await mcp(env, {
+    method: "notifications/initialized",
+    token: ADMIN,
+    omitId: true,
+    params: {}
+  });
+  assert.equal(noted.status, 202);
+  assert.equal(await noted.text(), "");
+
+  const init = await rpc(env, {
+    method: "initialize",
+    token: ADMIN,
+    id: 4,
+    params: {
+      protocolVersion: "2025-06-18",
+      capabilities: { roots: { listChanged: true } },
+      clientInfo: { name: "test", title: "Test", version: "0" },
+      _meta: { progressToken: "p" }
+    }
+  });
+  assert.equal(init.response.status, 200);
+  assert.equal(init.body.id, 4);
+  assert.equal(init.body.result.protocolVersion, "2025-06-18");
+
+  const badInit = await rpc(env, {
+    method: "initialize",
+    token: ADMIN,
+    id: 5,
+    params: { protocolVersion: 1, capabilities: {}, clientInfo: { name: "t", version: "1" } }
+  });
+  assert.equal(badInit.response.status, 200);
+  assert.equal(badInit.body.id, 5);
+  assert.deepEqual(badInit.body.error, { code: -32602, message: "Invalid params" });
+  assert.equal(badInit.text.includes("protocolVersion"), false);
+
+  const metaCall = await rpc(env, {
+    method: "tools/call",
+    token: ADMIN,
+    id: 8,
+    params: { name: "fleetlink_whoami", _meta: { progressToken: "p" } }
+  });
+  assert.equal(metaCall.response.status, 200);
+  assert.equal(metaCall.body.result.isError, undefined);
+  assert.equal(toolJson(metaCall.body).identity.kind, "operator");
+
+  const badCall = await rpc(env, {
+    method: "tools/call",
+    token: ADMIN,
+    id: 9,
+    params: { name: "fleetlink_whoami", arguments: [secret] }
+  });
+  assert.equal(badCall.response.status, 200);
+  assert.equal(badCall.body.id, 9);
+  assert.deepEqual(badCall.body.error, { code: -32602, message: "Invalid params" });
+  assert.equal(badCall.text.includes(secret), false);
+
+  const missingName = await rpc(env, {
+    method: "tools/call",
+    token: ADMIN,
+    id: 10,
+    params: { arguments: { text: secret } }
+  });
+  assert.equal(missingName.body.id, 10);
+  assert.deepEqual(missingName.body.error, { code: -32602, message: "Invalid params" });
+  assert.equal(missingName.text.includes(secret), false);
+
+  const extraParam = await rpc(env, {
+    method: "tools/call",
+    token: ADMIN,
+    id: 11,
+    params: { name: "fleetlink_whoami", arguments: {}, leaked: secret }
+  });
+  assert.equal(extraParam.body.id, 11);
+  assert.deepEqual(extraParam.body.error, { code: -32602, message: "Invalid params" });
+  assert.equal(extraParam.text.includes(secret), false);
+
+  const batchWrite = await mcp(env, {
+    token: AGENT,
+    raw: [{
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "fleetlink_create_share",
+        arguments: { text: "nope", slug: "from-batch" }
+      }
+    }]
+  });
+  assert.equal(batchWrite.status, 400);
+  const batchWriteBody = await batchWrite.json();
+  assert.equal(batchWriteBody.id, null);
+  assert.deepEqual(batchWriteBody.error, { code: -32600, message: "Invalid request" });
+  assert.equal(bucket.objects.has("from-batch/note.txt"), false);
 });
 
 test("whoami reports operator, agent-token, and account identities without secrets", async () => {
