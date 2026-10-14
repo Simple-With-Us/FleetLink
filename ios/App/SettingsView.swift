@@ -2,21 +2,19 @@ import SwiftUI
 
 public struct SettingsView: View {
     @ObservedObject var session: SessionManager
-    @ObservedObject private var apple: AppleSignInCoordinator
-    @ObservedObject private var webAuth: WebAuthSession
+    @ObservedObject private var passkeys: PasskeyCoordinator
 
     @AppStorage("fleetlink_server_host") private var serverHost: String = "https://fleetlink.online"
 
     public init(session: SessionManager) {
         self.session = session
-        self.apple = AppleSignInCoordinator(owner: session)
-        self.webAuth = WebAuthSession(owner: session)
+        self.passkeys = PasskeyCoordinator(owner: session)
     }
 
     public var body: some View {
         NavigationStack {
             Form {
-                AccountView(session: session, webAuth: webAuth, apple: apple)
+                AccountView(session: session, passkeys: passkeys)
 
                 Section {
                     SecureField("Admin / Agent Secret Token", text: $session.bearerSecret)
