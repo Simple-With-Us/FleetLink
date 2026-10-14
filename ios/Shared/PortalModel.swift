@@ -147,14 +147,14 @@ public final class PortalManager: ObservableObject {
             }
 
             if httpResponse.statusCode == 401 {
-                errorMessage = "Sign in to see your links.  Add your sign-in code in Settings."
+                errorMessage = "Sign in to see your links.\u{00A0} Add your sign-in code in Settings."
                 isLoading = false
                 return
             }
 
             guard (200...299).contains(httpResponse.statusCode) else {
                 let errText = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-                errorMessage = FleetLinkCopy.explain("Could not load links.  \(errText)")
+                errorMessage = FleetLinkCopy.explain("Could not load links.\u{00A0} \(errText)")
                 isLoading = false
                 return
             }
@@ -201,7 +201,7 @@ public final class PortalManager: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
                 let errText = String(data: data, encoding: .utf8) ?? "Error"
-                errorMessage = FleetLinkCopy.explain("Could not delete that link.  \(errText)")
+                errorMessage = FleetLinkCopy.explain("Could not delete that link.\u{00A0} \(errText)")
                 return false
             }
             shares.removeAll { $0.slug == slug }
@@ -225,7 +225,7 @@ public final class PortalManager: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
                 let errText = String(data: data, encoding: .utf8) ?? "Error"
-                errorMessage = FleetLinkCopy.explain("Could not renew that link.  \(errText)")
+                errorMessage = FleetLinkCopy.explain("Could not renew that link.\u{00A0} \(errText)")
                 return false
             }
             await fetchShares(host: host, token: token)
@@ -239,10 +239,10 @@ public final class PortalManager: ObservableObject {
 public enum FleetLinkCopy {
     public static func explain(_ message: String) -> String {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return "Something went wrong.  Try again." }
+        if trimmed.isEmpty { return "Something went wrong.\u{00A0} Try again." }
         let lower = trimmed.lowercased()
         if lower.contains("authentication required") || lower.contains("invalid secret") || lower.contains("unauthorized") {
-            return "Sign in before you continue.  Add your sign-in code in Settings."
+            return "Sign in before you continue.\u{00A0} Add your sign-in code in Settings."
         }
         if lower.contains("invalid url") || lower.contains("invalid endpoint") {
             return "That web address is not valid."
@@ -265,9 +265,9 @@ public enum PortalError: LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .invalidURL: return "That web address is not valid."
-        case .unauthorized: return "Sign in before you continue.  Add your sign-in code in Settings."
+        case .unauthorized: return "Sign in before you continue.\u{00A0} Add your sign-in code in Settings."
         case .serverError(let msg): return FleetLinkCopy.explain(msg)
-        case .encodingFailed: return "That text could not be saved.  Try again."
+        case .encodingFailed: return "That text could not be saved.\u{00A0} Try again."
         }
     }
 }

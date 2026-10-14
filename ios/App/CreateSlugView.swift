@@ -119,7 +119,7 @@ public struct CreateSlugView: View {
                         Label(err, systemImage: "exclamationmark.triangle.fill")
                             .font(.subheadline)
                             .foregroundStyle(.primary)
-                            .accessibilityLabel("Error.  \(err)")
+                            .accessibilityLabel("Error.\u{00A0} \(err)")
                     }
                 }
 
@@ -255,7 +255,7 @@ public struct CreateSlugView: View {
                 }
             } else {
                 guard let data = textContent.data(using: .utf8) else {
-                    errorMessage = "That text could not be saved.  Try again."
+                    errorMessage = "That text could not be saved.\u{00A0} Try again."
                     isSubmitting = false
                     return
                 }

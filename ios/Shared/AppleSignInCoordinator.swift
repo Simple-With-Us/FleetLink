@@ -1,10 +1,11 @@
 import AuthenticationServices
+import Combine
 import CryptoKit
 import Foundation
 import Security
-import SwiftUI
+import UIKit
 
-/// Native Sign in with Apple via `ASAuthorizationAppleIDProvider`.
+/// Apple Sign In and the GitHub/Google web session are not presented.
 ///
 /// The worker implements the Apple *web* flow (`/auth/apple/start` →
 /// `form_post` → `/auth/apple/callback`).  That flow mints its own client
@@ -31,9 +32,9 @@ public final class AppleSignInCoordinator: NSObject, ObservableObject {
             case .notConfigured:
                 return "Sign in with Apple is not available in this version of the app."
             case .providerError(let detail):
-                return detail.isEmpty ? "Apple could not finish signing in.  Try again." : detail
+                return detail.isEmpty ? "Apple could not finish signing in.\u{00A0} Try again." : detail
             case .exchangeUnavailable:
-                return "Sign in with Apple is not available yet.  Use GitHub or Google for now."
+                return "Sign in with Apple is not available yet.\u{00A0} Use GitHub or Google for now."
             case .rejected:
                 return "This account is turned off."
             }

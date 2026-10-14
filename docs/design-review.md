@@ -2,7 +2,7 @@
 
 Reviewed on 14 October 2026.  Surfaces: the public website (home), the signed-in link list and the account-owner list, the instructions and privacy pages, and the iOS app plus App Clip in `ios/`.
 
-Five reviews follow, then one agreed list.  Status is `done` when the change is in this branch, and `deferred` when it was agreed but left for a later change.  Sign-in itself is not redesigned here.  Another change is replacing the current sign-in with passkeys.  Labels and error sentences on the existing forms were updated.  The form fields, the requests they send, and the session cookie were not.
+Five reviews follow, then one agreed list.  Status is `done` when the change is in this branch, and `deferred` when it was agreed but left for a later change.  Merged with main on 14 October 2026.  Passkey accounts from #76 stay, and this branch does not redesign that request flow.  The account card uses plain sentences for creating a passkey and signing in with one.  The operator form under it keeps its fields and requests.  The automation sign-in code stays in Settings.
 
 Security behavior is unchanged.  A request for the old token URL still returns 410.  An HTML upload is still sent as a download.  The limits for a share without an account are still the limits in the worker.  This review does not turn guest sharing back on, and it does not publish a secrets file.
 
@@ -31,7 +31,7 @@ A new person could not tell what to do first, or which numbers to trust.
 - Instructions are a page the worker serves, with a short contents list: website, iPhone, duration, computer, and what people see.  The helper download stays available.  The secrets file is not offered as a download.
 - The iOS tabs were named for the implementation (portal, make slug, artifact viewer).  They are now Links, New link, View, and Settings.  Settings no longer explains storage internals.  It names the two websites the app opens, and it keeps a separate field for a sign-in code used by a shortcut or a script.
 
-What is still awkward: there is no public signup.  The site can only tell someone to use a sign-in code they already have.  Building accounts is a product change, not a copy change.
+What is still awkward: the share form still asks for a sign-in code.  A passkey account is created on the sign-in page.  That request flow belongs to the passkey work on main.
 
 ## Accessibility (WCAG 2.2 AA)
 
@@ -60,9 +60,9 @@ The app read like an internal tool dropped into a tab bar.
 - Time remaining is words ("3 days", "Until you delete it"), not a compact code.  An expiring row uses orange, which holds up on a light background better than yellow.
 - Type uses text styles (body, caption, large title) so Dynamic Type can scale it.  The two leftover fixed point sizes in the viewer were illustration icons.  They now use the large title style.
 - The App Clip still opens the same viewer.  Its footer says you can share a file from the iPhone, and the toolbar buttons have names.
-- Sign in with Apple, GitHub, and Google are unchanged as flows.  The sentences they show on failure are now ordinary sentences.  The automation sign-in code stays in Settings and is labeled as separate from those buttons.
+- Account login is a passkey, kept from main.  The card says to create a passkey or sign in with one, in ordinary sentences.  The automation sign-in code stays in Settings and is labeled as separate from that card.
 
-Deferred: a pass in Simulator at the largest Dynamic Type size, because this environment has no Swift toolchain.  Also deferred: any new sign-in method.
+Deferred: a pass in Simulator at the largest Dynamic Type size, because this environment has no Swift toolchain.
 
 ## Technical writer
 
@@ -95,16 +95,16 @@ Deferred: a second pass by someone who has not seen the worker, and a glossary. 
 | P2 | Give Markdown headings stable ids so a contents link can scroll to the heading. | Done |
 | P2 | iOS: VoiceOver names on icon buttons, selected filter chips, Dynamic Type text styles, orange for "expiring soon," and spoken time remaining.  The folder parser accepts the new file list and the older emoji list.  Expired pages are recognized by the new wording and the old wording. | Done |
 | P2 | Privacy page in plain language, including the crash-report sentence and the rule that HTML downloads. | Done |
-| P2 | Sign-in screens keep their current fields and requests.  Only the labels, the hint, and the failure sentences change. | Done |
+| P2 | Passkey sign-in from main stays.  This branch changes the labels, the hint, and the failure sentences on that card.  The operator form keeps its fields and requests. | Done |
 | P3 | One shared stylesheet and page chrome, so the next edit cannot drift. | Deferred |
 | P3 | Account-owner table as a stacked list on a narrow screen. | Deferred |
 | P3 | A recorded VoiceOver and keyboard pass on a deployed preview, and an iOS Dynamic Type pass in Simulator. | Deferred |
 | P3 | Public account signup.  The product does not have it. | Deferred |
-| P3 | Passkey sign-in.  Another change owns that flow. | Deferred |
+| P3 | Passkey sign-in.  Landed on main in #76 and kept in this merge.  Labels clarified here. | Done |
 | P3 | Showing uploaded HTML as a page in the browser.  HTML stays a download. | Deferred |
 | P3 | Changing the guest limits, or turning guest uploads back on. | Deferred |
 | P3 | A visual rebrand, or splitting the worker bundle back into separate source files. | Deferred |
 
 ## What was checked
 
-`node --check worker/fleetlink-api.mjs` succeeds.  The repository has no unit-test suite.  Swift was not compiled here.  No Swift toolchain is installed in this environment.  Nothing was deployed.
+`node --check worker/fleetlink-api.mjs` succeeds.  `npm test` covers the worker modules from main.  Swift was not compiled here.  No Swift toolchain is installed in this environment.  Nothing was deployed.

@@ -2,21 +2,19 @@ import SwiftUI
 
 public struct SettingsView: View {
     @ObservedObject var session: SessionManager
-    @ObservedObject private var apple: AppleSignInCoordinator
-    @ObservedObject private var webAuth: WebAuthSession
+    @ObservedObject private var passkeys: PasskeyCoordinator
 
     @AppStorage("fleetlink_server_host") private var serverHost: String = "https://fleetlink.online"
 
     public init(session: SessionManager) {
         self.session = session
-        self.apple = AppleSignInCoordinator(owner: session)
-        self.webAuth = WebAuthSession(owner: session)
+        self.passkeys = PasskeyCoordinator(owner: session)
     }
 
     public var body: some View {
         NavigationStack {
             Form {
-                AccountView(session: session, webAuth: webAuth, apple: apple)
+                AccountView(session: session, passkeys: passkeys)
 
                 Section {
                     SecureField("Sign-in code", text: $session.bearerSecret)
@@ -27,7 +25,7 @@ public struct SettingsView: View {
                 } header: {
                     Text("Automation")
                 } footer: {
-                    Text("Only for a script or shortcut that shares for you.  It is separate from Sign in with Apple.  Leave it blank if you only use the buttons above.")
+                    Text("Only for a script or shortcut that shares for you.\u{00A0} It is separate from the passkey sign-in above.\u{00A0} Leave it blank if you only use a passkey.")
                         .font(.caption)
                 }
 

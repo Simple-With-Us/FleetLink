@@ -1,3 +1,16 @@
+import { appleAppSiteAssociation } from "./lib/aasa.mjs";
+import { handleAccountRoutes } from "./lib/account-routes.mjs";
+import { reapCostGuards } from "./lib/cost-guards.mjs";
+import { mustForceAttachment } from "./lib/html-safety.mjs";
+import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
+import { captureWorkerException } from "./lib/sentry-scrub.mjs";
+import { randomHex } from "./lib/bytes.mjs";
+import { applyGrantTtl, lookupAgentToken, tighterCap } from "./lib/tokens.mjs";
+
+function allocateShareId() {
+  return randomHex(16);
+}
+
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -935,10 +948,9 @@ function renderLoginHtml(origin, errorMsg, isLoggedOut) {
       <div style="font-size: 1.75rem;">\u26A1</div>
       <div style="font-weight: 800; font-size: 1.2rem; color: #0f172a;">Fleet<span style="color:var(--primary);">Link</span></div>
     </div>
-    <h1>Sign in</h1>
-    <p>Use the name and password for your account, or paste your sign-in code.</p>
     ${isLoggedOut ? `<div class="msg-box success-box" role="status">You are signed out.</div>` : ""}
     ${errorMsg ? `<div class="msg-box error-box"><strong>Error:</strong> ${escapeHtml(errorMsg)}</div>` : ""}
+    ${passkeyLoginMarkup()}
     <form method="POST" action="/login" id="login-form">
       <div class="form-group">
         <label for="username">Name, email, or sign-in code</label>
@@ -953,9 +965,12 @@ function renderLoginHtml(origin, errorMsg, isLoggedOut) {
         <input type="checkbox" id="remember" name="remember" value="true" checked>
         <label for="remember" style="margin:0;font-weight:normal;cursor:pointer;">Keep me signed in (30 days)</label>
       </div>
-      <button type="submit" id="btn-login-submit">Sign In</button>
+      <button type="submit" id="btn-login-submit">Sign in with operator secret</button>
     </form>
+    </details>
+    ${passkeyLoginScript()}
     <div class="nav-links">
+      <a href="/dashboard">Dashboard</a>
       <a href="/">&larr; FleetLink Home</a>
       <a href="/portal">Your links</a>
       <a href="/privacy">Privacy Policy</a>
@@ -2073,10 +2088,13 @@ function renderInstructionsHtml(origin) {
     <p>A password is optional.&nbsp; Without one, anyone with the link can open it.</p>
 
     <h2 id="computer">From a computer</h2>
-    <p>You can share from a terminal with the <code>fleet-share</code> helper.&nbsp; <a href="/instructions/fleet-share?download=1" download="fleet-share">Download fleet-share</a>, then:</p>
+    <p>You can share from a terminal with the <code>fleet-share</code> helper.&nbsp; <a href="/instructions/fleet-share?download=1" download="fleet-share">Download fleet-share</a>, then set your sign-in code.&nbsp; FleetLink does not offer that code as a download.</p>
     <pre><code>chmod +x fleet-share
+export FLEET_ADMIN_SECRET='your-sign-in-code'
 ./fleet-share notes.md</code></pre>
-    <p>The helper asks for your sign-in code, or reads it from a private file you create yourself.&nbsp; FleetLink does not offer that code as a download.</p>
+    <p>Or point the helper at a private file you create yourself:</p>
+    <pre><code>export FLEETLINK_AUTH_FILE=/path/to/fleet-link-auth.env
+./fleet-share notes.md</code></pre>
     <p>A direct upload uses a header on the request.&nbsp; Replace the code and the file name:</p>
     <pre><code>curl -X PUT "https://fleetlink.online/notes/notes.md" \\
   -T ./notes.md \\
@@ -3767,14 +3785,15 @@ function renderPortalHtml(overview, origin) {
 }
 __name(renderPortalHtml, "renderPortalHtml");
 __name2(renderPortalHtml, "renderPortalHtml");
-var index_default = {
-  async fetch(request, env) {
+async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
     const hostname = url.hostname;
     let key = url.pathname.slice(1);
     const adminSecret = (env.ADMIN_SECRET || env.FLEET_ADMIN_SECRET || "").trim();
     const agentSecret = (env.AGENT_SECRET || env.FLEET_AGENT_SECRET || "").trim();
     const secrets = { adminSecret, agentSecret };
+    const accountResponse = await handleAccountRoutes(request, env, ctx);
+    if (accountResponse) return accountResponse;
     if (request.headers.get("X-Fleet-Auth")) {
       return new Response(JSON.stringify({
         error: "Upload rejected: Legacy 'X-Fleet-Auth' header is retired. Please authenticate using 'X-Fleet-Admin' (admin operations) or 'X-Fleet-Agent' (fleet agents)."
@@ -4000,8 +4019,7 @@ var index_default = {
         return new Response(JSON.stringify({ error: "Upload rejected: Unauthenticated guests cannot choose custom slugs. Please sign in to choose vanity slugs." }), { status: 403, headers: { "Content-Type": "application/json" } });
       }
       if (!slug) {
-        const randHex = Array.from(crypto.getRandomValues(new Uint8Array(3))).map((b) => b.toString(16).padStart(2, "0")).join("");
-        slug = randHex;
+        slug = allocateShareId();
       }
       if (isProtectedKey(slug, role === "admin")) {
         return new Response(JSON.stringify({ error: `Slug "${slug}" is reserved for system assets and routing.` }), { status: 400, headers: { "Content-Type": "application/json" } });
@@ -4351,6 +4369,11 @@ var index_default = {
             }
           }
         }
+        let agentGrant = null;
+        if (!isAdmin && !isAgent) {
+          agentGrant = await lookupAgentToken(request, env);
+          if (agentGrant) isAgent = true;
+        }
         const isGuest = !isAdmin && !isAgent;
         if (isGuest) {
           return unauthorizedJson();
@@ -4358,6 +4381,9 @@ var index_default = {
         const mode = (formData.get("mode") || "").toString().trim();
         const rawTargetUrl = (formData.get("target_url") || formData.get("redirect_url") || formData.get("url") || "").toString().trim();
         if (mode === "redirect" || rawTargetUrl) {
+          if (agentGrant && agentGrant.allowRedirects === false) {
+            return new Response(JSON.stringify({ error: "Upload rejected: This agent token is not permitted to create redirect URLs." }), { status: 403, headers: { "Content-Type": "application/json" } });
+          }
           if (request.headers.get("X-Fleet-Allow-Redirects") === "false" || formData.get("allow_redirects") === "false") {
             return new Response(JSON.stringify({ error: "Upload rejected: This agent token is not permitted to create redirect URLs." }), { status: 403, headers: { "Content-Type": "application/json" } });
           }
@@ -4382,8 +4408,7 @@ var index_default = {
             return new Response(JSON.stringify({ error: "Upload rejected: Unauthenticated guests cannot choose custom slugs. Please sign in or use an agent token." }), { status: 403, headers: { "Content-Type": "application/json" } });
           }
           if (!slug2) {
-            const randHex = Array.from(crypto.getRandomValues(new Uint8Array(3))).map((b) => b.toString(16).padStart(2, "0")).join("");
-            slug2 = randHex;
+            slug2 = allocateShareId();
           }
           if (isProtectedKey(slug2, isAdmin)) {
             return new Response(JSON.stringify({ error: `Slug "${slug2}" is reserved for system assets and routing.` }), { status: 400, headers: { "Content-Type": "application/json" } });
@@ -4414,6 +4439,11 @@ var index_default = {
             if (parsed2 > 183) {
               return new Response(JSON.stringify({ error: `Requested TTL (${parsed2} days) exceeds the allowed maximum of 180 days (6 months) for redirect URLs.` }), { status: 403, headers: { "Content-Type": "application/json" } });
             }
+            const grantedRedirect = applyGrantTtl(formData.get("days"), parsed2, agentGrant);
+            if (grantedRedirect.error) {
+              return new Response(JSON.stringify({ error: grantedRedirect.error }), { status: 403, headers: { "Content-Type": "application/json" } });
+            }
+            parsed2 = grantedRedirect.days;
             expireAt2 = Date.now() + parsed2 * 24 * 60 * 60 * 1e3;
           }
           const password2 = (formData.get("password") || "").toString().trim();
@@ -4460,6 +4490,7 @@ var index_default = {
           return new Response(JSON.stringify({ error: "No files uploaded." }), { status: 400, headers: { "Content-Type": "application/json" } });
         }
         let maxFiles = isAdmin ? 1e3 : isGuest ? GUEST_MAX_FILES : 50;
+        maxFiles = tighterCap(maxFiles, agentGrant?.maxFiles);
         const customMaxFiles = parseInt(request.headers.get("X-Fleet-Max-Files") || "");
         if (!isNaN(customMaxFiles) && customMaxFiles > 0) {
           maxFiles = Math.min(maxFiles, customMaxFiles);
@@ -4469,11 +4500,13 @@ var index_default = {
           return new Response(JSON.stringify({ error: limitMsg }), { status: 400, headers: { "Content-Type": "application/json" } });
         }
         let maxFileBytes = isAdmin ? 300 * 1024 * 1024 : isGuest ? GUEST_MAX_FILE_BYTES : 100 * 1024 * 1024;
+        maxFileBytes = tighterCap(maxFileBytes, agentGrant?.maxFileBytes);
         const customMaxFileMb = parseFloat(request.headers.get("X-Fleet-Max-File-MB") || "");
         if (!isNaN(customMaxFileMb) && customMaxFileMb > 0) {
           maxFileBytes = Math.min(maxFileBytes, customMaxFileMb * 1024 * 1024);
         }
         let maxBatchBytes = isAdmin ? 1024 * 1024 * 1024 : isGuest ? GUEST_MAX_BATCH_BYTES : 500 * 1024 * 1024;
+        maxBatchBytes = tighterCap(maxBatchBytes, agentGrant?.maxTotalBytes);
         const customMaxBatchMb = parseFloat(request.headers.get("X-Fleet-Max-Batch-MB") || "");
         if (!isNaN(customMaxBatchMb) && customMaxBatchMb > 0) {
           maxBatchBytes = Math.min(maxBatchBytes, customMaxBatchMb * 1024 * 1024);
@@ -4506,8 +4539,7 @@ var index_default = {
           return new Response(JSON.stringify({ error: "Upload rejected: Only admins can choose a custom slug." }), { status: 403, headers: { "Content-Type": "application/json" } });
         }
         if (!slug) {
-          const randHex = Array.from(crypto.getRandomValues(new Uint8Array(3))).map((b) => b.toString(16).padStart(2, "0")).join("");
-          slug = randHex;
+          slug = allocateShareId();
         }
         slug = slug.replace(/^\/+|\/+$/g, "").toLowerCase();
         if (slug) slugCaseCache.set(slug, slug);
@@ -4545,6 +4577,11 @@ var index_default = {
           }
           let numDays = parseFloat(days) || 3;
           if (numDays > 7) numDays = 7;
+          const grantedFiles = applyGrantTtl(formData.get("days"), numDays, agentGrant);
+          if (grantedFiles.error) {
+            return new Response(JSON.stringify({ error: grantedFiles.error }), { status: 403, headers: { "Content-Type": "application/json" } });
+          }
+          numDays = grantedFiles.days;
           expireAt = Date.now() + numDays * 24 * 60 * 60 * 1e3;
         }
         const password = formData.get("password") ? String(formData.get("password")).trim() : "";
@@ -4618,7 +4655,7 @@ var index_default = {
     }
     if (request.method === "GET" || request.method === "HEAD") {
       if (key === ".well-known/apple-app-site-association" || key === "apple-app-site-association") {
-        const aasa = {
+        const aasa = appleAppSiteAssociation(env) || {
           applinks: {
             apps: [],
             details: [
@@ -4880,9 +4917,10 @@ var index_default = {
         headers.set("content-type", "application/octet-stream");
         headers.set("content-disposition", `attachment; filename="${filename}"`);
         contentType = "application/octet-stream";
-      } else if (keyLc.endsWith(".html") || keyLc.endsWith(".htm")) {
-        // P0 hotfix 2026-10-13: uploaded HTML must never render inline, even when the
-        // R2 object carries a stored text/html content-type from the uploader.
+      } else if (mustForceAttachment(object.key, headers.get("content-type"))) {
+        // P0 hotfix 2026-10-13, extended for the #75 review: uploaded HTML must never
+        // render inline.  Match the key extension and the stored content type, so a
+        // text/html object named payload.html.bak or notes.xhtml still downloads.
         headers.set("content-type", "application/octet-stream");
         headers.set("content-disposition", `attachment; filename="${filename}"`);
         contentType = "application/octet-stream";
@@ -4951,7 +4989,7 @@ var index_default = {
         return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
       }
       const response = new Response(object.body, { headers });
-      if (contentType && contentType.includes("text/html")) {
+      if (contentType && contentType.includes("text/html") && !mustForceAttachment(object.key, headers.get("content-type"))) {
         return new HTMLRewriter().on("head", {
           element(e) {
             e.append('<meta name="apple-itunes-app" content="app-clip-bundle-id=online.fleetlink.Clip, app-clip-display=card">', { html: true });
@@ -4965,8 +5003,10 @@ var index_default = {
     }
     if (request.method === "PUT") {
       const putAuth = await authenticate(request, secrets);
-      const isAdmin = putAuth.isAdmin;
-      const isAgent = putAuth.isAgent;
+      let isAdmin = putAuth.isAdmin;
+      let isAgent = putAuth.isAgent;
+      const agentGrant = !isAdmin && !isAgent ? await lookupAgentToken(request, env) : null;
+      if (agentGrant) isAgent = true;
       const isGuest = !isAdmin && !isAgent;
       if (isGuest) {
         return new Response("Upload rejected: Authentication required.  Provide a valid X-Fleet-Admin or X-Fleet-Agent header.", {
@@ -4987,6 +5027,9 @@ var index_default = {
       const redirectTarget = (request.headers.get("X-Fleet-Redirect") || request.headers.get("X-Redirect-To") || "").trim();
       const isRedirect = Boolean(redirectTarget);
       if (isRedirect) {
+        if (agentGrant && agentGrant.allowRedirects === false) {
+          return new Response("Upload rejected: This agent token is not permitted to create redirect URLs.", { status: 403 });
+        }
         if (request.headers.get("X-Fleet-Allow-Redirects") === "false") {
           return new Response("Upload rejected: This agent token is not permitted to create redirect URLs.", { status: 403 });
         }
@@ -4994,7 +5037,15 @@ var index_default = {
           return new Response(`Upload rejected: Invalid redirect target URL "${redirectTarget}". Must begin with http:// or https://.`, { status: 400 });
         }
       }
+      if (!isRedirect && agentGrant && tighterCap(1, agentGrant.maxFiles) < 1) {
+        return new Response("Upload rejected: This agent token is not permitted to upload files.", {
+          status: 403,
+          headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" }
+        });
+      }
       let maxFileBytes = isAdmin ? 300 * 1024 * 1024 : isGuest ? GUEST_MAX_FILE_BYTES : 100 * 1024 * 1024;
+      maxFileBytes = tighterCap(maxFileBytes, agentGrant?.maxFileBytes);
+      maxFileBytes = tighterCap(maxFileBytes, agentGrant?.maxTotalBytes);
       const customMaxFileMb = parseFloat(request.headers.get("X-Fleet-Max-File-MB") || "");
       if (!isNaN(customMaxFileMb) && customMaxFileMb > 0) {
         maxFileBytes = Math.min(maxFileBytes, customMaxFileMb * 1024 * 1024);
@@ -5045,6 +5096,9 @@ var index_default = {
           if (!isNaN(customMaxDays) && customMaxDays > 0 && days > customMaxDays) {
             return new Response(`Upload rejected: Requested TTL (${days} days) exceeds custom agent token limit of ${customMaxDays} days.`, { status: 403 });
           }
+          const grantedRedirect = applyGrantTtl(requestedDays, days, agentGrant);
+          if (grantedRedirect.error) return new Response(grantedRedirect.error, { status: 403 });
+          days = grantedRedirect.days;
           expireAt = Date.now() + days * 24 * 60 * 60 * 1e3;
         }
       } else if (isLargeUpload) {
@@ -5089,6 +5143,9 @@ var index_default = {
         if (!isNaN(customMaxDays) && customMaxDays > 0 && days > customMaxDays) {
           return new Response(`Upload rejected: Requested TTL (${days} days) exceeds custom agent token limit of ${customMaxDays} days.`, { status: 403 });
         }
+        const grantedFile = applyGrantTtl(requestedDays, days, agentGrant);
+        if (grantedFile.error) return new Response(grantedFile.error, { status: 403 });
+        days = grantedFile.days;
         expireAt = Date.now() + days * 24 * 60 * 60 * 1e3;
       }
       const customMetadata = {
@@ -5202,6 +5259,22 @@ var index_default = {
       }
     }
     return new Response("Method Not Allowed: Only GET, HEAD, PUT, POST, and DELETE are supported.", { status: 405 });
+  }
+var index_default = {
+  async fetch(request, env, ctx) {
+    try {
+      return await handleRequest(request, env, ctx);
+    } catch (err) {
+      const pending = captureWorkerException(err, request, env);
+      if (ctx && ctx.waitUntil) ctx.waitUntil(pending);
+      else pending.catch(() => {});
+      throw err;
+    }
+  },
+  async scheduled(_event, env, ctx) {
+    const job = reapCostGuards(env);
+    if (ctx && ctx.waitUntil) ctx.waitUntil(job);
+    else await job;
   }
 };
 export {

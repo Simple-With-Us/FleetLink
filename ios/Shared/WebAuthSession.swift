@@ -1,4 +1,7 @@
+/// GitHub and Google sign-in are deferred.  PasskeyCoordinator is the account login.
+/// This type stays so the web-session cookie path can be revived later.
 import AuthenticationServices
+import Combine
 import Foundation
 import WebKit
 
@@ -41,13 +44,13 @@ public final class WebAuthSession: NSObject, ObservableObject {
             case .canceled:
                 return "Sign-in was cancelled."
             case .providerUnavailable:
-                return "Sign-in is not available right now.  Try again later."
+                return "Sign-in is not available right now.\u{00A0} Try again later."
             case .providerError(let detail):
-                return detail.isEmpty ? "Sign-in could not finish.  Try again." : detail
+                return detail.isEmpty ? "Sign-in could not finish.\u{00A0} Try again." : detail
             case .noSessionCookie:
-                return "Sign-in finished without a session.  Try again."
+                return "Sign-in finished without a session.\u{00A0} Try again."
             case .network:
-                return "Could not reach the sign-in service.  Check your connection."
+                return "Could not reach the sign-in service.\u{00A0} Check your connection."
             }
         }
     }
@@ -97,7 +100,7 @@ public final class WebAuthSession: NSObject, ObservableObject {
         self.session = session
         isPresenting = true
         if !session.start() {
-            finish(with: .failure(Failure.providerError("The sign-in window could not open.  Try again.")))
+            finish(with: .failure(Failure.providerError("The sign-in window could not open.\u{00A0} Try again.")))
             return
         }
 

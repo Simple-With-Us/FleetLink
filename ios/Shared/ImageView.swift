@@ -21,7 +21,7 @@ public struct ImageView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .accessibilityLabel("Shared picture")
-                        .accessibilityHint("Pinch to zoom.  Double-tap to zoom in or out.")
+                        .accessibilityHint("Pinch to zoom.\u{00A0} Double-tap to zoom in or out.")
                         .scaleEffect(scale)
                         .offset(offset)
                         .gesture(

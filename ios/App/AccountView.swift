@@ -1,20 +1,15 @@
-import AuthenticationServices
 import SwiftUI
 
-/// The account card: signed out shows the three providers, signed in shows who
-/// you are with a sign-out button.  Sentences use two spaces.
+/// The account card.  Passkeys are the account login.  The automation
+/// sign-in code stays in the field below this card.
 struct AccountView: View {
     @ObservedObject var session: SessionManager
-    @ObservedObject var webAuth: WebAuthSession
-    @ObservedObject var apple: AppleSignInCoordinator
+    @ObservedObject var passkeys: PasskeyCoordinator
 
-    @State private var isSigningIn = false
+    @State private var displayName = ""
+    @State private var email = ""
 
-    /// True while any provider flow is still on screen.  `webAuth.signIn(with:)`
-    /// returns as soon as it starts polling, so the busy state has to follow the
-    /// coordinator rather than the tap, or a second flow could be started on top
-    /// of the first.
-    private var isBusy: Bool { isSigningIn || webAuth.isPresenting || apple.isPresenting }
+    private var isBusy: Bool { passkeys.isPresenting || session.isCheckingSession }
 
     var body: some View {
         Section("Account") {
@@ -32,8 +27,6 @@ struct AccountView: View {
             }
         }
     }
-
-    // MARK: - Signed In
 
     @ViewBuilder
     private func signedIn(_ user: SessionUser) -> some View {
@@ -58,76 +51,54 @@ struct AccountView: View {
                     .foregroundColor(.secondary)
                     .accessibilityIdentifier("accountEmail")
             }
-            Text("Signed in to FleetLink.  This sign-in stays on this device.")
+            Text("Signed in with a passkey.\u{00A0} This sign-in stays on this device.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, 2)
 
         Button(role: .destructive) {
-            Task {
-                isSigningIn = true
-                await session.signOut()
-                isSigningIn = false
-            }
+            Task { await session.signOut() }
         } label: {
-            HStack {
-                if isSigningIn {
-                    ProgressView().controlSize(.small)
-                }
-                Text("Sign out")
-            }
+            Text("Sign out")
         }
         .disabled(isBusy)
         .accessibilityIdentifier("signOutButton")
     }
 
-    // MARK: - Signed Out
-
     @ViewBuilder
     private var signedOut: some View {
-        Text("Sign in to see your links and choose a short name.  This sign-in stays on this device.")
+        Text("Create a passkey, or sign in with one you already have.\u{00A0} FleetLink does not store a password for this account.")
             .font(.caption)
             .foregroundColor(.secondary)
 
-        SignInWithAppleButton(.signIn) { request in
-            request.requestedScopes = [.fullName, .email]
-        } onCompletion: { result in
-            switch result {
-            case .success(let authorization): apple.handle(authorization: authorization)
-            case .failure(let error): apple.handle(error: error)
-            }
-        }
-        .signInWithAppleButtonStyle(.black)
-        .frame(height: 44)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .disabled(isBusy)
-        .accessibilityIdentifier("signInWithAppleButton")
+        TextField("Name", text: $displayName)
+            .textContentType(.name)
+            .accessibilityIdentifier("passkeyDisplayName")
+        TextField("Email (optional)", text: $email)
+            .textContentType(.emailAddress)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .accessibilityIdentifier("passkeyEmail")
 
-        ForEach(WebAuthSession.Provider.allCases, id: \.self) { provider in
-            Button {
-                Task {
-                    isSigningIn = true
-                    do {
-                        try await webAuth.signIn(with: provider)
-                    } catch {
-                        session.report(error: (error as? WebAuthSession.Failure)?.errorDescription
-                            ?? "Sign in with \(provider.displayName) could not start.  Try again.")
-                    }
-                    isSigningIn = false
-                }
-            } label: {
-                HStack {
-                    if isBusy {
-                        ProgressView().controlSize(.small)
-                    }
-                    Text("Continue With \(provider.displayName)")
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .buttonStyle(.bordered)
-            .disabled(isBusy)
-            .accessibilityIdentifier("signInWith\(provider.rawValue.capitalized)")
+        Button {
+            Task { await passkeys.createPasskey(displayName: displayName, email: email) }
+        } label: {
+            Text("Create a passkey")
+                .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.borderedProminent)
+        .disabled(isBusy)
+        .accessibilityIdentifier("createPasskeyButton")
+
+        Button {
+            Task { await passkeys.signIn(email: email) }
+        } label: {
+            Text("Sign in with a passkey")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .disabled(isBusy)
+        .accessibilityIdentifier("signInPasskeyButton")
     }
 }

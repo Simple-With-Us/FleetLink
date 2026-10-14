@@ -136,7 +136,7 @@ public struct PortalView: View {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .font(.subheadline)
                             .foregroundStyle(.primary)
-                            .accessibilityLabel("Error.  \(error)")
+                            .accessibilityLabel("Error.\u{00A0} \(error)")
                     }
                 }
 
@@ -255,7 +255,7 @@ public struct PortalView: View {
         if !searchText.isEmpty || filterMode != .all {
             return "Try a different word, or show every link."
         }
-        return "Use New link to share a file or a web address.  Links you make on the website show up here after you sign in."
+        return "Use New link to share a file or a web address.\u{00A0} Links you make on the website show up here after you sign in."
     }
 
     private func renewShare(_ share: PortalShare) {
@@ -365,7 +365,7 @@ private struct ShareRowView: View {
                             .font(.caption2.bold())
                     }
                     .foregroundStyle(share.isExpiringSoon ? Color.orange : Color.secondary)
-                    .accessibilityLabel(share.isExpiringSoon ? "Expires soon.  \(share.timeRemainingString)" : share.timeRemainingString)
+                    .accessibilityLabel(share.isExpiringSoon ? "Expires soon.\u{00A0} \(share.timeRemainingString)" : share.timeRemainingString)
 
                     if let renewals = share.renewals_used, renewals > 0 {
                         Text("\(renewals) renewal\(renewals == 1 ? "" : "s")")

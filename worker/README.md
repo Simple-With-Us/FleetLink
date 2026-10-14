@@ -14,7 +14,9 @@ This is the esbuild bundle of the original `fleetlink-legacy` JavaScript codebas
 
 ## Editing
 
-The bundle is readable, non-minified JS — edit it directly for small changes.  For larger work, reconstructing the original multi-file source from this bundle is the durable fix, but that has not been done yet.
+Small fixes still land in `fleetlink-api.mjs`.  Account sign-in, the `/dashboard` page, team lookup, cost-guard reaping, and Sentry scrubbing live in `worker/lib/` and are imported by the bundle.  `scripts/bundle-worker.mjs` produces the single module `scripts/deploy.sh` uploads.  The account code is not deployed until the approvals in `DEPLOY.md` are done.
+
+The file was byte-for-byte identical to production on 2026-10-13.  Later commits diverge on purpose.  Do not "fix" that by uploading this tree until `DEPLOY.md` is followed.
 
 ## Verifying against production
 
