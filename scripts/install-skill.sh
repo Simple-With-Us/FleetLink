@@ -254,7 +254,7 @@ install_target() {
   fi
   if [ -L "$path" ]; then
     rm -f "$path"
-  elif [ -e "$path" ] && { [ ! -d "$path" ] || [ ! -f "$path/.fleetlink-skill-managed" ]; }; then
+  elif [ -e "$path" ]; then
     backup_real "$name" "$path"
   fi
   copy_into "$path"
@@ -336,11 +336,12 @@ add_target codex "$HOME/.codex/skills/fleetlink"
 add_target grok "$HOME/.grok/skills/fleetlink"
 add_target agents "$HOME/.agents/skills/fleetlink"
 
-WORKFLOWS_DIR=${FLEETLINK_SKILL_WORKFLOWS_DIR:-/home/box/agent-data/workflows}
-if [ -d "$WORKFLOWS_DIR" ]; then
-  add_target workflows "$WORKFLOWS_DIR/fleetlink-mcp-cli"
+if [ -n "${FLEETLINK_SKILL_WORKFLOWS_DIR:-}" ] && [ -d "$FLEETLINK_SKILL_WORKFLOWS_DIR" ]; then
+  add_target workflows "$FLEETLINK_SKILL_WORKFLOWS_DIR/fleetlink-mcp-cli"
+elif [ -n "${FLEETLINK_SKILL_WORKFLOWS_DIR:-}" ]; then
+  emit skipped workflows - "parent missing $FLEETLINK_SKILL_WORKFLOWS_DIR"
 else
-  emit skipped workflows - "parent missing $WORKFLOWS_DIR"
+  emit skipped workflows - "FLEETLINK_SKILL_WORKFLOWS_DIR unset"
 fi
 
 while IFS=$'\t' read -r name path; do

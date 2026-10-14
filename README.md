@@ -31,7 +31,7 @@ Until 2026-10-13 this repo held a TypeScript rewrite (D1 `agent_tokens`, R2 `FIL
 
 ## CLI and agent skill
 
-`cli/fleet-share` uploads with `X-Fleet-Admin` (default) or `X-Fleet-Agent` (`--agent`).  It reads `KEY=value` lines from `~/.secrets/fleet-link-auth.env` or `~/.secrets/fleet-share-auth.env` (full search order, TTL caps, list, and delete are in `skills/fleetlink/SKILL.md`).  The command never prints the secret.
+`cli/fleet-share` uploads with `X-Fleet-Admin` (default) or `X-Fleet-Agent` (`--agent`).  It reads `FLEET_ADMIN_SECRET` or `FLEET_AGENT_SECRET` from the environment, or `KEY=value` lines from `FLEETLINK_AUTH_FILE` or `./fleet-link-auth.env` (full order, TTL caps, list, and delete are in `skills/fleetlink/SKILL.md`).  The command never prints the secret.
 
 Install the skill from a checkout:
 
@@ -49,13 +49,13 @@ fleet-share skill update
 - `~/.codex/skills/fleetlink`
 - `~/.grok/skills/fleetlink`
 - `~/.agents/skills/fleetlink`
-- `/home/box/agent-data/workflows/fleetlink-mcp-cli` when `/home/box/agent-data/workflows` exists
+- `$FLEETLINK_SKILL_WORKFLOWS_DIR/fleetlink-mcp-cli` when `$FLEETLINK_SKILL_WORKFLOWS_DIR` is set and that directory exists
 
-Parent directories are created.  A stale symlink is replaced.  A real directory in the way is moved to `<path>.bak.<UTC timestamp>`.
+Parent directories are created.  A stale symlink is replaced.  A real file or directory in the way, including a managed copy whose files differ, is moved to `<path>.bak.<UTC timestamp>`.
 
 `--copy` copies every target (`rsync -a --delete`, or `cp -a` when `rsync` is missing).  `FLEETLINK_SKILL_COPY_TARGETS` (comma or space separated names: `claude`, `cursor`, `codex`, `grok`, `agents`, `workflows`) copies those targets and leaves the rest as symlinks.  If the platform cannot follow symlinks, every target is copied.  `FLEETLINK_SKILL_SYMLINKS_OK=0` forces that fallback.
 
-Outside a checkout, `fleet-share skill install` downloads the skill and the installer from `https://raw.githubusercontent.com/Simple-With-Us/FleetLink/main` into `~/.cache/fleetlink` (`FLEETLINK_SKILL_RAW_BASE` and `FLEETLINK_SKILL_CACHE` override those) and installs from the cache.
+Outside a checkout, `fleet-share skill install` downloads the skill and the installer from a commit pinned in `cli/fleet-share` (`FLEETLINK_SKILL_GIT_SHA` or `FLEETLINK_SKILL_RAW_BASE` override the source) into `~/.cache/fleetlink` (`FLEETLINK_SKILL_CACHE` overrides the cache).  It checks SHA-256 pins before it runs the installer and refuses a mismatch.
 
 Symlinks track this checkout, so `git pull` is enough to update them.  Copies need a refresh.  Install the hook once per clone:
 

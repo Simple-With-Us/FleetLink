@@ -16,31 +16,30 @@ FleetLink hosts a file or a folder at a short link on `https://fleetlink.online`
 
 This repo does not ship a FleetLink MCP server.  The live worker has no `/mcp` route and no tool schema.  The sibling `fleetlink-legacy` tree does not either.  Its tests use the labels "MCP request shape", `share_file`, and `share_directory` for ordinary HTTP: `PUT` with `X-Fleet-Agent` or `X-Fleet-Admin`, and `POST /api/portal/delete` with those headers or `Authorization: Bearer`.
 
-`~/.local/bin/botfleet-mcp`, when present, is a stdio bridge to BotFleet at `https://botfleetadmin.jays.services/mcp/sse`.  It reads `SEAT_MCP_TOKEN` from `~/.secrets/seat-mcp.env`.  That bridge is not FleetLink.  Do not send FleetLink secrets to it.
+`~/.local/bin/botfleet-mcp`, when present, is a stdio bridge to BotFleet at `https://botfleetadmin.jays.services/mcp/sse`.  It reads `SEAT_MCP_TOKEN` from that bridge's own environment.  That bridge is not FleetLink.  Do not send FleetLink secrets to it.
 
 The website bullet "Full API, CLI, and MCP access" is page copy.  It does not correspond to an endpoint in the worker.  Use the CLI and the HTTPS API below.
 
 ## Auth
 
-Never print, log, or commit a secret value.  Name the file and the variable only.
+Never print, log, or commit a secret value.  Name the variable only.
 
-The CLI reads the first file that exists, in this order, and stops.  An empty file blocks the later paths.
+The CLI uses the first source that yields a value:
 
-1. `$HOME/.secrets/fleet-link-auth.env`
-2. `$HOME/.secrets/fleet-share-auth.env`
-3. `/Users/jay/.secrets/fleet-link-auth.env`
-4. `/home/box/.secrets/fleet-share-auth.env`
-5. `./fleet-link-auth.env`
-6. `./.fleet-link-auth.env`
+1. The environment.  Default uploads read `FLEET_ADMIN_SECRET`, then `ADMIN_SECRET`, then `FLEET_AUTH_SECRET`, then `AUTH_SECRET`.  `--agent` reads `FLEET_AGENT_SECRET`, then `AGENT_SECRET`.
+2. `FLEETLINK_AUTH_FILE`, when that variable is set.  The file is `KEY=value`.  A missing path is an error.  The CLI does not open another file after it.
+3. `./fleet-link-auth.env`, then `./.fleet-link-auth.env`, in the current directory.  The first file that exists wins, even when the matching key is empty.
 
-Lines are `KEY=value`.  A leading `export` is ignored by the CLI and will not match.  Surrounding single or double quotes are stripped.  The first matching line wins.
+The CLI does not search home directories for a credential file.  Export the variable in the shell that runs the CLI, or set `FLEETLINK_AUTH_FILE` to a path you choose.
 
-| CLI flag | Header sent | Key names (first matching line) |
+Lines are `KEY=value`.  A leading `export` is ignored by the CLI and will not match.  One surrounding pair of single or double quotes is stripped.  Quotes inside the value stay.  The first matching line wins.
+
+| CLI flag | Header sent | Key names (first matching env var or line) |
 | --- | --- | --- |
 | default | `X-Fleet-Admin` | `FLEET_ADMIN_SECRET`, `ADMIN_SECRET`, `FLEET_AUTH_SECRET`, `AUTH_SECRET` |
 | `--agent` | `X-Fleet-Agent` | `FLEET_AGENT_SECRET`, `AGENT_SECRET` |
 
-Keep the file mode at `600`.  The CLI does not enforce that.
+If you use a file, keep its mode at `600`.  The CLI does not enforce that.
 
 The worker compares those values to its secret bindings `ADMIN_SECRET` or `FLEET_ADMIN_SECRET`, and `AGENT_SECRET` or `FLEET_AGENT_SECRET`.  There is one operator admin secret and one operator agent secret.  `worker/lib/tokens.mjs` also accepts `Authorization: Bearer fla_...` against the D1 `agent_tokens` table once that database is provisioned.  That path is not live until `DEPLOY.md` is followed.  The CLI does not send an `fla_` token.  Do not invent one.
 
@@ -73,14 +72,14 @@ What the flags do:
 - `--slug NAME` and exactly one file: `PUT /NAME` (the bytes live at the slug itself, not at `/NAME/filename`).
 - `--slug NAME` with a directory or several files: batch id is `NAME`.  A directory is uploaded as `/NAME/<dirname>/<relative-path>`.  A file in a multi-file batch is `/NAME/<filename>`.
 - `--id HASH`: batch id, always under `/HASH/<filename>`.  It does not use the single-file slug shortcut.
-- No id and no slug: batch id is `openssl rand -hex 3` (6 hex characters).
+- No id and no slug: batch id is `openssl rand -hex 16` (32 hex characters, 128 bits).
 - `--password`: `X-Fleet-Password`.  The flag is visible in the process list.
 - `--preview NAME`: `X-Fleet-Preview` metadata.  It does not upload that image.  `NAME` is the file name the viewer should find beside the share, such as `cover.png`, and only if that file is already part of the upload.
 - The CLI does not implement `--title` or `--redirect`.  Use curl for `X-Fleet-Title`, `X-Fleet-Description`, and `X-Fleet-Redirect`.
 
 Before it sends anything, the CLI rejects a file over 100 MB and a batch over 500 MB.  Those are the agent caps.  An admin who needs the worker's 300 MB / 1 GB caps must use curl.  The CLI will not send the larger body.
 
-`fleet-share skill install` and `fleet-share skill update` do the same thing: run `scripts/install-skill.sh` from this checkout when the script can see it (including when `cli/fleet-share` is a symlink into the checkout, or `FLEETLINK_REPO_ROOT` points at it).  Outside a checkout, they download `skills/fleetlink/SKILL.md` and `scripts/install-skill.sh` from `FLEETLINK_SKILL_RAW_BASE` (default `https://raw.githubusercontent.com/Simple-With-Us/FleetLink/main`) into `$FLEETLINK_SKILL_CACHE` (default `$HOME/.cache/fleetlink`) and install from that cache.  Skill install does not read the auth file.
+`fleet-share skill install` and `fleet-share skill update` do the same thing: run `scripts/install-skill.sh` from this checkout when the script can see it (including when `cli/fleet-share` is a symlink into the checkout, or `FLEETLINK_REPO_ROOT` points at it).  Outside a checkout, they download `skills/fleetlink/SKILL.md` and `scripts/install-skill.sh` from a pinned commit (`FLEETLINK_SKILL_GIT_SHA`, default baked into `cli/fleet-share`) at `https://raw.githubusercontent.com/Simple-With-Us/FleetLink/<commit>`.  `FLEETLINK_SKILL_RAW_BASE` replaces that whole base URL.  The CLI checks each downloaded file against a pinned SHA-256 (`FLEETLINK_SKILL_MD_SHA256` and `FLEETLINK_INSTALLER_SHA256`) and refuses to run `install-skill.sh` on a mismatch.  Files land in `$FLEETLINK_SKILL_CACHE` (default `$HOME/.cache/fleetlink`).  Skill install does not read the auth file.
 
 The copy served by the website at `/instructions/fleet-share` is an object in storage.  It can lag this repo.  Prefer `cli/fleet-share`.
 
@@ -90,7 +89,7 @@ Authenticated `PUT /<key>` stores one object.  Admin and agent may both choose t
 
 A successful PUT body is plain text: `Successfully uploaded to <url>` and `(Expires: <ISO-8601 or Never>)`.
 
-`POST /api/upload` is multipart form data (`files`, optional `slug`, `days`, `password`, `title`, `preview_image`, `token` or `secret`).  On this route only an admin may pass `slug`.  An agent receives `403` and `Only admins can choose a custom slug.`  A missing slug becomes 6 random hex characters.  JSON on success: `success`, `url`, `slug`, `count`, `expires`.
+`POST /api/upload` is multipart form data (`files`, optional `slug`, `days`, `password`, `title`, `preview_image`, `token` or `secret`).  On this route only an admin may pass `slug`.  An agent receives `403` and `Only admins can choose a custom slug.`  A missing slug is allocated by the worker as 32 random hex characters (128 bits).  JSON on success: `success`, `url`, `slug`, `count`, `expires`.
 
 `POST /api/redirect` with JSON `{"url":"https://...","slug":"name","days":30}` creates a redirect object.  Admin and agent may both choose `slug`.  `PUT /<slug>` with `X-Fleet-Redirect: https://...` (alias `X-Redirect-To`) does the same.  The destination must be `http` or `https` and at most 2048 characters.  `X-Fleet-Allow-Redirects: false` rejects redirect creation.  A host such as `notes.fleetlink.online/path` is stored under the key `notes/path`.  The labels `www`, `api`, `admin`, and `portal` are not remapped.
 
@@ -131,7 +130,7 @@ A preview image attached as `preview_image` on `POST /api/upload` must be 5 MB o
 
 ## Examples
 
-Admin file, 3-day link, secret stays in the file:
+Admin file, 3-day link, secret stays in the environment:
 
 ```bash
 fleet-share notes.md
@@ -149,13 +148,9 @@ Admin link with no expiry (worker accepts `forever` only for admin, and only at 
 fleet-share --slug handbook --forever ./handbook
 ```
 
-The same upload with curl.  Source the env file in the shell you already trust.  Do not echo the variable.
+The same upload with curl.  Export the variable in the shell you already trust.  Do not echo it.
 
 ```bash
-set -a
-. "$HOME/.secrets/fleet-link-auth.env"
-set +a
-
 curl -sS -X PUT "https://fleetlink.online/sprint-notes/notes.md" \
   -T notes.md \
   -H "X-Fleet-Agent: ${FLEET_AGENT_SECRET}" \
@@ -216,15 +211,15 @@ Default targets, each a symlink to `skills/fleetlink`:
 - `$HOME/.codex/skills/fleetlink`
 - `$HOME/.grok/skills/fleetlink`
 - `$HOME/.agents/skills/fleetlink`
-- `/home/box/agent-data/workflows/fleetlink-mcp-cli` only when `/home/box/agent-data/workflows` exists (`FLEETLINK_SKILL_WORKFLOWS_DIR` overrides that parent)
+- `$FLEETLINK_SKILL_WORKFLOWS_DIR/fleetlink-mcp-cli` only when `$FLEETLINK_SKILL_WORKFLOWS_DIR` is set and that directory exists
 
-The installer creates parent directories.  A symlink is replaced when it points somewhere else.  A real directory or file in the way is moved to `<path>.bak.<UTC timestamp>` and then replaced.  A second run does not create another backup once the target is the symlink or the managed copy.
+The installer creates parent directories.  A symlink is replaced when it points somewhere else.  A real file or directory in the way, including a managed copy whose files differ, is moved to `<path>.bak.<UTC timestamp>` before the new install.  A matching managed copy is left in place.  A second run does not create another backup once the target is the symlink or a matching managed copy.
 
 `--copy` copies every target (`rsync -a --delete` when `rsync` exists, otherwise `cp -a`).  Copied trees contain `.fleetlink-skill-managed`.  A later copy updates that tree in place.
 
 `FLEETLINK_SKILL_COPY_TARGETS` selects extra copy targets while the others stay symlinks.  Use short names (`claude`, `cursor`, `codex`, `grok`, `agents`, `workflows`) or the destination path.  Commas or spaces both work.  When the OS cannot create or follow a symlink, every target is copied.  `FLEETLINK_SKILL_SYMLINKS_OK=0` forces that fallback.  `FLEETLINK_SKILL_SYMLINKS_OK=1` skips the probe and keeps symlink mode.
 
-`--check` prints one line per target and writes nothing: `ok`, `missing`, `stale`, `foreign`, or `skipped`.  It exits 1 when a selected target is not `ok`.  A missing workflows parent is `skipped` and does not fail.
+`--check` prints one line per target and writes nothing: `ok`, `missing`, `stale`, `foreign`, or `skipped`.  It exits 1 when a selected target is not `ok`.  An unset `FLEETLINK_SKILL_WORKFLOWS_DIR`, or a missing workflows parent, is `skipped` and does not fail.
 
 `--copy-targets-only` updates copy targets and prints `skipped` for symlink targets.  `scripts/hooks/post-merge` runs that mode.  `scripts/hooks/install.sh` links it to `.git/hooks/post-merge` (an existing real hook file is backed up first).  A symlink install needs no hook: `git pull` updates the checkout the link points at.  A copy install needs the hook, or `fleet-share skill update`, to pick up new skill text.
 
