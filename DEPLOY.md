@@ -6,17 +6,17 @@ This is the approval list for putting FL-1 on `fleetlink-api`.  Nothing in this 
 
 A passkey is bound to one relying party ID.  `fleetlink.online` and `fleetlink.app` are different registrable domains, so one passkey cannot be valid on both.
 
-Recommended choice: **RP ID `fleetlink.app`**, origins `https://fleetlink.app`.  That is the account host.  Share HTML is served on `fleetlink.online`, and the session cookie should not be issued there.  The iOS app reads `FleetLinkAccountOrigin` (default `https://fleetlink.app`) and the worker allowlist must match.
+**Decision: RP ID `fleetlink.online`, origin `https://fleetlink.online`.**  `ios/project.yml` sets `FleetLinkAccountOrigin` to `https://fleetlink.online`.  The worker allowlist must match that origin.  Ship an app build from this spec before anyone creates a passkey.
 
-The other choice is RP ID `fleetlink.online` with origin `https://fleetlink.online`.  If you pick that, change `FleetLinkAccountOrigin` in `ios/project.yml` and ship an app build before anyone creates a passkey.  Do not list both origins unless you have accepted that a ceremony on the share host can set a session cookie there.
+Share HTML and the account ceremony both use `fleetlink.online`.  A session cookie from that ceremony is scoped to that host.  The origin list is the single origin `https://fleetlink.online`.  Adding `https://fleetlink.app` as well would let a ceremony on the other registrable domain set a session cookie there, and one passkey still cannot be valid on both.
 
-Set these Infisical values to the choice you approve:
+Set these Infisical values to the decision:
 
-- `WEBAUTHN_RP_ID`
-- `WEBAUTHN_ORIGINS` (comma-separated, exact `https://` origins)
+- `WEBAUTHN_RP_ID` = `fleetlink.online`
+- `WEBAUTHN_ORIGINS` = `https://fleetlink.online`
 - `WEBAUTHN_RP_NAME` (optional, default `FleetLink`)
 
-Associated Domains already include `webcredentials:fleetlink.online` and `webcredentials:fleetlink.app`, so either choice can succeed once the app is installed.  The server still accepts only the configured origin list.
+Associated Domains already include `webcredentials:fleetlink.online` and `webcredentials:fleetlink.app`.  The server still accepts only the configured origin list.  `SessionManager` reads `FleetLinkAccountOrigin` from the built Info.plist.  When that key is absent the code fallback is `https://fleetlink.app`, so the build that ships has to be generated from this project spec.
 
 ## Approvals and secrets
 
@@ -39,13 +39,13 @@ Associated Domains already include `webcredentials:fleetlink.online` and `webcre
 
 ## Order of operations
 
-1. Approve the RP ID and origin list above.
+1. The RP ID decision above is `fleetlink.online` with origin `https://fleetlink.online`.  Set the Infisical values to that before any passkey is created.
 2. Enable R2 on the dedicated account when you want uploads.  Auth can ship before that.  HTML attachment still needs an end-to-end check once a real object can be stored.
 3. `bash scripts/provision-d1.sh` and record the printed database id as `D1_DATABASE_ID`.
 4. Put the secrets in Infisical.  Confirm none of them are committed.
 5. `FLEETLINK_DEPLOY=1 bash scripts/deploy.sh`
 6. Hit `GET /api/auth/token` and expect 410.  Delete a share with no credentials and expect 401.  Upload an `.html` file and a non-html name with `Content-Type: text/html` and expect `application/octet-stream` plus `Content-Disposition: attachment`.
-7. Create one passkey on `https://<rp-id>` and open `/dashboard`.
+7. Create one passkey on `https://fleetlink.online` and open `/dashboard`.
 
 ## Follow-ups, not in this build
 

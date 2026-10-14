@@ -102,7 +102,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         ITSAppUsesNonExemptEncryption: false
         SentryDSN: $(SENTRY_DSN)
-        FleetLinkAccountOrigin: https://fleetlink.app
+        FleetLinkAccountOrigin: https://fleetlink.online
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
