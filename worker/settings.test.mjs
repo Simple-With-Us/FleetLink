@@ -350,6 +350,20 @@ test("settings writes are conditional, including the first save and a clear", as
   assert.equal(shares.objects.has("settings:overrides"), true);
 });
 
+test("writeOverrides does not read settings again before the conditional put", async () => {
+  const { env, shares } = testEnv();
+  const originalGet = shares.get.bind(shares);
+  let reads = 0;
+  shares.get = async (key) => {
+    if (key === "settings:overrides") reads += 1;
+    return originalGet(key);
+  };
+  const saved = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 4 } }, "0"), env));
+  assert.equal(saved.status, 200);
+  // Request materialization plus the patch read.  writeOverrides must not add another.
+  assert.equal(reads, 2);
+});
+
 test("an R2 precondition failure is a conflict and a storage error is not", async () => {
   const { env, shares } = testEnv();
   const first = await readJson(await worker.fetch(admin("PUT", { values: { guest_max_files: 4 } }, "0"), env));

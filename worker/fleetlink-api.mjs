@@ -4432,11 +4432,6 @@ __name2(readSettingsRecord, "readSettingsRecord");
 async function writeOverrides(env, overrides, record) {
   const ns = env && env.FLEET_SHARES;
   if (!ns || typeof ns.put !== "function") throw new Error("storage unavailable");
-  const current = await readSettingsRecord(env);
-  if (current.version !== record.version || current.exists !== record.exists || current.etag !== record.etag) {
-    invalidateSettingsCache(env);
-    throw settingsConflict();
-  }
   const version = record.version + 1;
   const payload = blankBag();
   payload._v = version;
