@@ -16,7 +16,7 @@ Set these Infisical values to the decision:
 - `WEBAUTHN_ORIGINS` = `https://fleetlink.online`
 - `WEBAUTHN_RP_NAME` (optional, default `FleetLink`)
 
-Associated Domains already include `webcredentials:fleetlink.online` and `webcredentials:fleetlink.app`.  The server still accepts only the configured origin list.  `SessionManager` reads `FleetLinkAccountOrigin` from the built Info.plist.  When that key is absent the code fallback is `https://fleetlink.app`, so the build that ships has to be generated from this project spec.
+Associated Domains already include `webcredentials:fleetlink.online` and `webcredentials:fleetlink.app`.  The server still accepts only the configured origin list.  `SessionManager` reads `FleetLinkAccountOrigin` from the built Info.plist.  When that key is absent the code fallback is `https://fleetlink.online`.  The checked-in plist and `ios/project.yml` both set that key, and XcodeGen keeps it when the project is regenerated.
 
 ## Approvals and secrets
 

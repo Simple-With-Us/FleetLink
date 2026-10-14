@@ -198,7 +198,7 @@ private struct Ceremony: Decodable {
         let rp: RelyingParty?
         let rpId: String?
         let user: User?
-        var relyingPartyId: String { rp?.id ?? rpId ?? "fleetlink.app" }
+        var relyingPartyId: String { rp?.id ?? rpId ?? "fleetlink.online" }
         struct RelyingParty: Decodable { let id: String }
         struct User: Decodable { let id: String; let name: String; let displayName: String }
     }
