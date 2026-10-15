@@ -26,7 +26,8 @@ export const RESERVED_SLUGS = new Set([
   "terms", "instructions", "help", "intro", "docs", "about", "support", "security", "billing", "app",
   "oauth", ".well-known", "well-known", "apple-app-site-association", "robots.txt", "favicon.ico",
   "preview.png", "preview-locked.png", "preview.jpg", "cover.png", "og-image.png", "share-to-fleetlink.shortcut",
-  "index.html", "www", "fleetlink", "invite", "join", "new", "upload", "links", "shares", "teams", "tokens", "users"
+  "index.html", "www", "fleetlink", "invite", "join", "new", "upload", "links", "shares", "teams", "tokens", "users",
+  "agents", "features", "pricing"
 ]);
 
 const SLUG = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9_])?$/;

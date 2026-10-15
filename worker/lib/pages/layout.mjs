@@ -27,10 +27,11 @@ function initials(name) {
 function navLinks(principal, active) {
   const link = (href, label, key) => `<a href="${href}"${active === key ? ' aria-current="page"' : ""}>${label}</a>`;
   if (!principal) {
-    return `${link("/instructions", "How It Works", "instructions")}${link("/login", "Sign In", "login")}<a class="button" href="/login#signup">Create Account</a>`;
+    return `${link("/#features", "Features", "features")}${link("/agents", "For Agents", "agents")}${link("/instructions", "How It Works", "instructions")}${link("/login", "Sign In", "login")}<a class="button" href="/login#signup">Create Account</a>`;
   }
   const items = [link("/dashboard", "Dashboard", "dashboard")];
   if (principal.isAdmin) items.push(link("/admin", "Admin", "admin"));
+  items.push(link("/agents", "For Agents", "agents"));
   items.push(link("/instructions", "Help", "instructions"));
   const name = principal.user?.display_name || "Account";
   items.push(`<a class="who" href="/dashboard#account" title="Your account"><span class="avatar" aria-hidden="true">${escapeHtml(initials(name))}</span><span>${escapeHtml(name)}</span></a>`);
@@ -61,7 +62,7 @@ ${head}
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
 <main id="main"${fullBleed ? "" : ' class="wrap"'}>${body}</main>
-<footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : '<a href="/login">Sign In</a><a href="/login#signup">Create Account</a>'}<a href="/instructions">How It Works</a><a href="/privacy">Privacy</a><a href="mailto:support@fleetlink.online">Support</a></nav></div></footer>
+<footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : '<a href="/login">Sign In</a><a href="/login#signup">Create Account</a>'}<a href="/#features">Features</a><a href="/agents">For Agents</a><a href="/instructions">How It Works</a><a href="/privacy">Privacy</a><a href="mailto:support@fleetlink.online">Support</a></nav></div></footer>
 ${scriptTags}
 </body>
 </html>`;

@@ -73,6 +73,10 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     assert.equal(await page.locator('header a[href="/login"]').count(), 1);
     await settle();
     await page.screenshot({ path: join(shots, "00-landing.png"), fullPage: true });
+    await page.click('header a[href="/agents"]');
+    await page.waitForURL("**/agents");
+    await page.waitForSelector("#mcp pre");
+    await page.screenshot({ path: join(shots, "00-agents.png"), fullPage: true });
     await page.click('header a[href="/login"]');
     await page.waitForURL("**/login");
     await settle();
