@@ -19,7 +19,7 @@
   ],
   "r2_buckets": [{ "binding": "FLEET_SHARES", "bucket_name": "fleet-shares" }],
   // The worker creates and migrates its own tables (worker/lib/schema.mjs).
-  "d1_databases": [{ "binding": "DB", "database_name": "fleetlink", "database_id": "85ef083e-0000-0000-0000-000000000000" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "fleetlink", "database_id": "85ef083e-9435-49c5-8314-404db547792d" }],
   "triggers": { "crons": ["*/15 * * * *"] },
   "vars": {
     "WEBAUTHN_RP_ID": "fleetlink.online",

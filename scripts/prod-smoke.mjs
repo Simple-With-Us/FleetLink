@@ -59,7 +59,8 @@ async function main() {
   check("health is ok", health.status === 200 && health.data.ok === true, JSON.stringify(health.data));
   console.log(`     release ${health.headers.get("x-fleet-release") || "unknown"}, schema ${health.data.schema}`);
 
-  check("old token endpoint is gone", (await http("GET", "/api/auth/token")).status === 410);
+  // The worker answers 410; the production zones also block this path at the edge (403).
+  check("old token endpoint is closed", [403, 410].includes((await http("GET", "/api/auth/token")).status));
   check("anonymous delete is refused", (await http("DELETE", "/api/shares/anything")).status === 401);
   check("anonymous upload is refused", (await http("PUT", `/smoke-anon-${run}/x.txt`, { body: "x", headers: { "content-type": "text/plain" } })).status === 401);
   check("shared agent secret is retired", (await http("GET", "/api/me", { headers: { "x-fleet-agent": "x" } })).status === 401);
