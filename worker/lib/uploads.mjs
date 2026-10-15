@@ -20,13 +20,13 @@ export const UPLOAD_SECRET = /^flu_[0-9a-f]{64}$/;
 export const UPLOAD_TTL_DEFAULT_SECONDS = 15 * 60;
 export const UPLOAD_TTL_MAX_SECONDS = 30 * 60;
 
-/** What a caller may ask of an upload URL.  Extra keys (a tool's slug or title) are dropped. */
+/** What a caller may ask of an upload URL.  Unknown keys are a 400, so a misspelled field is never lost. */
 export const UploadGrantInput = z.object({
   path: z.string().min(1).max(512),
   content_type: z.string().max(200).nullable().optional(),
   max_bytes: z.number().int().positive().nullable().optional(),
   ttl_seconds: z.number().int().positive().nullable().optional()
-}).strip();
+}).strict();
 
 /** Mint a one-time PUT URL for `path` in a share the principal can edit. */
 export async function createUploadGrant(env, principal, share, input, apiOrigin) {

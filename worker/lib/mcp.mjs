@@ -479,7 +479,8 @@ async function toolUploadUrl(data, ctx) {
   }
   let upload;
   try {
-    upload = await createUploadGrant(ctx.env, ctx.principal, share, data, requestOrigin(ctx));
+    const { path, content_type: contentType, max_bytes: maxBytes, ttl_seconds: ttl } = data;
+    upload = await createUploadGrant(ctx.env, ctx.principal, share, { path, content_type: contentType, max_bytes: maxBytes, ttl_seconds: ttl }, requestOrigin(ctx));
   } catch (err) {
     if (created) await purgeShare(ctx.env, share).catch(() => {});
     throw err;

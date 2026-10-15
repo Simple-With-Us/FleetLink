@@ -134,6 +134,7 @@ test("one-time upload URLs: mint with edit access, use once, within size and tim
   assert.equal((await callJson(env, "POST", "/api/shares/drop-box/upload-url", { auth: bob, json: { path: "x", ttl_seconds: 7200 } })).status, 400);
   assert.equal((await callJson(env, "POST", "/api/shares/drop-box/upload-url", { auth: bob, json: { path: "x", max_bytes: 1024 ** 4 } })).status, 400);
   assert.equal((await callJson(env, "POST", "/api/shares/drop-box/upload-url", { auth: bob, json: { path: "../x" } })).status, 400);
+  assert.equal((await callJson(env, "POST", "/api/shares/drop-box/upload-url", { auth: bob, json: { path: "x", ttlSeconds: 60 } })).status, 400);
 
   // Access is checked again at upload time: a grant dies with the access behind it.
   const later = (await callJson(env, "POST", "/api/shares/drop-box/upload-url", { auth: carol, json: { path: "late.txt" } })).data.upload;

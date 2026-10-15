@@ -177,7 +177,7 @@ export function shareRoutes(router) {
   router.on("POST", "/api/shares/:slug/upload-url", async (ctx) => {
     const principal = await ctx.auth();
     const { share } = await loadShareFor(ctx.env, principal, ctx.params.slug, "edit");
-    const input = parseWith(UploadGrantInput.strict(), await readBody(ctx.request));
+    const input = parseWith(UploadGrantInput, await readBody(ctx.request));
     return json({ upload: await createUploadGrant(ctx.env, principal, share, input, ctx.url.origin) }, 201);
   });
   // The upload URL is its own credential, so this route reads no other one.
