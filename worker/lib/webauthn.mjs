@@ -35,7 +35,7 @@ export function expectedOrigins(request, config) {
   return [origin];
 }
 
-export async function registrationOptions(config, { userId, userName, displayName }) {
+export async function registrationOptions(config, { userId, userName, displayName, exclude = [] }) {
   const options = await generateRegistrationOptions({
     rpName: config.rpName,
     rpID: config.rpID,
@@ -44,6 +44,7 @@ export async function registrationOptions(config, { userId, userName, displayNam
     userDisplayName: displayName,
     timeout: CHALLENGE_TTL_MS,
     attestationType: "none",
+    excludeCredentials: exclude.length ? exclude : undefined,
     authenticatorSelection: {
       residentKey: "required",
       userVerification: "required"

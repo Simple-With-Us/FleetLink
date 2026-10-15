@@ -19,8 +19,9 @@ export function randomHex(bytes = 32) {
   return Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function randomId(bytes = 16) {
-  return randomHex(bytes);
+/** Prefixed random id, such as usr_3f9a… */
+export function newId(prefix, bytes = 10) {
+  return `${prefix}_${randomHex(bytes)}`;
 }
 
 export async function sha256Hex(value) {
@@ -28,19 +29,46 @@ export async function sha256Hex(value) {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function json(body, status = 200, extra = {}) {
-  const headers = new Headers(extra);
-  headers.set("Content-Type", "application/json; charset=utf-8");
-  headers.set("Cache-Control", "no-store");
-  return new Response(JSON.stringify(body), { status, headers });
+/**
+ * Hash a bearer secret for storage.  The pepper (SESSION_SECRET) means a copy
+ * of the database alone cannot be replayed as a list of live credentials.
+ */
+export function pepperedHash(value, pepper) {
+  return sha256Hex(pepper ? `${pepper}\0${value}` : value);
 }
 
-export function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  })[c]);
+/** Constant-time string comparison over SHA-256 digests. */
+export async function safeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || !a || !b) return false;
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(a)),
+    crypto.subtle.digest("SHA-256", encoder.encode(b))
+  ]);
+  const x = new Uint8Array(ha);
+  const y = new Uint8Array(hb);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+export async function hmacHex(key, data) {
+  const imported = await crypto.subtle.importKey("raw", encoder.encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", imported, encoder.encode(data));
+  return Array.from(new Uint8Array(sig), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Salted share-password hash: "s1$<salt>$<sha256(salt:password)>". */
+export async function hashSharePassword(password) {
+  const salt = randomHex(12);
+  return `s1$${salt}$${await sha256Hex(`${salt}:${password}`)}`;
+}
+
+export async function verifySharePassword(password, stored) {
+  if (!password || !stored) return false;
+  const parts = String(stored).split("$");
+  if (parts.length === 3 && parts[0] === "s1") {
+    return safeEqual(await sha256Hex(`${parts[1]}:${password}`), parts[2]);
+  }
+  // Shares adopted from the old bucket stored an unsalted SHA-256.
+  return safeEqual(await sha256Hex(password), String(stored));
 }
