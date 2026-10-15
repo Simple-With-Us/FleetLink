@@ -52,12 +52,21 @@ async function readJson(response) {
 
 test("GET /health returns 200 JSON after a cheap R2 list and D1 select 1", async () => {
   const { env } = await envWith();
-  const result = await readJson(await getHealth(env));
+  const response = await getHealth(env);
+  const result = await readJson(response);
   assert.equal(result.status, 200);
   assert.match(result.type, /^application\/json/);
   assert.deepEqual(result.body, { ok: true, storage: "ok", db: "ok" });
   assert.equal(result.text.includes(ADMIN), false);
   assert.equal(result.text.includes(AGENT), false);
+  assert.equal(response.headers.get("x-fleet-release"), null);
+});
+
+test("GET /health exposes x-fleet-release when SENTRY_RELEASE is configured", async () => {
+  const { env } = await envWith({ SENTRY_RELEASE: "0123456789abcdef0123456789abcdef01234567" });
+  const response = await getHealth(env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-fleet-release"), "0123456789abcdef0123456789abcdef01234567");
 });
 
 test("GET /health runs before share lookup on every host", async () => {
