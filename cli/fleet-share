@@ -33,9 +33,9 @@ DEFAULT_DOMAIN = "https://fleetlink.online"
 # download that does not match is deleted and never run.  The git SHA names a
 # commit that already published those bytes; it is an ancestor of the commit
 # that records it, because a commit cannot contain its own id.
-FLEETLINK_PINNED_GIT_SHA_DEFAULT = '1294fee4c106e1b47b1b03f5a70e5c0a36b8314b'
+FLEETLINK_PINNED_GIT_SHA_DEFAULT = '609fa5a370f05535e890005a3a47915db4c1fcb2'
 FLEETLINK_INSTALLER_SHA256_DEFAULT = 'e8bf443e751ad50c5dd795c2348cdda28752afda9d9d42d55dd60deb5094d6ce'
-FLEETLINK_SKILL_MD_SHA256_DEFAULT = '7e5b8a68c1b0c2d770236acfa6e1fcafbdb375a32091e157b724abf8e4461d47'
+FLEETLINK_SKILL_MD_SHA256_DEFAULT = '69c808ae4e59b1787255ef1a681709e2af5fc8660148db9c29dfe2a3d9b2f028'
 
 TEXT_TYPES = {
     ".md": "text/markdown; charset=utf-8",
