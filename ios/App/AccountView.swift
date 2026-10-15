@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// The account card.  Passkeys are the account login.  The automation
-/// sign-in code stays in the field below this card.
+/// The account card.  Passkeys are the account login; every link the app
+/// lists or makes belongs to this account.
 struct AccountView: View {
     @ObservedObject var session: SessionManager
     @ObservedObject var passkeys: PasskeyCoordinator
 
     @State private var displayName = ""
     @State private var email = ""
+    @State private var invite = ""
 
     private var isBusy: Bool { passkeys.isPresenting || session.isCheckingSession }
 
@@ -37,7 +38,7 @@ struct AccountView: View {
                     .accessibilityIdentifier("accountName")
                 Spacer()
                 if user.isAdmin {
-                    Text("Account owner")
+                    Text("Admin")
                         .font(.caption2.bold())
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -50,6 +51,12 @@ struct AccountView: View {
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .accessibilityIdentifier("accountEmail")
+            }
+            if let usage = session.usage {
+                Text("\(usage.shares) live \(usage.shares == 1 ? "link" : "links"), \(ByteCountFormatter.string(fromByteCount: usage.bytes, countStyle: .file)) stored.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .accessibilityIdentifier("accountUsage")
             }
             Text("Signed in with a passkey.\u{00A0} This sign-in stays on this device.")
                 .font(.caption)
@@ -80,9 +87,13 @@ struct AccountView: View {
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .accessibilityIdentifier("passkeyEmail")
+        TextField("Invite code (if you have one)", text: $invite)
+            .textInputAutocapitalization(.characters)
+            .autocorrectionDisabled()
+            .accessibilityIdentifier("passkeyInvite")
 
         Button {
-            Task { await passkeys.createPasskey(displayName: displayName, email: email) }
+            Task { await passkeys.createPasskey(displayName: displayName, email: email, invite: invite) }
         } label: {
             Text("Create a passkey")
                 .frame(maxWidth: .infinity)

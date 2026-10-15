@@ -230,7 +230,7 @@ public struct PortalView: View {
             }
             .searchable(text: $searchText, prompt: "Search by name or address")
             .refreshable {
-                await portalManager.fetchShares(host: serverHost, token: session.bearerSecret, sessionCookie: session.sessionCookieHeader)
+                await portalManager.fetchShares(host: serverHost, token: session.apiToken)
             }
             .navigationTitle("Links")
             .toolbar {
@@ -248,7 +248,7 @@ public struct PortalView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         Task {
-                            await portalManager.fetchShares(host: serverHost, token: session.bearerSecret, sessionCookie: session.sessionCookieHeader)
+                            await portalManager.fetchShares(host: serverHost, token: session.apiToken)
                         }
                     } label: {
                         Image(systemName: "arrow.clockwise")
@@ -264,7 +264,7 @@ public struct PortalView: View {
             ) { share in
                 Button("Delete '\(share.slug)'", role: .destructive) {
                     Task {
-                        _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: session.bearerSecret, sessionCookie: session.sessionCookieHeader)
+                        _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: session.apiToken)
                     }
                 }
                 Button("Cancel", role: .cancel) {}
@@ -273,8 +273,11 @@ public struct PortalView: View {
             }
             .task {
                 if portalManager.shares.isEmpty {
-                    await portalManager.fetchShares(host: serverHost, token: session.bearerSecret, sessionCookie: session.sessionCookieHeader)
+                    await portalManager.fetchShares(host: serverHost, token: session.apiToken)
                 }
+            }
+            .onChange(of: session.user) { _, _ in
+                Task { await portalManager.fetchShares(host: serverHost, token: session.apiToken) }
             }
         }
     }
@@ -301,13 +304,13 @@ public struct PortalView: View {
         if !searchText.isEmpty || filterMode != .all {
             return "Try a different word, or show every link."
         }
-        return "Use New link to share a file or a web address.\u{00A0} Links you make on the website show up here after you sign in."
+        return "Use New link to share a file or a web address.\u{00A0} Every link you make on any device shows up here."
     }
 
     private func renewShare(_ share: PortalShare) {
         isRenewing[share.slug] = true
         Task {
-            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: session.bearerSecret, sessionCookie: session.sessionCookieHeader)
+            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: session.apiToken)
             isRenewing[share.slug] = false
         }
     }

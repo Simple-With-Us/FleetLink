@@ -28,9 +28,8 @@ test("attachment is forced from either signal", () => {
   assert.equal(mustForceAttachment("readme.md", "text/markdown"), false);
 });
 
-test("the file serve path consults stored content type before HTMLRewriter", () => {
-  const source = readFileSync(new URL("../worker/fleetlink-api.mjs", import.meta.url), "utf8");
-  const uses = source.split("mustForceAttachment(").length - 1;
-  assert.ok(uses >= 2, "serve path should force attachment and skip the HTML rewriter");
-  assert.match(source, /mustForceAttachment\(object\.key, headers\.get\("content-type"\)\)/);
+test("the file serve path checks the path and the stored type", () => {
+  const source = readFileSync(new URL("../worker/lib/serve.mjs", import.meta.url), "utf8");
+  assert.match(source, /mustForceAttachment\(file\.path, type\)/);
+  assert.equal(source.includes("HTMLRewriter"), false);
 });

@@ -6,18 +6,20 @@ Coordinate with other AI agents on Zulip (`https://[REDACTED].zulipchat.com`), c
 
 ## The live worker
 
-- **Worker:** `fleetlink-api`, serving `fleetlink.online` and `fleetlink.app`.
-- **Canonical source:** `worker/fleetlink-api.mjs`, plus `worker/lib/` for passkey accounts, the dashboard, cost guards, and Sentry scrubbing.  `scripts/deploy.sh` bundles that into one module and uploads it with the script-upload API.  It does not run unless `FLEETLINK_DEPLOY=1`.  See `DEPLOY.md`.  Do not deploy from `wrangler.jsonc`.
-- **Deploys go through the Cloudflare Workers script-upload API** (same path as the Oct 11 and Oct 13 hotfixes), not wrangler from this repo.  `wrangler.jsonc` still describes the removed TypeScript architecture and is intentionally stale — do not deploy from it without reconciling it first.
-- **History:** the TypeScript rewrite (D1 `agent_tokens`, R2 `FILES` binding) was removed 2026-10-13; it never served production.  Recover it from the `legacy-architecture-final` git tag if needed.
+- **Worker:** `fleetlink-api`, serving `fleetlink.online` and `fleetlink.app` on the dedicated FleetLink Cloudflare account.  Bindings: D1 `DB`, R2 `FLEET_SHARES`.
+- **Source:** `worker/index.mjs` and `worker/lib/`.  The design is `docs/multi-user.md`: every share has an owner, every request resolves to one principal, and `worker/lib/policy.mjs` decides access.
+- **Deploy:** `scripts/deploy.sh` only (`FLEETLINK_DEPLOY=1`; `FLEETLINK_SECRETS=keep` keeps the bindings already on the worker).  See `DEPLOY.md`.  Verify with `/health` and `node scripts/prod-smoke.mjs`.
+- **Schema:** `worker/lib/schema.mjs`.  The worker applies pending migrations itself.  Append migrations; never edit one that shipped.
 - **Never delete the old `fleet-share-api` worker** (Usage.Jays.Services account).  It serves no routes but the rule stands.
-- **R2 is not yet enabled** in the dedicated Cloudflare account — uploads are blocked until Jay enables it in the dashboard.  The Oct 13 HTML-attachment fix must be re-verified end-to-end once R2 is on.
 
 ## Security invariants (do not regress)
 
-- `GET /api/auth/token` → `410 gone`.
-- Unauthenticated `DELETE /api/shares/:slug` → `401`.
+- Every management route checks the share, team, or admin role through `worker/lib/policy.mjs`.  Another person's share is `404` to read and `409` to claim.
+- `GET /api/auth/token` → `410 gone`.  `X-Fleet-Agent` and `X-Fleet-Auth` → `401`.
+- Unauthenticated writes, including `DELETE /api/shares/:slug` and `DELETE /<slug>`, → `401`.
 - `.html`/`.htm` (any case) **or a stored `text/html` / `application/xhtml+xml` content type** → `application/octet-stream` + `Content-Disposition: attachment`, unconditionally.
-- Guest clamps: 10 files, 5 MB/file, 10 MB/batch, 1h file TTL, 6h redirect TTL.
-- workers.dev and preview URLs off; Workers Logs observability off (share passwords travel in URLs).
+- User files carry `Content-Security-Policy: sandbox` (PDF excepted) and `X-Content-Type-Options: nosniff`.  Rendered Markdown only runs nonce'd scripts.
+- Cookie-authenticated writes need a same-origin `Origin` header (`assertSameOrigin`).  API tokens cannot manage the account.
+- Sessions, API tokens, and invite codes are stored only as peppered hashes.
+- workers.dev and preview URLs off; Workers Logs observability off (share passwords can travel in URLs).
 - Secrets are Worker secret bindings, never in code.  Never print them.

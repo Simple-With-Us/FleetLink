@@ -55,3 +55,12 @@ test("upload check accepts a success body and rejects a failure body", () => {
   assert.doesNotMatch(bad.stdout, /Script uploaded/);
   assert.doesNotMatch(bad.stderr, /TypeError/);
 });
+
+test("deploy.sh can keep the worker's existing bindings and sets the sweep schedule", () => {
+  assert.match(source, /FLEETLINK_SECRETS:-infisical/);
+  assert.match(source, /keep\)/);
+  assert.match(source, /"keep_bindings": \["secret_text", "plain_text", "kv_namespace"\]/);
+  assert.match(source, /\/schedules"/);
+  assert.match(source, /x-fleet-release: \$\{SENTRY_RELEASE\}/);
+  assert.doesNotMatch(source, /AGENT_SECRET/);
+});
