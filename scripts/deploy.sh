@@ -175,6 +175,29 @@ for name, value in values.items():
 PY
 fi
 
+echo "Uploading site media to R2 (${R2_BUCKET_NAME}/site/media/)"
+for MEDIA in "$ROOT"/assets/web/media/*; do
+  [[ -f "$MEDIA" ]] || continue
+  NAME="$(basename "$MEDIA")"
+  case "$NAME" in
+    *.mp4) TYPE="video/mp4" ;;
+    *.jpg) TYPE="image/jpeg" ;;
+    *.png) TYPE="image/png" ;;
+    *) continue ;;
+  esac
+  RESULT="$(curl --config "$WORKDIR/curl.cfg" -sS -X PUT \
+    "${API}/r2/buckets/${R2_BUCKET_NAME}/objects/site%2Fmedia%2F${NAME}" \
+    -H "Content-Type: ${TYPE}" \
+    --data-binary "@${MEDIA}")"
+  python3 -c '
+import json, sys
+body = json.load(sys.stdin)
+if not body.get("success"):
+    raise SystemExit("media upload failed: " + json.dumps(body.get("errors")))
+' <<<"$RESULT"
+  echo "Uploaded ${NAME}"
+done
+
 echo "Setting the sweep schedule (${SWEEP_CRON})"
 python3 - "$WORKDIR/schedules.json" "$SWEEP_CRON" <<'PY'
 import json, sys

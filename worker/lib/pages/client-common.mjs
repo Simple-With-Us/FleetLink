@@ -7,6 +7,11 @@ export const APP_JS = String.raw`
   "use strict";
   var FL = window.FL = {};
 
+  // Logo animations play once.  With reduced motion they stay on their poster, the final frame.
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    document.querySelectorAll("video[data-intro]").forEach(function (v) { v.removeAttribute("autoplay"); v.pause(); });
+  }
+
   FL.h = function (tag, attrs) {
     var el = document.createElement(tag);
     if (attrs) {

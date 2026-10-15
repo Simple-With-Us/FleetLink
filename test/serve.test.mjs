@@ -262,3 +262,27 @@ test("signed-in pages render for people and admins", async () => {
   const op = await call(env, "GET", "/admin", { headers: { "x-fleet-admin": "test-operator-secret-value" } });
   assert.equal(op.status, 200);
 });
+
+test("brand assets: the app-icon logo, favicon, touch icon, and logo animations from R2 with ranges", async () => {
+  const env = await makeEnv();
+  for (const [path, type] of [["/favicon.ico", "image/x-icon"], ["/apple-touch-icon.png", "image/png"], ["/assets/logo-64.png", "image/png"], ["/assets/logo-128.png", "image/png"]]) {
+    const res = await call(env, "GET", path);
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get("content-type"), type, path);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    assert.ok(bytes.length > 500, path);
+  }
+  const png = new Uint8Array(await (await call(env, "GET", "/assets/logo-64.png")).arrayBuffer());
+  assert.deepEqual([...png.slice(1, 4)], [0x50, 0x4e, 0x47]);
+  assert.equal((await call(env, "GET", "/assets/media/fleetlink-wordmark.mp4")).status, 404);
+  await env.FLEET_SHARES.put("site/media/fleetlink-wordmark.mp4", "0123456789");
+  const part = await call(env, "GET", "/assets/media/fleetlink-wordmark.mp4", { headers: { range: "bytes=0-3" } });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get("content-type"), "video/mp4");
+  assert.equal(await part.text(), "0123");
+  assert.equal((await call(env, "GET", "/assets/media/..%2Fsettings%3Aoverrides")).status, 404);
+  const home = await (await call(env, "GET", "/")).text();
+  assert.match(home, /<img src="\/assets\/logo-64\.png\?v=[a-z0-9]+" width="32" height="32" alt="">FleetLink<\/a>/);
+  assert.match(home, /<video class="hero-intro" data-intro autoplay muted playsinline/);
+  assert.match(home, /href="\/login#signup">Create Account<\/a>/);
+});

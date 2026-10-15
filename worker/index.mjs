@@ -96,6 +96,37 @@ function aasaResponse(env) {
   return new Response(JSON.stringify(body, null, 2), { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
 }
 
+const MEDIA_TYPES = { mp4: "video/mp4", webm: "video/webm", jpg: "image/jpeg", png: "image/png" };
+
+/**
+ * Site media too large to bundle (the logo animations) lives in R2 under
+ * site/media/, uploaded by scripts/deploy.sh from assets/web/media/.  Range
+ * requests are honored, which Safari needs to play MP4.
+ */
+async function siteMedia(request, env, name) {
+  const ext = name.split(".").pop().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{0,80}$/.test(name) || !MEDIA_TYPES[ext]) return null;
+  const object = await getObject(env, `site/media/${name}`, request).catch(() => null);
+  if (!object) return null;
+  const headers = new Headers({
+    "Content-Type": MEDIA_TYPES[ext],
+    "Cache-Control": "public, max-age=86400",
+    "Accept-Ranges": "bytes",
+    "X-Content-Type-Options": "nosniff",
+    ETag: object.httpEtag
+  });
+  if (!object.body) return new Response(null, { status: 304, headers });
+  if (object.range && request.headers.has("range")) {
+    const offset = object.range.offset ?? (object.range.suffix != null ? object.size - object.range.suffix : 0);
+    const length = object.range.length ?? object.size - offset;
+    headers.set("Content-Range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
+    headers.set("Content-Length", String(length));
+    return new Response(request.method === "HEAD" ? null : object.body, { status: 206, headers });
+  }
+  headers.set("Content-Length", String(object.size));
+  return new Response(request.method === "HEAD" ? null : object.body, { headers });
+}
+
 /** Errors on raw share writes are plain text for curl, JSON for API clients. */
 function rawError(request, err) {
   if (wantsJson(request)) return errorResponse(err);
@@ -110,7 +141,11 @@ export async function handleRequest(request, env, exec, deps = {}) {
   if (path === "/health" || path === "/health/") return health(env);
   if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/") return handleOAuthProtectedResource(request);
   if (path === "/.well-known/apple-app-site-association" || path === "/apple-app-site-association") return aasaResponse(env);
+  if (path.startsWith("/assets/media/")) return (await siteMedia(request, env, path.slice("/assets/media/".length))) || text("Not found.\n", 404);
   if (path.startsWith("/assets/")) return serveAsset(path.slice("/assets/".length)) || text("Not found.\n", 404);
+  if (path === "/favicon.ico" || path === "/apple-touch-icon.png" || path === "/apple-touch-icon-precomposed.png") {
+    return serveAsset(path === "/favicon.ico" ? "favicon.ico" : "apple-touch-icon.png");
+  }
   if (request.headers.get("x-fleet-auth")) {
     return json({ error: "The X-Fleet-Auth header is retired.  Send an API token as Authorization: Bearer fla_…." }, 401);
   }

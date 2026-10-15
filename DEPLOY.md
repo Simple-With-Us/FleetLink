@@ -39,7 +39,7 @@ FLEETLINK_DEPLOY=1 \
   bash scripts/deploy.sh
 ```
 
-Values are read from the environment and never printed.  The Cloudflare token goes to curl through a mode-0600 config file, not argv.
+The deploy also uploads `assets/web/media/*` (the logo animations) to R2 under `site/media/`, where the worker serves them at `/assets/media/`.  Values are read from the environment and never printed.  The Cloudflare token goes to curl through a mode-0600 config file, not argv.
 
 ## After A Deploy
 

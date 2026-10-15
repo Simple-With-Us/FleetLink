@@ -8,7 +8,7 @@
  *   npm run e2e        (needs `npx playwright install chromium` once)
  */
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,9 @@ const AdminUsers = z.object({
   users: z.array(z.object({ id: z.string(), display_name: z.string(), role: z.enum(["user", "admin"]), status: z.enum(["active", "disabled"]) }).passthrough())
 }).passthrough();
 
-const shots = join(dirname(fileURLToPath(import.meta.url)), "screenshots");
+const here = dirname(fileURLToPath(import.meta.url));
+const shots = join(here, "screenshots");
+const media = join(here, "../assets/web/media");
 mkdirSync(shots, { recursive: true });
 
 async function personContext(browser, base, problems) {
@@ -50,6 +52,8 @@ async function signUp(page, name) {
 
 test("people sign up, share, manage tokens and teams, and admins manage people, all in a real browser", async () => {
   const env = await makeEnv();
+  // The logo animations deploy.sh uploads to R2.
+  for (const name of readdirSync(media)) await env.FLEET_SHARES.put(`site/media/${name}`, readFileSync(join(media, name)));
   const server = await serve(env);
   const base = server.url.replace("127.0.0.1", "localhost");
   env.WEBAUTHN_RP_ID = "localhost";
@@ -59,6 +63,26 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
   try {
     const ada = await personContext(browser, base, problems);
     const page = ada.page;
+    // Logo animations play once; show their final frame so screenshots are stable.
+    const settle = () => page.evaluate(() => document.querySelectorAll("video").forEach((v) => { v.pause(); if (v.duration) v.currentTime = v.duration; }));
+
+    // Signed out, the landing page leads to sign-in and sign-up.
+    await page.goto("/");
+    assert.equal(await page.locator("header .brand img").getAttribute("src").then((s) => s.startsWith("/assets/logo-64.png")), true);
+    assert.equal(await page.locator('header a[href="/login#signup"]').count(), 1);
+    assert.equal(await page.locator('header a[href="/login"]').count(), 1);
+    await settle();
+    await page.screenshot({ path: join(shots, "00-landing.png"), fullPage: true });
+    await page.click('header a[href="/login"]');
+    await page.waitForURL("**/login");
+    await settle();
+    await page.screenshot({ path: join(shots, "00-login.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await settle();
+    await page.screenshot({ path: join(shots, "00-landing-phone.png"), fullPage: true });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "no sideways scroll on a phone");
+    await page.setViewportSize({ width: 1280, height: 900 });
     await signUp(page, "Ada");
     await page.screenshot({ path: join(shots, "01-dashboard-empty.png"), fullPage: true });
 
@@ -156,6 +180,7 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     // Public pages and a share page render cleanly too.
     for (const [path, name] of [["/", "09-home"], ["/instructions", "10-instructions"], ["/ada-notes/", "11-listing"], ["/privacy", "12-privacy"]]) {
       await page.goto(path);
+      await settle();
       await page.screenshot({ path: join(shots, `${name}.png`), fullPage: true });
     }
     await page.goto("/ada-notes/notes.md");
