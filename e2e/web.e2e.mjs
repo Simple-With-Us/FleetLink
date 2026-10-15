@@ -68,7 +68,9 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     const page = ada.page;
     // Logo animations play once; show their final frame so screenshots are stable.
     // Seeking finishes on "seeked", so wait for it (or for the metadata first) before a screenshot.
-    const settle = () => page.evaluate(() => Promise.all([...document.querySelectorAll("video")].map((v) => new Promise((resolve) => {
+    const settle = () => page.evaluate(() => Promise.all([...document.querySelectorAll("video")].map((v) => new Promise((done) => {
+      const timer = setTimeout(() => done(), 3000);
+      const resolve = () => { clearTimeout(timer); done(); };
       v.pause();
       const seekToEnd = () => {
         if (!Number.isFinite(v.duration)) return resolve();
@@ -80,7 +82,6 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
         v.addEventListener("loadedmetadata", seekToEnd, { once: true });
         v.addEventListener("error", () => resolve(), { once: true });
       }
-      setTimeout(resolve, 3000);
     }))));
 
     // Signed out, the landing page leads to sign-in and sign-up.
