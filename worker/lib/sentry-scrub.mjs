@@ -25,6 +25,11 @@ const QUERY_DENY = new Set([
   "session"
 ]);
 
+const BOUNDED_SPAN_OPS = new Set(["auth", "upload", "download", "r2"]);
+const MAX_CHILD_SPANS = 4;
+
+const activeTraces = new WeakMap();
+
 export function isSensitiveKey(key) {
   const raw = String(key);
   const normalized = raw.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -88,7 +93,8 @@ function scrubRecord(value, depth = 0) {
     return;
   }
   for (const [key, child] of Object.entries(value)) {
-    if (isSensitiveKey(key)) {
+    const normalizedKey = key.trim().toLowerCase();
+    if (isSensitiveKey(key) || /slug|artifact|filename|filepath|sharepath|objectkey/i.test(normalizedKey)) {
       value[key] = SENTRY_FILTERED;
       continue;
     }
@@ -98,21 +104,6 @@ function scrubRecord(value, depth = 0) {
     }
     scrubRecord(child, depth + 1);
   }
-}
-
-export function scrubSentryLog(log) {
-  if (!log) return log;
-  if (typeof log.message === "string" && isSensitiveKey(log.message)) return null;
-  if (log.attributes) scrubRecord(log.attributes);
-  return log;
-}
-
-export function applySentryRelease(event, env) {
-  const release = env?.SENTRY_RELEASE?.trim();
-  const environment = env?.SENTRY_ENVIRONMENT?.trim() || "production";
-  if (release) event.release = release;
-  event.environment = environment;
-  return event;
 }
 
 export function scrubSentryEvent(event) {
@@ -139,7 +130,46 @@ export function scrubSentryEvent(event) {
   }
   if (event.extra) scrubRecord(event.extra);
   if (event.contexts) scrubRecord(event.contexts);
+  if (Array.isArray(event.spans)) {
+    for (const span of event.spans) {
+      if (span?.data) scrubRecord(span.data);
+      if (typeof span?.description === "string") span.description = coarsePath(span.description);
+    }
+  }
   return event;
+}
+
+export function scrubSentryLog(log) {
+  if (!log) return log;
+  if (typeof log.message === "string" && isSensitiveKey(log.message)) return null;
+  if (log.attributes) scrubRecord(log.attributes);
+  return log;
+}
+
+export function parseTracesSampleRate(raw, fallback = 0.2) {
+  if (raw == null || raw === "") return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : fallback;
+}
+
+export function shouldSampleTraces(env) {
+  const rate = parseTracesSampleRate(env?.SENTRY_TRACES_SAMPLE_RATE, 0.2);
+  if (rate <= 0) return false;
+  if (rate >= 1) return true;
+  return Math.random() < rate;
+}
+
+function telemetryTags(env) {
+  const release = env?.SENTRY_RELEASE?.trim();
+  const environment = env?.SENTRY_ENVIRONMENT?.trim() || "production";
+  return {
+    ...(release ? { release } : {}),
+    environment
+  };
+}
+
+export function workerRelease(env) {
+  return env?.SENTRY_RELEASE?.trim() || "";
 }
 
 export function parseDsn(dsn) {
@@ -158,13 +188,23 @@ export function parseDsn(dsn) {
   }
 }
 
-export function sentryEnvelope(dsn, event, itemType = "event") {
+function randomEventId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function randomTraceId() {
+  return randomEventId() + randomEventId();
+}
+
+function randomSpanId() {
+  return randomEventId().slice(0, 16);
+}
+
+function envelopeBody(dsn, itemType, payload) {
   const parsed = parseDsn(dsn);
   if (!parsed) return null;
-  const scrubbed = itemType === "log"
-    ? scrubSentryLog(structuredClone(event))
-    : scrubSentryEvent(structuredClone(event));
-  if (!scrubbed) return null;
+  const scrubbed = scrubSentryEvent(structuredClone(payload));
   const eventId = randomEventId();
   const header = JSON.stringify({ event_id: eventId, sent_at: new Date().toISOString() });
   const item = JSON.stringify({ type: itemType });
@@ -175,38 +215,93 @@ export function sentryEnvelope(dsn, event, itemType = "event") {
   };
 }
 
-function randomEventId() {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+export function sentryEnvelope(dsn, event) {
+  const envelope = envelopeBody(dsn, "event", event);
+  return envelope;
 }
 
-export function eventFromError(error, request, env) {
+function requestSnapshot(request) {
   let url = "";
   try { url = request?.url || ""; } catch { url = ""; }
-  const event = {
-    message: error instanceof Error ? error.message : String(error),
-    level: "error",
-    platform: "javascript",
-    request: {
-      method: request?.method,
-      url,
-      headers: request?.headers ? Object.fromEntries(request.headers.entries()) : undefined
-    }
+  return {
+    method: request?.method,
+    url,
+    headers: request?.headers ? Object.fromEntries(request.headers.entries()) : undefined
   };
-  return applySentryRelease(event, env);
 }
 
-function randomTraceId() {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+function transactionName(request) {
+  const method = request?.method || "GET";
+  let pathname = "/";
+  try {
+    pathname = new URL(request.url).pathname;
+  } catch {
+    pathname = "/";
+  }
+  return `${method} ${coarsePath(pathname)}`;
 }
 
-function randomSpanId() {
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+export function beginWorkerTrace(request, env) {
+  if (!env?.SENTRY_DSN?.trim() || !shouldSampleTraces(env)) return null;
+  const started = Date.now() / 1000;
+  const trace = {
+    traceId: randomTraceId(),
+    rootSpanId: randomSpanId(),
+    started,
+    spans: [],
+    recordedOps: new Set()
+  };
+  activeTraces.set(request, trace);
+  return trace;
 }
 
-export async function postSentryEnvelope(dsn, envelope, fetchImpl = fetch) {
+/** At most one span per op (auth, upload, download, r2) and MAX_CHILD_SPANS total. */
+export function recordWorkerSpan(request, op, detail = "") {
+  if (!BOUNDED_SPAN_OPS.has(op)) return;
+  const trace = activeTraces.get(request);
+  if (!trace || trace.recordedOps.has(op) || trace.spans.length >= MAX_CHILD_SPANS) return;
+  trace.recordedOps.add(op);
+  const description = detail ? coarsePath(detail.startsWith("/") ? detail : `/${detail}`) : op;
+  trace.spans.push({
+    span_id: randomSpanId(),
+    trace_id: trace.traceId,
+    op,
+    description,
+    start_timestamp: Date.now() / 1000,
+    timestamp: Date.now() / 1000
+  });
+}
+
+function httpStatusToTraceStatus(status) {
+  if (status >= 500) return "internal_error";
+  if (status >= 400) return "invalid_argument";
+  return "ok";
+}
+
+function transactionFromTrace(trace, request, env, status) {
+  const ended = Date.now() / 1000;
+  return {
+    type: "transaction",
+    platform: "javascript",
+    transaction: transactionName(request),
+    start_timestamp: trace.started,
+    timestamp: ended,
+    ...telemetryTags(env),
+    request: requestSnapshot(request),
+    contexts: {
+      trace: {
+        trace_id: trace.traceId,
+        span_id: trace.rootSpanId,
+        op: "http.server",
+        status: httpStatusToTraceStatus(status)
+      }
+    },
+    spans: trace.spans
+  };
+}
+
+async function postEnvelope(dsn, itemType, payload, fetchImpl) {
+  const envelope = envelopeBody(dsn, itemType, payload);
   if (!envelope) return { sent: false };
   await fetchImpl(envelope.url, {
     method: "POST",
@@ -219,13 +314,80 @@ export async function postSentryEnvelope(dsn, envelope, fetchImpl = fetch) {
   return { sent: true };
 }
 
+export function finishWorkerTrace(request, env, ctx, status, fetchImpl = fetch) {
+  const trace = activeTraces.get(request);
+  if (!trace) return { sent: false };
+  activeTraces.delete(request);
+  const dsn = env?.SENTRY_DSN?.trim();
+  if (!dsn) return { sent: false };
+  const payload = transactionFromTrace(trace, request, env, status);
+  const pending = postEnvelope(dsn, "transaction", payload, fetchImpl).catch(() => ({ sent: false }));
+  if (ctx && ctx.waitUntil) ctx.waitUntil(pending);
+  else pending.catch(() => {});
+  return { sent: true };
+}
+
+export function eventFromError(error, request, env) {
+  let url = "";
+  try { url = request?.url || ""; } catch { url = ""; }
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    level: "error",
+    platform: "javascript",
+    ...(env ? telemetryTags(env) : {}),
+    request: {
+      method: request?.method,
+      url,
+      headers: request?.headers ? Object.fromEntries(request.headers.entries()) : undefined
+    }
+  };
+}
+
 /** No-ops when SENTRY_DSN is unset.  Never throws into the request path. */
 export async function captureWorkerException(error, request, env, fetchImpl = fetch) {
   try {
     const dsn = env?.SENTRY_DSN?.trim();
     if (!dsn) return { sent: false };
     const envelope = sentryEnvelope(dsn, eventFromError(error, request, env));
-    return await postSentryEnvelope(dsn, envelope, fetchImpl);
+    if (!envelope) return { sent: false };
+    await fetchImpl(envelope.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-sentry-envelope",
+        "X-Sentry-Auth": `Sentry sentry_version=7, sentry_key=${envelope.key}`
+      },
+      body: envelope.body
+    });
+    return { sent: true };
+  } catch {
+    return { sent: false };
+  }
+}
+
+/** Sparse operational logs (warn/error).  Attributes are scrubbed; message keys that look sensitive are dropped. */
+export async function captureWorkerLog(level, message, attributes, env, fetchImpl = fetch) {
+  try {
+    const dsn = env?.SENTRY_DSN?.trim();
+    if (!dsn) return { sent: false };
+    const normalized = String(level || "info").toLowerCase();
+    if (normalized !== "error" && normalized !== "warning" && normalized !== "warn") return { sent: false };
+    if (normalized === "warn" || normalized === "warning") {
+      if (!shouldSampleTraces(env)) return { sent: false };
+    }
+    const log = scrubSentryLog({
+      message: String(message || ""),
+      level: normalized === "warning" ? "warn" : normalized,
+      attributes: attributes && typeof attributes === "object" ? { ...attributes } : {}
+    });
+    if (!log) return { sent: false };
+    const event = {
+      message: log.message,
+      level: log.level === "warn" ? "warning" : log.level,
+      platform: "javascript",
+      ...telemetryTags(env),
+      extra: log.attributes
+    };
+    return await postEnvelope(dsn, "event", event, fetchImpl);
   } catch {
     return { sent: false };
   }

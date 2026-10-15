@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import {
   SENTRY_FILTERED,
-  applySentryRelease,
+  beginWorkerTrace,
   captureWorkerException,
+  captureWorkerLog,
   eventFromError,
+  finishWorkerTrace,
+  recordWorkerSpan,
   redactSentryUrl,
   scrubSentryEvent,
   scrubSentryLog,
@@ -46,24 +50,6 @@ test("redactSentryUrl coarsens share paths and drops userinfo", () => {
   assert.match(redacted, /\[Filtered\]|%5BFiltered%5D/);
 });
 
-test("scrubSentryLog drops sensitive messages and scrubs attributes", () => {
-  assert.equal(scrubSentryLog({ message: "password leak" }), null);
-  const kept = scrubSentryLog({ message: "storage degraded", attributes: { token: "secret", region: "iad" } });
-  assert.equal(kept.message, "storage degraded");
-  assert.equal(kept.attributes.token, SENTRY_FILTERED);
-  assert.equal(kept.attributes.region, "iad");
-});
-
-test("eventFromError attaches release metadata without leaking secrets", () => {
-  const event = eventFromError(new Error("boom"), new Request("https://fleetlink.online/a"), {
-    SENTRY_RELEASE: "deadbeef",
-    SENTRY_ENVIRONMENT: "production"
-  });
-  assert.equal(event.release, "deadbeef");
-  assert.equal(event.environment, "production");
-  assert.equal(applySentryRelease({ level: "error" }, {}).environment, "production");
-});
-
 test("capture is a no-op without a DSN and the envelope never contains the password", async () => {
   const skipped = await captureWorkerException(new Error("boom"), new Request("https://fleetlink.online/a?password=hunter2"), {});
   assert.deepEqual(skipped, { sent: false });
@@ -83,4 +69,65 @@ test("capture is a no-op without a DSN and the envelope never contains the passw
   );
   assert.equal(sent.sent, true);
   assert.equal(called, 1);
+});
+
+test("errors and transactions carry SENTRY_RELEASE without leaking slug paths", () => {
+  const env = { SENTRY_RELEASE: "deadbeef", SENTRY_ENVIRONMENT: "production" };
+  const errorEvent = eventFromError(new Error("boom"), new Request("https://fleetlink.online/notes/secret.html"), env);
+  assert.equal(errorEvent.release, "deadbeef");
+  assert.equal(errorEvent.environment, "production");
+  const envelope = sentryEnvelope("https://public@o0.ingest.sentry.io/1", errorEvent);
+  assert.match(envelope.body, /deadbeef/);
+  assert.doesNotMatch(envelope.body, /secret\.html/);
+});
+
+test("bounded worker spans emit one sampled transaction per request", async () => {
+  const env = {
+    SENTRY_DSN: "https://public@o0.ingest.sentry.io/1",
+    SENTRY_RELEASE: "cafebabe",
+    SENTRY_TRACES_SAMPLE_RATE: "1"
+  };
+  const request = new Request("https://fleetlink.online/api/auth/passkey/register", { method: "POST" });
+  const ctx = { waitUntil(p) { p.catch(() => {}); } };
+  beginWorkerTrace(request, env);
+  recordWorkerSpan(request, "auth", "/api/auth/passkey/register");
+  recordWorkerSpan(request, "auth", "/api/auth/passkey/login");
+  recordWorkerSpan(request, "upload", "/api/shares/my-slug");
+  let body = "";
+  const result = finishWorkerTrace(request, env, ctx, 200, async (_url, init) => {
+    body = init.body;
+    return new Response("ok");
+  });
+  assert.equal(result.sent, true);
+  assert.match(body, /"type":"transaction"/);
+  assert.match(body, /cafebabe/);
+  assert.match(body, /passkey\/\[step\]/);
+  assert.doesNotMatch(body, /my-slug/);
+  const spanMatches = body.match(/"op":"auth"/g) || [];
+  assert.equal(spanMatches.length, 1);
+});
+
+test("scrubSentryLog drops sensitive messages and captureWorkerLog scrubs attributes", async () => {
+  assert.equal(scrubSentryLog({ message: "password leak", attributes: {} }), null);
+  const sent = await captureWorkerLog(
+    "error",
+    "put_failed",
+    { token: "secret", slug: "my-share" },
+    { SENTRY_DSN: "https://public@o0.ingest.sentry.io/1", SENTRY_RELEASE: "abc" },
+    async (_url, init) => {
+      assert.match(init.body, /put_failed/);
+      assert.match(init.body, /\[Filtered\]/);
+      assert.doesNotMatch(init.body, /secret/);
+      assert.doesNotMatch(init.body, /my-share/);
+      return new Response("ok");
+    }
+  );
+  assert.equal(sent.sent, true);
+});
+
+test("deploy.sh publishes SENTRY_RELEASE from git for Worker release correlation", () => {
+  const deploy = readFileSync(new URL("../scripts/deploy.sh", import.meta.url), "utf8");
+  assert.match(deploy, /SENTRY_RELEASE/);
+  assert.match(deploy, /rev-parse HEAD/);
+  assert.match(deploy, /SENTRY_TRACES_SAMPLE_RATE/);
 });

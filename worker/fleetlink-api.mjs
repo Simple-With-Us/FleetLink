@@ -4,7 +4,14 @@ import { reapCostGuards } from "./lib/cost-guards.mjs";
 import { mustForceAttachment } from "./lib/html-safety.mjs";
 import { handleMcp, handleOAuthProtectedResource, mcpWwwAuthenticate } from "./lib/mcp.mjs";
 import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
-import { captureWorkerLog, finalizeWorkerRequestTelemetry } from "./lib/sentry-telemetry.mjs";
+import {
+  beginWorkerTrace,
+  captureWorkerException,
+  captureWorkerLog,
+  finishWorkerTrace,
+  recordWorkerSpan,
+  workerRelease
+} from "./lib/sentry-scrub.mjs";
 import { randomHex } from "./lib/bytes.mjs";
 import { SettingsOverridesDocument, SettingsUpdateBody } from "./lib/settings-schema.mjs";
 import { applyGrantTtl, lookupAgentToken, tighterCap } from "./lib/tokens.mjs";
@@ -5162,30 +5169,23 @@ async function probeDb(env) {
 }
 __name(probeDb, "probeDb");
 __name2(probeDb, "probeDb");
-async function healthCheck(env, ctx) {
+async function healthCheck(env) {
   const storageOk = await probeStorage(env);
   const dbOk = await probeDb(env);
-  const release = (env?.SENTRY_RELEASE || "").trim();
   const body = {
     ok: storageOk && dbOk,
     storage: storageOk ? "ok" : "error",
     db: dbOk ? "ok" : "error"
   };
-  if (release) body.release = release;
-  if (!body.ok && ctx) {
-    const pending = captureWorkerLog("warning", "health check failed", env, {
-      storage: body.storage,
-      db: body.db
-    });
-    if (ctx.waitUntil) ctx.waitUntil(pending);
-    else pending.catch(() => {});
-  }
+  const headers = {
+    "content-type": "application/json",
+    "cache-control": "no-store"
+  };
+  const release = workerRelease(env);
+  if (release) headers["x-fleet-release"] = release;
   return new Response(JSON.stringify(body), {
     status: body.ok ? 200 : 503,
-    headers: {
-      "content-type": "application/json",
-      "cache-control": "no-store"
-    }
+    headers
   });
 }
 __name(healthCheck, "healthCheck");
@@ -5193,7 +5193,7 @@ __name2(healthCheck, "healthCheck");
 async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/health/")) {
-      return healthCheck(env, ctx);
+      return healthCheck(env);
     }
     if ((request.method === "GET" || request.method === "HEAD") && (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/")) {
       return handleOAuthProtectedResource(request);
@@ -5213,7 +5213,10 @@ async function handleRequest(request, env, ctx) {
     const agentSecret = (rawEnv.AGENT_SECRET || rawEnv.FLEET_AGENT_SECRET || "").trim();
     const secrets = { adminSecret, agentSecret };
     const accountResponse = await handleAccountRoutes(request, env, ctx);
-    if (accountResponse) return accountResponse;
+    if (accountResponse) {
+      if (url.pathname.startsWith("/api/auth")) recordWorkerSpan(request, "auth", url.pathname);
+      return accountResponse;
+    }
     if (request.headers.get("X-Fleet-Auth")) {
       const legacyHeaders = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
       if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
@@ -6124,6 +6127,7 @@ async function handleRequest(request, env, ctx) {
       if (isSettingsStorageKey(key)) {
         return new Response("Not Found", { status: 404, headers: { "cache-control": "no-store" } });
       }
+      recordWorkerSpan(request, "download", url.pathname);
       if (!key.endsWith("/") && !key.includes(".")) {
         const indexObj = await env.FLEET_SHARES.get(key + "/index.html");
         if (indexObj) {
@@ -6650,7 +6654,10 @@ async function handleRequest(request, env, ctx) {
             headers: { "content-type": "text/plain; charset=utf-8" }
           });
         } catch (err) {
-          console.error(JSON.stringify({ event: "put_redirect_failed", error: err.message || String(err) }));
+          recordWorkerSpan(request, "r2", "put");
+          const logPending = captureWorkerLog("error", "put_redirect_failed", { event: "put_redirect_failed" }, env);
+          if (ctx && ctx.waitUntil) ctx.waitUntil(logPending);
+          else logPending.catch(() => {});
           return new Response(`Upload rejected: Storage error writing to R2 - ${err.message || String(err)}`, { status: 500 });
         }
       }
@@ -6658,6 +6665,7 @@ async function handleRequest(request, env, ctx) {
       const putSlug = putParts[0].toLowerCase();
       key = putParts.length > 1 ? `${putSlug}/${putParts.slice(1).join("/")}` : putSlug;
       slugCaseCache.set(putSlug, putSlug);
+      recordWorkerSpan(request, "upload", url.pathname);
       try {
         await env.FLEET_SHARES.put(key, request.body, {
           httpMetadata,
@@ -6671,7 +6679,10 @@ async function handleRequest(request, env, ctx) {
           headers: { "content-type": "text/plain; charset=utf-8" }
         });
       } catch (err) {
-        console.error(JSON.stringify({ event: "put_failed", error: err.message || String(err) }));
+        recordWorkerSpan(request, "r2", "put");
+        const logPending = captureWorkerLog("error", "put_failed", { event: "put_failed" }, env);
+        if (ctx && ctx.waitUntil) ctx.waitUntil(logPending);
+        else logPending.catch(() => {});
         return new Response(`Upload rejected: Storage error writing to R2 - ${err.message || String(err)}`, { status: 500 });
       }
     }
@@ -6726,13 +6737,16 @@ async function handleRequest(request, env, ctx) {
   }
 var index_default = {
   async fetch(request, env, ctx) {
-    const startedMs = Date.now();
+    beginWorkerTrace(request, env);
     try {
       const response = await handleRequest(request, env, ctx);
-      finalizeWorkerRequestTelemetry(request, env, ctx, { startedMs, response, error: null });
+      finishWorkerTrace(request, env, ctx, response.status);
       return response;
     } catch (err) {
-      finalizeWorkerRequestTelemetry(request, env, ctx, { startedMs, response: null, error: err });
+      finishWorkerTrace(request, env, ctx, 500);
+      const pending = captureWorkerException(err, request, env);
+      if (ctx && ctx.waitUntil) ctx.waitUntil(pending);
+      else pending.catch(() => {});
       throw err;
     }
   },
