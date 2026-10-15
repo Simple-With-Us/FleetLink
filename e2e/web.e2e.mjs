@@ -53,7 +53,10 @@ async function signUp(page, name) {
 test("people sign up, share, manage tokens and teams, and admins manage people, all in a real browser", async () => {
   const env = await makeEnv();
   // The logo animations deploy.sh uploads to R2.
-  for (const name of readdirSync(media)) await env.FLEET_SHARES.put(`site/media/${name}`, readFileSync(join(media, name)));
+  for (const name of readdirSync(media)) {
+    if (!/\.(mp4|jpg|png)$/i.test(name)) continue;
+    await env.FLEET_SHARES.put(`site/media/${name}`, readFileSync(join(media, name)));
+  }
   const server = await serve(env);
   const base = server.url.replace("127.0.0.1", "localhost");
   env.WEBAUTHN_RP_ID = "localhost";
@@ -64,7 +67,21 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     const ada = await personContext(browser, base, problems);
     const page = ada.page;
     // Logo animations play once; show their final frame so screenshots are stable.
-    const settle = () => page.evaluate(() => document.querySelectorAll("video").forEach((v) => { v.pause(); if (v.duration) v.currentTime = v.duration; }));
+    // Seeking finishes on "seeked", so wait for it (or for the metadata first) before a screenshot.
+    const settle = () => page.evaluate(() => Promise.all([...document.querySelectorAll("video")].map((v) => new Promise((resolve) => {
+      v.pause();
+      const seekToEnd = () => {
+        if (!Number.isFinite(v.duration)) return resolve();
+        v.addEventListener("seeked", () => resolve(), { once: true });
+        v.currentTime = v.duration;
+      };
+      if (v.readyState >= 1) seekToEnd();
+      else {
+        v.addEventListener("loadedmetadata", seekToEnd, { once: true });
+        v.addEventListener("error", () => resolve(), { once: true });
+      }
+      setTimeout(resolve, 3000);
+    }))));
 
     // Signed out, the landing page leads to sign-in and sign-up.
     await page.goto("/");
