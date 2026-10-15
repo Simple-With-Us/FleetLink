@@ -61,10 +61,14 @@ require_secret APPLE_BUNDLE_ID
 echo "Bundling worker"
 node "$ROOT/scripts/bundle-worker.mjs"
 
+SENTRY_RELEASE="$(git -C "$ROOT" rev-parse HEAD)"
+export SENTRY_RELEASE
+SENTRY_TRACES_SAMPLE_RATE="${SENTRY_TRACES_SAMPLE_RATE:-0.2}"
+
 R2_BUCKET_NAME="${FLEETLINK_R2_BUCKET:-fleet-shares}"
-python3 - "$WORKDIR/metadata.json" "$D1_DATABASE_ID" "$R2_BUCKET_NAME" <<'PY'
+python3 - "$WORKDIR/metadata.json" "$D1_DATABASE_ID" "$R2_BUCKET_NAME" "$SENTRY_RELEASE" "$SENTRY_TRACES_SAMPLE_RATE" <<'PY'
 import json, sys
-path, database_id, r2_bucket = sys.argv[1:]
+path, database_id, r2_bucket, sentry_release, traces_rate = sys.argv[1:]
 metadata = {
     "main_module": "fleetlink-api.mjs",
     "compatibility_date": "2026-09-28",
@@ -82,6 +86,8 @@ metadata = {
         {"type": "plain_text", "name": "ADMIN_HOST", "text": __import__("os").environ.get("ADMIN_HOST", "fleetlink.app")},
         {"type": "plain_text", "name": "SHARE_HOSTS", "text": __import__("os").environ.get("SHARE_HOSTS", "fleetlink.online,fleetlink.app")},
         {"type": "plain_text", "name": "SENTRY_ENVIRONMENT", "text": "production"},
+        {"type": "plain_text", "name": "SENTRY_RELEASE", "text": sentry_release},
+        {"type": "plain_text", "name": "SENTRY_TRACES_SAMPLE_RATE", "text": traces_rate},
     ],
 }
 # Drop an empty clip id rather than publishing a blank plain_text binding.
@@ -160,4 +166,4 @@ curl --config "$WORKDIR/curl.cfg" -sS -X POST \
   -H "Content-Type: application/json" \
   --data '{"enabled":false}' >/dev/null || echo "workers.dev subdomain endpoint returned an error.  Confirm in the dashboard that workers.dev stays off."
 
-echo "Deploy finished for ${SCRIPT_NAME}.  Confirm workers.dev, preview URLs, and Workers Logs are still off in the dashboard."
+echo "Deploy finished for ${SCRIPT_NAME} (SENTRY_RELEASE=${SENTRY_RELEASE}).  Confirm workers.dev, preview URLs, and Workers Logs are still off in the dashboard."
