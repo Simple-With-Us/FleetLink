@@ -29,7 +29,7 @@ The full model, limits, and API map are in [`docs/multi-user.md`](docs/multi-use
 
 ## Using It
 
-On the web, create an account at `https://fleetlink.online/login`, then use the dashboard to share files, make short links, create API tokens, and manage teams.
+On the web, create an account at `https://fleetlink.online/login`, then use the dashboard to share files, make short links, create API tokens, and manage teams.  The landing page at `https://fleetlink.online` walks through handoffs between people and agents, and `https://fleetlink.online/agents` is the step-by-step guide for connecting an agent (tokens, CLI, MCP, skill, HTTP).
 
 From a terminal:
 

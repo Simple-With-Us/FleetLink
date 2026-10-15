@@ -24,7 +24,7 @@ export const SYSTEM_ASSETS = new Set([
   "preview.png", "preview-locked.png", "preview.jpg", "cover.png", "og-image.png", "favicon.ico",
   "robots.txt", "apple-app-site-association", "share-to-fleetlink.shortcut"
 ]);
-const SYSTEM_PREFIXES = [".well-known/", "instructions/", "settings:", "settings/", STORAGE_PREFIX];
+const SYSTEM_PREFIXES = [".well-known/", "instructions/", "settings:", "settings/", "site/", STORAGE_PREFIX];
 
 export function isSystemKey(key) {
   const lower = String(key).toLowerCase();

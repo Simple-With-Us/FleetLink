@@ -25,7 +25,7 @@
 | `settings.mjs`, `audit.mjs` | Admin settings and the security log. |
 | `legacy.mjs` | Adopts R2 objects stored before ownership into the operator account. |
 | `storage.mjs` | R2 access.  New files live under `fl2/<share id>/<path>`. |
-| `pages/` | Server-rendered pages and the browser scripts and stylesheet served from `/assets`. |
+| `pages/` | Server-rendered pages and the browser scripts and stylesheet served from `/assets`.  `brand-data.mjs` (logo, favicon, touch icon) is generated from the iOS app icon by `scripts/build-brand.py`; the logo animations live in R2 under `site/media/`. |
 | `sentry-scrub.mjs`, `html-safety.mjs`, `aasa.mjs`, `shortcut.mjs`, `bytes.mjs`, `http.mjs`, `router.mjs` | Support. |
 
 ## Changing It

@@ -2,38 +2,12 @@
 import { optionalPrincipal } from "../auth.mjs";
 import { escapeHtml, html, redirect } from "../http.mjs";
 import { appClipMeta, ogTags, page } from "./layout.mjs";
+import { agents, home, introVideo } from "./marketing.mjs";
 
 const SCRIPTS = (name) => ["app.js", name];
 
 function origin(ctx) {
   return ctx.url.origin;
-}
-
-function home(ctx, principal) {
-  const signedIn = Boolean(principal);
-  const cta = signedIn
-    ? `<a class="button" href="/dashboard">Open Your Dashboard</a><a class="button secondary" href="/dashboard#new">Share Something</a>`
-    : `<a class="button" href="/login#signup">Create An Account</a><a class="button secondary" href="/login">Sign In</a>`;
-  const deleted = ctx.url.searchParams.get("deleted") === "1"
-    ? '<p class="notice ok">Your account was deleted.&nbsp; Its shares are removed within the hour.</p>'
-    : "";
-  return page(ctx.env, {
-    title: "Share Files And Short Links",
-    principal,
-    head: ogTags({ title: "FleetLink", description: "Share a file, a folder, or a short link that expires on its own.", url: `${origin(ctx)}/`, image: `${origin(ctx)}/preview.png` }) + appClipMeta(ctx.env),
-    body: `${deleted}<section class="hero">
-      <p class="eyebrow">FleetLink</p>
-      <h1>Share a file, a folder, or a short link that cleans up after itself.</h1>
-      <p>Every link has an owner and an expiry.&nbsp; People sign in with a passkey, agents use their own API tokens, and teams share a space for their links.</p>
-      <div class="actions">${cta}</div>
-    </section>
-    <section class="grid">
-      <div class="card"><h3>Yours, Not Everyone's</h3><p>Each link belongs to the account that made it.&nbsp; Only you, your team's admins, and FleetLink admins can change or delete it.</p></div>
-      <div class="card"><h3>Passkeys, No Passwords</h3><p>Sign in with Face ID, Touch ID, or a security key.&nbsp; FleetLink never stores a password for your account.</p></div>
-      <div class="card"><h3>Built For Agents</h3><p>Give each agent its own API token with its own limits.&nbsp; Use the <code>fleet-share</code> CLI, plain <code>curl</code>, or the MCP server.</p></div>
-      <div class="card"><h3>Gone On Time</h3><p>Files last up to 7 days and short links up to 180.&nbsp; Renew a link if you need it longer, or delete it now.</p></div>
-    </section>`
-  });
 }
 
 function login(ctx, principal, settings) {
@@ -51,11 +25,17 @@ function login(ctx, principal, settings) {
     principal,
     active: "login",
     scripts: SCRIPTS("login.js"),
-    body: `<div id="auth" class="grid">
-      <div id="auth-msg" class="notice error" hidden role="alert"></div>
-      ${signedOut}
+    body: `<div id="auth">
+      <div class="auth-head">
+        ${introVideo("fleetlink-monogram", "auth-intro", "FleetLink")}
+        <h1>Welcome To FleetLink</h1>
+        <p class="muted">Sign in to see your links, API tokens, and teams, or create an account in a few seconds.</p>
+        <div id="auth-msg" class="notice error" hidden role="alert"></div>
+        ${signedOut}
+      </div>
+      <div class="auth-grid">
       <section class="card" id="signin">
-        <h1>Sign In</h1>
+        <h2>Sign In</h2>
         <p class="muted">Use the passkey you made for FleetLink.&nbsp; Your device asks for Face ID, Touch ID, or your security key.</p>
         <form id="signin-form">
           <label for="si-email">Email (optional)</label>
@@ -75,6 +55,8 @@ function login(ctx, principal, settings) {
           <div class="actions mt"><button type="submit">Create A Passkey</button></div>
         </form>
       </section>
+      </div>
+      <p class="small muted center-text">New to FleetLink?&nbsp; <a href="/">See what it does</a> or read <a href="/instructions">how it works</a>.</p>
     </div>`
   });
 }
@@ -100,8 +82,10 @@ function dashboard(ctx, principal) {
     active: "dashboard",
     scripts: SCRIPTS("dashboard.js"),
     body: `<div id="dashboard" data-admin="${principal.isAdmin ? "1" : "0"}">
-      <h1 id="hello">Dashboard</h1>
-      <div id="usage"><p class="small muted">Loading…</p></div>
+      <div class="dash-head">
+        <div><p class="eyebrow">Your dashboard</p><h1 id="hello">Dashboard</h1></div>
+        <div id="usage" class="usage"><p class="small muted">Loading…</p></div>
+      </div>
       <div class="tabs" role="tablist" aria-label="Dashboard sections">
         <button type="button" role="tab" data-tab="shares">Shares</button>
         <button type="button" role="tab" data-tab="new">New Share</button>
@@ -210,7 +194,7 @@ function admin(ctx, principal) {
     active: "admin",
     scripts: SCRIPTS("admin.js"),
     body: `<div id="admin" data-user="${escapeHtml(principal.user.id)}">
-      <h1>Admin</h1>
+      <div class="dash-head"><div><p class="eyebrow">FleetLink admin</p><h1>People, Invites, And Settings</h1></div><a class="button secondary" href="/dashboard">Your Dashboard</a></div>
       <div id="stats" class="stats"></div>
       <div class="tabs" role="tablist" aria-label="Admin sections">
         <button type="button" role="tab" data-tab="people">People</button>
@@ -362,6 +346,8 @@ function forbiddenPage(ctx, principal) {
 
 export function pageRoutes(router) {
   router.on("GET", "/", async (ctx) => html(home(ctx, await optionalPrincipal(ctx.request, ctx.env))));
+  router.on("GET", "/agents", async (ctx) => html(agents(ctx, await optionalPrincipal(ctx.request, ctx.env))));
+  router.on("GET", "/features", async () => redirect("/#features", 301));
   router.on("GET", "/intro", async () => redirect("/", 301));
   router.on("GET", "/help", async () => redirect("/instructions", 301));
   router.on("GET", "/login", async (ctx) => {
