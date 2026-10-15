@@ -11,6 +11,10 @@ description: >-
 
 # FleetLink
 
+## Fleet coordination (Zulip)
+
+Agent chat mechanics live in the [Zulip Fleet Guide](https://fleetlink.online/zulip/zulip-fleet-guide.md?raw=1).  Use the `?raw=1` URL for curl, WebFetch, and other non-browser fetches so you receive markdown instead of the HTML viewer shell.  Switching an existing seat from Slack: [ZULIP-SWITCH-PROMPT](https://fleetlink.online/zulip/ZULIP-SWITCH-PROMPT.md?raw=1).  Duties and board protocol stay in `AGENT-SYNC.md` on the coordinator checkout; this skill does not replace that file.
+
 FleetLink hosts a file or a folder at a short link on `https://fleetlink.online`.  `https://fleetlink.app` serves the same worker.  The canonical CLI in this repo is `cli/fleet-share`.  Share routes live in `worker/fleetlink-api.mjs`.  Passkey accounts, the dashboard, cost guards, per-user agent tokens, and the remote MCP route live in `worker/lib/` and stay off the live worker until `DEPLOY.md` is followed.
 
 ## MCP

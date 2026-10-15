@@ -51,11 +51,11 @@ async function readJson(response) {
 }
 
 test("GET /health returns 200 JSON after a cheap R2 list and D1 select 1", async () => {
-  const { env } = await envWith();
+  const { env } = await envWith({ SENTRY_RELEASE: "abc123def456" });
   const result = await readJson(await getHealth(env));
   assert.equal(result.status, 200);
   assert.match(result.type, /^application\/json/);
-  assert.deepEqual(result.body, { ok: true, storage: "ok", db: "ok" });
+  assert.deepEqual(result.body, { ok: true, storage: "ok", db: "ok", release: "abc123def456" });
   assert.equal(result.text.includes(ADMIN), false);
   assert.equal(result.text.includes(AGENT), false);
 });

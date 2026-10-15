@@ -4,7 +4,7 @@ import { reapCostGuards } from "./lib/cost-guards.mjs";
 import { mustForceAttachment } from "./lib/html-safety.mjs";
 import { handleMcp, handleOAuthProtectedResource, mcpWwwAuthenticate } from "./lib/mcp.mjs";
 import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
-import { captureWorkerException } from "./lib/sentry-scrub.mjs";
+import { captureWorkerLog, finalizeWorkerRequestTelemetry } from "./lib/sentry-telemetry.mjs";
 import { randomHex } from "./lib/bytes.mjs";
 import { SettingsOverridesDocument, SettingsUpdateBody } from "./lib/settings-schema.mjs";
 import { applyGrantTtl, lookupAgentToken, tighterCap } from "./lib/tokens.mjs";
@@ -5162,14 +5162,24 @@ async function probeDb(env) {
 }
 __name(probeDb, "probeDb");
 __name2(probeDb, "probeDb");
-async function healthCheck(env) {
+async function healthCheck(env, ctx) {
   const storageOk = await probeStorage(env);
   const dbOk = await probeDb(env);
+  const release = (env?.SENTRY_RELEASE || "").trim();
   const body = {
     ok: storageOk && dbOk,
     storage: storageOk ? "ok" : "error",
     db: dbOk ? "ok" : "error"
   };
+  if (release) body.release = release;
+  if (!body.ok && ctx) {
+    const pending = captureWorkerLog("warning", "health check failed", env, {
+      storage: body.storage,
+      db: body.db
+    });
+    if (ctx.waitUntil) ctx.waitUntil(pending);
+    else pending.catch(() => {});
+  }
   return new Response(JSON.stringify(body), {
     status: body.ok ? 200 : 503,
     headers: {
@@ -5183,7 +5193,7 @@ __name2(healthCheck, "healthCheck");
 async function handleRequest(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/health/")) {
-      return healthCheck(env);
+      return healthCheck(env, ctx);
     }
     if ((request.method === "GET" || request.method === "HEAD") && (url.pathname === "/.well-known/oauth-protected-resource" || url.pathname === "/.well-known/oauth-protected-resource/")) {
       return handleOAuthProtectedResource(request);
@@ -6716,12 +6726,13 @@ async function handleRequest(request, env, ctx) {
   }
 var index_default = {
   async fetch(request, env, ctx) {
+    const startedMs = Date.now();
     try {
-      return await handleRequest(request, env, ctx);
+      const response = await handleRequest(request, env, ctx);
+      finalizeWorkerRequestTelemetry(request, env, ctx, { startedMs, response, error: null });
+      return response;
     } catch (err) {
-      const pending = captureWorkerException(err, request, env);
-      if (ctx && ctx.waitUntil) ctx.waitUntil(pending);
-      else pending.catch(() => {});
+      finalizeWorkerRequestTelemetry(request, env, ctx, { startedMs, response: null, error: err });
       throw err;
     }
   },

@@ -29,7 +29,9 @@ Associated Domains already include `webcredentials:fleetlink.online` and `webcre
 | `ADMIN_SECRET` | Infisical, published as a Worker secret | existing operator portal.  Also published as `FLEET_ADMIN_SECRET`. |
 | `AGENT_SECRET` | Infisical, published as a Worker secret | existing agent header.  Also published as `FLEET_AGENT_SECRET`. |
 | `SESSION_SECRET` | Infisical, published as a Worker secret | pepper for session and agent-token hashes.  Rotating it signs everyone out. |
-| `SENTRY_DSN` | Infisical, published as a Worker secret | worker reports.  The scrubber drops share passwords, cookies, and auth headers.  Leave Workers Logs off. |
+| `SENTRY_DSN` | Infisical, published as a Worker secret | worker errors, bounded spans, and sparse logs.  The scrubber drops share passwords, cookies, and auth headers.  Leave Workers Logs off. |
+| `SENTRY_AUTH_TOKEN` | Infisical (optional) | `scripts/sentry-release.mjs` registers the git SHA and bundled `fleetlink-api.mjs` hash with Sentry during deploy.  Skipped when unset. |
+| `SENTRY_RELEASE` | deploy-time plain text binding | Git SHA at deploy.  Exposed on `GET /health` as `release` for verification. |
 | `APPLE_TEAM_ID` | Infisical, plain text binding | `/.well-known/apple-app-site-association`.  Until this and the bundle id are set, the worker keeps the AASA document already deployed. |
 | `APPLE_BUNDLE_ID` | Infisical, plain text binding | expected `online.fleetlink.ios`.  Clip id defaults to `<bundle>.Clip` unless `APPLE_CLIP_BUNDLE_ID` is set. |
 | Infisical machine identity | `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `INFISICAL_PROJECT_ID` | `deploy.sh` exports secrets into a mode-0600 temp file and does not print values. |

@@ -22,8 +22,8 @@ Present today:
 
 | Infisical key | Secret | Used by | Default when unset |
 |---|---|---|---|
-| `SENTRY_DSN` | Yes | iOS build setting `SentryDSN`.  Not read by the live worker. | SDK stays off |
-| `SENTRY_FLEET_DSN` | Yes | Intended worker error reporting.  Not read by the live worker. | Reporting stays off |
+| `SENTRY_DSN` | Yes | Worker secret (`scripts/deploy.sh`) and iOS build setting `SentryDSN`. | SDK and worker reporting stay off |
+| `SENTRY_FLEET_DSN` | Yes | Legacy fleet-infra CI reporting (`SENTRY_FLEET_DSN` in workflows).  Not read by the live worker fetch handler. | CI reports stay off |
 | `SENTRY_AUTH_TOKEN` | Yes | Release upload tooling.  Not read by the live worker. | Uploads stay unsigned |
 | `SENTRY_ORG` | No | Release upload tooling.  Not read by the live worker. | None |
 | `SENTRY_PROJECT` | No | Release upload tooling.  Not read by the live worker. | None |

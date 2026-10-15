@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SENTRY_FILTERED, captureWorkerException, redactSentryUrl, scrubSentryEvent, sentryEnvelope } from "../worker/lib/sentry-scrub.mjs";
+import {
+  SENTRY_FILTERED,
+  applySentryRelease,
+  captureWorkerException,
+  eventFromError,
+  redactSentryUrl,
+  scrubSentryEvent,
+  scrubSentryLog,
+  sentryEnvelope
+} from "../worker/lib/sentry-scrub.mjs";
 
 test("share passwords and auth headers are stripped before send", () => {
   const event = {
@@ -35,6 +44,24 @@ test("redactSentryUrl coarsens share paths and drops userinfo", () => {
   assert.doesNotMatch(redacted, /abc123/);
   assert.doesNotMatch(redacted, /xyz/);
   assert.match(redacted, /\[Filtered\]|%5BFiltered%5D/);
+});
+
+test("scrubSentryLog drops sensitive messages and scrubs attributes", () => {
+  assert.equal(scrubSentryLog({ message: "password leak" }), null);
+  const kept = scrubSentryLog({ message: "storage degraded", attributes: { token: "secret", region: "iad" } });
+  assert.equal(kept.message, "storage degraded");
+  assert.equal(kept.attributes.token, SENTRY_FILTERED);
+  assert.equal(kept.attributes.region, "iad");
+});
+
+test("eventFromError attaches release metadata without leaking secrets", () => {
+  const event = eventFromError(new Error("boom"), new Request("https://fleetlink.online/a"), {
+    SENTRY_RELEASE: "deadbeef",
+    SENTRY_ENVIRONMENT: "production"
+  });
+  assert.equal(event.release, "deadbeef");
+  assert.equal(event.environment, "production");
+  assert.equal(applySentryRelease({ level: "error" }, {}).environment, "production");
 });
 
 test("capture is a no-op without a DSN and the envelope never contains the password", async () => {

@@ -100,6 +100,21 @@ function scrubRecord(value, depth = 0) {
   }
 }
 
+export function scrubSentryLog(log) {
+  if (!log) return log;
+  if (typeof log.message === "string" && isSensitiveKey(log.message)) return null;
+  if (log.attributes) scrubRecord(log.attributes);
+  return log;
+}
+
+export function applySentryRelease(event, env) {
+  const release = env?.SENTRY_RELEASE?.trim();
+  const environment = env?.SENTRY_ENVIRONMENT?.trim() || "production";
+  if (release) event.release = release;
+  event.environment = environment;
+  return event;
+}
+
 export function scrubSentryEvent(event) {
   if (!event) return event;
   event.user = undefined;
@@ -143,13 +158,16 @@ export function parseDsn(dsn) {
   }
 }
 
-export function sentryEnvelope(dsn, event) {
+export function sentryEnvelope(dsn, event, itemType = "event") {
   const parsed = parseDsn(dsn);
   if (!parsed) return null;
-  const scrubbed = scrubSentryEvent(structuredClone(event));
+  const scrubbed = itemType === "log"
+    ? scrubSentryLog(structuredClone(event))
+    : scrubSentryEvent(structuredClone(event));
+  if (!scrubbed) return null;
   const eventId = randomEventId();
   const header = JSON.stringify({ event_id: eventId, sent_at: new Date().toISOString() });
-  const item = JSON.stringify({ type: "event" });
+  const item = JSON.stringify({ type: itemType });
   return {
     url: parsed.envelopeUrl,
     key: parsed.key,
@@ -162,10 +180,10 @@ function randomEventId() {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function eventFromError(error, request) {
+export function eventFromError(error, request, env) {
   let url = "";
   try { url = request?.url || ""; } catch { url = ""; }
-  return {
+  const event = {
     message: error instanceof Error ? error.message : String(error),
     level: "error",
     platform: "javascript",
@@ -175,6 +193,30 @@ export function eventFromError(error, request) {
       headers: request?.headers ? Object.fromEntries(request.headers.entries()) : undefined
     }
   };
+  return applySentryRelease(event, env);
+}
+
+function randomTraceId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function randomSpanId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function postSentryEnvelope(dsn, envelope, fetchImpl = fetch) {
+  if (!envelope) return { sent: false };
+  await fetchImpl(envelope.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-sentry-envelope",
+      "X-Sentry-Auth": `Sentry sentry_version=7, sentry_key=${envelope.key}`
+    },
+    body: envelope.body
+  });
+  return { sent: true };
 }
 
 /** No-ops when SENTRY_DSN is unset.  Never throws into the request path. */
@@ -182,17 +224,8 @@ export async function captureWorkerException(error, request, env, fetchImpl = fe
   try {
     const dsn = env?.SENTRY_DSN?.trim();
     if (!dsn) return { sent: false };
-    const envelope = sentryEnvelope(dsn, eventFromError(error, request));
-    if (!envelope) return { sent: false };
-    await fetchImpl(envelope.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-sentry-envelope",
-        "X-Sentry-Auth": `Sentry sentry_version=7, sentry_key=${envelope.key}`
-      },
-      body: envelope.body
-    });
-    return { sent: true };
+    const envelope = sentryEnvelope(dsn, eventFromError(error, request, env));
+    return await postSentryEnvelope(dsn, envelope, fetchImpl);
   } catch {
     return { sent: false };
   }
