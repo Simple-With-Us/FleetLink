@@ -25,11 +25,15 @@ The shared agent secret (`AGENT_SECRET`, `X-Fleet-Agent`) is retired.  A request
 
 The operator secret maps to a real user row (`usr_operator`, role `admin`, marked as a system account).  Shares it creates are owned by that account, so they show up in admin views and follow the same rules as everyone else's.  It cannot sign in with a passkey and cannot be deleted.
 
-### Agent Accounts
+### Bots and Agent Accounts
 
-The fleet's AI seats (JET, GROK-WEB, ECHO, and the rest) reach FleetLink through the Agent-Sync MCP server at `agent-sync.jays.services`, which already authenticates each seat with its own OAuth grant.  That server holds one credential, `AGENT_SYNC_SECRET` (`fls_` plus 64 hex, a worker secret on both sides), and names the seat in `X-Fleet-Seat`.  FleetLink gives every seat its own account, `usr_agent_<seat>` (kind `agent`), made on first use and added to the built-in **Fleet agents** team (`team_fleet`) as a member.  So each seat has a personal side, like a person, and puts work on the team side when it chooses.
+A **bot** is an account of kind `agent`:  an AI seat that signs in as itself.  It never has a passkey, never acts as a site admin (even if given the role), and cannot manage the account.  A bot has a **manager** (`users.manager_id`), the person whose account it sits under:  the manager has the owner's rights on everything the bot owns, personal shares included, lists them with `scope=bots`, and runs the bot from the dashboard's **Bots** tab (add a bot, rename, disable or enable it, give it API tokens or revoke them).  Anyone can add bots under their own account.
 
-Agent accounts never sign in with a passkey, cannot create tokens or teams, and never act as admins even if an admin gives one the role.  An admin disables a seat like any account, from the admin console's People tab.  A site admin joins Fleet agents (or any team) from the admin console's Teams tab to see and edit the seats' team shares on their own dashboard.  Without `AGENT_SYNC_SECRET` set, an `fls_` credential is refused with `401`.
+**The fleet's bots.**  Migration 3 creates an account for every bot in the fleet handbook (`worker/lib/fleet-roster.mjs`:  the 15 seats, the 11 BotFleet roles and the 11 Grok Bot personas), and any other seat gets one on first use.  Every one is an **admin of the Fleet team** (`team_fleet`), works with the widest limits (admin file and share sizes, any lifetime including never, unlimited renewals, short names, no storage quota, 100 tokens), and its new shares land in the Fleet team with `edit` access unless it asks for a personal one (`personal: true`, or `X-Fleet-Personal: 1` on the raw path).  So the bots and the fleet owner edit and overwrite each other's team shares; a person's personal shares stay theirs.
+
+**The fleet owner** manages every fleet bot and owns the Fleet team.  The worker finds them once and remembers it (`meta.fleet_owner_id`):  the active person account whose email equals the `FLEET_OWNER_EMAIL` worker secret and that has a passkey, or a site admin who presses **Make Me The Fleet Owner** in the admin console's Teams tab (`POST /api/admin/fleet/claim`).  Claiming moves every bot without another manager under the owner, and the change is audited as `fleet.owner`.
+
+**Signing in.**  Cloud seats reach FleetLink through the Agent-Sync MCP server at `agent-sync.jays.services`, which authenticates each seat with its own OAuth grant, then calls FleetLink with one credential, `AGENT_SYNC_SECRET` (`fls_` plus 64 hex, a worker secret on both sides), naming the seat in `X-Fleet-Seat`.  A bot that runs on a machine (a CLI, a cloud VM) uses its own `fla_` API token instead:  its manager makes one on the Bots tab, or the Agent-Sync credential mints one for the seat it acts as (`POST /api/agent/token`), which is how the fleet's per-seat tokens are provisioned into Infisical.  Without `AGENT_SYNC_SECRET`, an `fls_` credential gets `503` naming the setting; every other request is unaffected.
 
 ### Passkeys
 
@@ -60,6 +64,8 @@ Every request resolves to one principal or none.  The checks are in `worker/lib/
 | Add, replace, delete files; change title, description, link destination; renew (edit) | yes | yes | when the share's team access is `edit` | yes | no |
 | Rename, set the password, change the team access level, delete (manage) | yes | yes | no | yes | no |
 | Share it with a team, move it between teams, make it personal (owner) | yes | no | no | yes | no |
+
+A bot's manager counts as its owner in this table.
 | Create a share in a team | — | yes | yes | yes | no |
 
 ### Personal and Team Sides
@@ -100,7 +106,7 @@ The schema is `worker/lib/schema.mjs`.  The worker applies pending migrations it
 - `passkeys`, `webauthn_challenges`, `sessions`, `api_tokens`, `invites`.
 - `teams`, `team_members` (roles `owner`, `admin`, `member`).  Deleting a team keeps its shares with their owners and removes the API tokens and invites bound to it.
 - `shares`: slug, owner, optional team with `team_access` (`view` or `edit`), kind (`files` or `link`), optional password hash, expiry, renewals, file count, byte total.
-- `users.kind`: `person` or `agent` (migration 2).
+- `users.kind`: `person` or `agent` (migration 2);  `users.agent_seat` and `users.manager_id` (migration 3).
 - `upload_grants`: one-time upload URLs (secret hash, share, path, creator, optional token, byte cap, expiry, used time).  The sweep removes them a day after they expire.
 - `share_files`: one row per object with its R2 key, size, and type.  New uploads use `s/<share id>/<path>`, so a slug never collides with an old object or a system asset.
 - `settings`: admin-editable values.
@@ -135,5 +141,6 @@ All JSON.  Errors are `{ "error": "…" }` with the right status.
 - Shares: `GET|POST /api/shares`, `GET|PATCH|DELETE /api/shares/:slug` (`PATCH` takes `team_id` and `team_access`), `POST /api/shares/:slug/renew`, `PUT|DELETE /api/shares/:slug/files/<path>`, `POST /api/shares/:slug/upload-url`, `POST /api/links`.
 - Upload URLs: `PUT /api/uploads/:secret` (no other credential).
 - Raw upload: `PUT /<slug>/<path>` and `DELETE /<slug>` for curl and the CLI.
-- Admin: `GET /api/admin/stats`, `GET /api/admin/users`, `PATCH|DELETE /api/admin/users/:id`, `GET|POST /api/admin/invites`, `DELETE /api/admin/invites/:id`, `GET /api/admin/teams`, `POST /api/admin/teams/:id/join`, `GET|PUT /api/admin/settings`, `GET /api/admin/audit`.
+- Bots: `GET|POST /api/bots`, `PATCH /api/bots/:id`, `GET|POST /api/bots/:id/tokens`, `DELETE /api/bots/:id/tokens/:tokenId`, and `POST /api/agent/token` (Agent-Sync credential only).
+- Admin: `GET /api/admin/fleet`, `POST /api/admin/fleet/claim`, `GET /api/admin/stats`, `GET /api/admin/users`, `PATCH|DELETE /api/admin/users/:id`, `GET|POST /api/admin/invites`, `DELETE /api/admin/invites/:id`, `GET /api/admin/teams`, `POST /api/admin/teams/:id/join`, `GET|PUT /api/admin/settings`, `GET /api/admin/audit`.
 - MCP: `POST /mcp` with the same credentials.  See `docs/mcp.md`.

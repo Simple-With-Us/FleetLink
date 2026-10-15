@@ -37,7 +37,7 @@ async function operatorPrincipal(env) {
 /** The Agent-Sync server acting for one seat (agents.mjs).  Agents are never admins. */
 async function agentPrincipal(env, request) {
   const user = await ensureAgentUser(env, request.headers.get("x-fleet-seat"));
-  return { ...principalFor("agent", user), isAdmin: false, seat: user.display_name.replace(/ \(agent\)$/, "") };
+  return { ...principalFor("agent", user), isAdmin: false, seat: user.agent_seat };
 }
 
 async function fromToken(env, secret) {

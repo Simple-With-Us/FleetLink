@@ -35,7 +35,8 @@ test("migrations replace the old account tables and seed the operator account", 
   assert.equal(operator.is_system, 1);
   // A second run is a no-op.
   assert.equal(await migrate(db), MIGRATIONS.at(-1).version);
-  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM users").first()).n, 1);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM users WHERE kind = 'person'").first()).n, 1);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM users WHERE kind = 'agent'").first()).n, 37);
 });
 
 test("ensureSchema runs once per binding and retries after a failure", async () => {
@@ -96,7 +97,7 @@ test("a ceremony from another origin, a reused challenge, and a wrong origin in 
   assert.equal(wrongOrigin.status, 401);
   const reuse = await callJson(env, "POST", "/api/auth/passkey/register/verify", { headers: { "x-fleet-client": "ios" }, json: { challengeId: started.data.challengeId, credential: await auth.create(started.data.options) } });
   assert.equal(reuse.status, 401);
-  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE is_system = 0").first()).n, 0);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE is_system = 0 AND kind = 'person'").first()).n, 0);
 });
 
 test("a cloned authenticator whose counter goes backwards is refused", async () => {

@@ -1,7 +1,8 @@
 /** Routes for a person's own account: passkeys, sessions, profile, tokens, and teams. */
 import { z } from "zod";
 import { audit } from "../audit.mjs";
-import { now, run } from "../db.mjs";
+import { first, now, run } from "../db.mjs";
+import { ensureFleetOwner } from "../fleet.mjs";
 import { badRequest, cookie, json, parseWith, readBody, redirect, wantsJson } from "../http.mjs";
 import {
   addPasskeyOptions, addPasskeyVerify, listPasskeys, loginOptions, loginVerify,
@@ -20,7 +21,12 @@ const UpdateMeBody = z.object({
 const DeleteMeBody = z.object({ confirm: z.literal("delete my account") }).strict();
 
 async function principalSummary(ctx, principal) {
+  const ownerId = await ensureFleetOwner(ctx.env);
   const summary = await accountSummary(ctx.env, principal.user, await ctx.settings());
+  if (principal.user.kind !== "agent") {
+    const bots = await first(ctx.env.DB, "SELECT COUNT(*) AS n FROM users WHERE kind = 'agent' AND manager_id = ? AND status != 'deleted'", principal.user.id);
+    summary.bots = { count: Number(bots?.n ?? 0), fleet_owner: ownerId === principal.user.id };
+  }
   summary.auth = { kind: principal.kind };
   if (principal.token) summary.auth.token = { id: principal.token.id, name: principal.token.name, team_id: principal.token.team_id };
   return summary;

@@ -92,6 +92,7 @@ function dashboard(ctx, principal) {
         <button type="button" role="tab" data-tab="new">New Share</button>
         <button type="button" role="tab" data-tab="tokens">API Tokens</button>
         <button type="button" role="tab" data-tab="teams">Teams</button>
+        <button type="button" role="tab" data-tab="bots">Bots</button>
         <button type="button" role="tab" data-tab="account">Account</button>
       </div>
 
@@ -157,6 +158,22 @@ function dashboard(ctx, principal) {
           <div class="end"><button type="submit">Create Team</button></div></div>
         </form>
         <div id="team-list"></div>
+      </section>
+
+      <section id="panel-bots" role="tabpanel" hidden>
+        <div class="card">
+          <h2>Bots</h2>
+          <p class="muted">Bot identities under your account.&nbsp; Each bot signs in as itself, through the Agent-Sync MCP server or with a token you give it here.&nbsp; You see and manage everything your bots own, and the fleet's bots work in the Fleet team with you, where they and you can edit and overwrite each other's shares.</p>
+          <p id="bot-summary" class="small muted"></p>
+          <form id="bot-form" class="row">
+            <div><label for="bot-seat">New bot seat</label><input id="bot-seat" name="seat" type="text" maxlength="24" required placeholder="QA-BOT" autocomplete="off"></div>
+            <div><label for="bot-name">Display name (optional)</label><input id="bot-name" name="display_name" type="text" maxlength="64"></div>
+            <div class="end"><button type="submit">Add Bot</button></div>
+          </form>
+          <div id="bot-secret"></div>
+        </div>
+        ${table("bot-rows", [["Bot"], ["Shares", "hide-sm"], ["Tokens"], ["Status"], [""]])}
+        <p id="bot-empty" class="empty" hidden>No bots under your account yet.</p>
       </section>
 
       <section id="panel-account" role="tabpanel" hidden>
@@ -225,7 +242,8 @@ function admin(ctx, principal) {
         <p id="invite-empty" class="empty" hidden>No invites yet.</p>
       </section>
       <section id="panel-teams" role="tabpanel" hidden>
-        <p class="small muted">Every team.&nbsp; Fleet agents is where the AI seats share work with each other; join it to see and edit their team shares from your dashboard.</p>
+        <div class="card"><h2>Fleet Bots</h2><p id="fleet-owner" class="small muted">Loading…</p><div id="fleet-actions" class="actions"></div></div>
+        <p class="small muted">Every team.&nbsp; Fleet is where the fleet owner and the AI seats share work; join a team to see and edit its shares from your dashboard.</p>
         ${table("team-rows", [["Team"], ["Members"], ["Live shares"], [""]])}
         <p id="team-empty" class="empty" hidden>No teams yet.</p>
       </section>
