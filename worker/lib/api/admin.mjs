@@ -134,6 +134,35 @@ export function adminRoutes(router) {
     return json({ ok: true });
   });
 
+  // Every team, so an admin can find the built-in "Fleet agents" team (or any
+  // other) and join it to see the agents' team shares on their own dashboard.
+  router.on("GET", "/api/admin/teams", async (ctx) => {
+    const principal = await ctx.admin();
+    const rows = await all(
+      ctx.env.DB,
+      `SELECT t.id, t.name, t.created_at,
+              (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS members,
+              (SELECT COUNT(*) FROM shares s WHERE s.team_id = t.id AND (s.expires_at IS NULL OR s.expires_at > ?)) AS shares,
+              (SELECT role FROM team_members m WHERE m.team_id = t.id AND m.user_id = ?) AS my_role
+         FROM teams t ORDER BY t.name LIMIT 500`,
+      now(), principal.user.id
+    );
+    return json({ teams: rows.map((row) => ({ id: row.id, name: row.name, members: Number(row.members), shares: Number(row.shares), my_role: row.my_role ?? null, created_at: new Date(row.created_at * 1000).toISOString() })) });
+  });
+  router.on("POST", "/api/admin/teams/:id/join", async (ctx) => {
+    const principal = await ctx.admin();
+    if (principal.kind === "operator") throw badRequest("The operator account is already in the teams it needs.  Sign in as yourself to join.");
+    const team = await first(ctx.env.DB, "SELECT id FROM teams WHERE id = ?", ctx.params.id);
+    if (!team) throw notFound("Team not found.");
+    await run(
+      ctx.env.DB,
+      "INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?) ON CONFLICT(team_id, user_id) DO UPDATE SET role = 'owner'",
+      team.id, principal.user.id, now()
+    );
+    await audit(ctx.env, principal.user.id, "admin.team.join", team.id);
+    return json({ ok: true, team_id: team.id, role: "owner" });
+  });
+
   router.on("GET", "/api/admin/invites", async (ctx) => {
     await ctx.admin();
     return json({ invites: await listInvites(ctx.env) });

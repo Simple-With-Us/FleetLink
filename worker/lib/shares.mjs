@@ -3,7 +3,7 @@ import { audit } from "./audit.mjs";
 import { hashSharePassword, newId } from "./bytes.mjs";
 import { all, first, now, run } from "./db.mjs";
 import { badRequest, forbidden, HttpError, iso, notFound, parseWith } from "./http.mjs";
-import { requireShareAccess, shareAccess, slugTaken } from "./policy.mjs";
+import { REFUSALS, requireShareAccess, shareAccess, slugTaken } from "./policy.mjs";
 import { deleteKeys, objectKey, putObject } from "./storage.mjs";
 import { membership, requireTeamRole, teamRoles } from "./teams.mjs";
 import { assertTokenTeam, requireLinksAllowed } from "./tokens.mjs";
@@ -151,8 +151,11 @@ export const CreateShareBody = z.object({
   title: z.string().max(400).nullable().optional(),
   description: z.string().max(2000).nullable().optional(),
   team_id: z.string().max(64).nullable().optional(),
+  team_access: z.enum(["view", "edit"]).optional(),
   source: z.enum(["web", "api", "ios", "mcp"]).optional()
 }).passthrough();
+
+export const TEAM_ACCESS = ["view", "edit"];
 
 /** Remove an expired share that still holds a slug, so the name can be reused. */
 async function reclaimExpired(env, slug) {
@@ -183,6 +186,7 @@ export async function createShare(env, principal, input) {
     slug: requested || randomSlug(),
     owner_id: principal.user.id,
     team_id: teamId,
+    team_access: input.team_access === "view" ? "view" : "edit",
     kind,
     target_url: targetUrl,
     title: cleanText(input.title, 200, "Title"),
@@ -196,9 +200,9 @@ export async function createShare(env, principal, input) {
   };
   const insert = () => run(
     env.DB,
-    `INSERT INTO shares (id, slug, owner_id, team_id, kind, target_url, title, description, password_hash, source, token_id, created_at, updated_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    row.id, row.slug, row.owner_id, row.team_id, row.kind, row.target_url, row.title, row.description,
+    `INSERT INTO shares (id, slug, owner_id, team_id, team_access, kind, target_url, title, description, password_hash, source, token_id, created_at, updated_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    row.id, row.slug, row.owner_id, row.team_id, row.team_access, row.kind, row.target_url, row.title, row.description,
     row.password_hash, row.source, row.token_id, row.created_at, row.updated_at, row.expires_at
   );
   try {
@@ -329,41 +333,62 @@ export const UpdateShareBody = z.object({
   description: z.string().max(2000).nullable().optional(),
   password: z.string().max(256).nullable().optional(),
   team_id: z.string().max(64).nullable().optional(),
+  team_access: z.enum(["view", "edit"]).optional(),
   url: z.string().max(4096).optional(),
   target_url: z.string().max(4096).optional()
 }).strict();
 
+/**
+ * Change a share.  Each field needs its own level (policy.mjs): title,
+ * description, and a link's destination need edit; the name, password, and
+ * team access level need manage; moving it into, between, or out of teams
+ * needs the owner.  Ownership itself never changes here.
+ */
 export async function updateShare(env, principal, slug, body) {
   const input = parseWith(UpdateShareBody, body);
-  const { share } = await loadShareFor(env, principal, slug, "manage");
+  const { share, access } = await loadShareFor(env, principal, slug, "view");
+  const need = (level) => {
+    if (!access[level]) throw forbidden(REFUSALS[level]);
+  };
   const sets = [];
   const args = [];
+  const changes = {};
   if (input.slug !== undefined) {
     const next = cleanSlug(input.slug, { isAdmin: principal.isAdmin });
     if (!next) throw badRequest("A share needs a name.");
     if (next !== share.slug) {
+      need("manage");
       const holder = await getShareBySlug(env, next);
       if (holder && !(isExpired(holder) && (await reclaimExpired(env, next)))) throw slugTaken(next);
       sets.push("slug = ?");
       args.push(next);
     }
   }
-  if (input.title !== undefined) { sets.push("title = ?"); args.push(cleanText(input.title, 200, "Title")); }
-  if (input.description !== undefined) { sets.push("description = ?"); args.push(cleanText(input.description, 500, "Description")); }
+  if (input.title !== undefined) { need("edit"); sets.push("title = ?"); args.push(cleanText(input.title, 200, "Title")); }
+  if (input.description !== undefined) { need("edit"); sets.push("description = ?"); args.push(cleanText(input.description, 500, "Description")); }
   if (input.password !== undefined) {
+    need("manage");
     const pw = cleanPassword(input.password);
     sets.push("password_hash = ?");
     args.push(pw ? await hashSharePassword(pw) : null);
   }
   if (input.team_id !== undefined) {
     const teamId = input.team_id ? await resolveTeam(env, principal, input.team_id) : null;
-    if (!teamId && share.owner_id !== principal.user.id && !principal.isAdmin) {
-      throw forbidden("Only the owner can take a share out of its team.");
+    if (teamId !== (share.team_id ?? null)) {
+      need("owner");
+      sets.push("team_id = ?");
+      args.push(teamId);
+      changes.team_id = teamId;
     }
-    sets.push("team_id = ?");
-    args.push(teamId);
+  }
+  if (input.team_access !== undefined && input.team_access !== share.team_access) {
+    need("manage");
+    sets.push("team_access = ?");
+    args.push(input.team_access);
+    changes.team_access = input.team_access;
   }
   if (input.url !== undefined || input.target_url !== undefined) {
+    need("edit");
     if (share.kind !== "link") throw badRequest("Only short links have a destination.");
     requireLinksAllowed(principal);
     sets.push("target_url = ?");
@@ -378,11 +403,31 @@ export async function updateShare(env, principal, slug, body) {
     if (/UNIQUE/i.test(String(err?.message || err))) throw slugTaken(input.slug);
     throw err;
   }
+  if (Object.keys(changes).length) await audit(env, principal.user.id, "share.sharing", share.slug, { owner_id: share.owner_id, ...changes });
   return first(env.DB, "SELECT * FROM shares WHERE id = ?", share.id);
 }
 
+/** Put a share in one of the owner's teams, with view or edit access for its members. */
+export async function shareToTeam(env, principal, slug, { team_id: requested = null, access = "edit" } = {}) {
+  let teamId = requested || principal.token?.team_id || null;
+  if (!teamId) {
+    const teams = await all(env.DB, "SELECT team_id FROM team_members WHERE user_id = ?", principal.user.id);
+    if (teams.length !== 1) {
+      throw badRequest(teams.length ? "You are in more than one team.  Give team_id (list your teams first)." : "You are not in any team yet.  Create one, or ask a team owner to add you.");
+    }
+    teamId = teams[0].team_id;
+  }
+  if (!TEAM_ACCESS.includes(access)) throw badRequest("access is view or edit.");
+  return updateShare(env, principal, slug, { team_id: teamId, team_access: access });
+}
+
+/** Take a share out of its team.  Only the owner (or a site admin) can. */
+export async function makePersonal(env, principal, slug) {
+  return updateShare(env, principal, slug, { team_id: null });
+}
+
 export async function renewShare(env, principal, slug, body = {}) {
-  const { share } = await loadShareFor(env, principal, slug, "manage");
+  const { share } = await loadShareFor(env, principal, slug, "edit");
   const limits = tier(principal);
   if (share.expires_at == null) return { share, unchanged: true };
   if (limits.renewals != null && share.renewals >= limits.renewals) {
@@ -457,9 +502,10 @@ export async function listShares(env, principal, { scope = "mine", team_id: team
   const page = rows.slice(0, pageSize);
   const roles = principal.isAdmin ? null : await teamRoles(env, principal.user.id);
   const manageable = (row) => principal.isAdmin || row.owner_id === principal.user.id || ["owner", "admin"].includes(roles?.get(row.team_id));
+  const editable = (row) => manageable(row) || (row.team_access === "edit" && roles?.has(row.team_id));
   const last = page[page.length - 1];
   return {
-    rows: page.map((row) => ({ row, canManage: manageable(row) })),
+    rows: page.map((row) => ({ row, canManage: manageable(row), canEdit: editable(row) })),
     next: more && last ? `${last.created_at}:${last.id}` : null
   };
 }
@@ -475,7 +521,7 @@ export function shareUrl(origin, share, path = null) {
 }
 
 /** The JSON shape of a share for its owner, team, or an admin. */
-export function publicShare(share, origin, { canManage = false, files = null, ownerName = null, teamName = null } = {}) {
+export function publicShare(share, origin, { canManage = false, canEdit = canManage, files = null, ownerName = null, teamName = null } = {}) {
   const out = {
     id: share.id,
     slug: share.slug,
@@ -485,7 +531,8 @@ export function publicShare(share, origin, { canManage = false, files = null, ow
     description: share.description ?? null,
     target_url: share.target_url ?? null,
     owner: { id: share.owner_id, display_name: ownerName ?? share.owner_name ?? null },
-    team: share.team_id ? { id: share.team_id, name: teamName ?? share.team_name ?? null } : null,
+    team: share.team_id ? { id: share.team_id, name: teamName ?? share.team_name ?? null, access: share.team_access === "edit" ? "edit" : "view" } : null,
+    visibility: share.team_id ? "team" : "personal",
     has_password: Boolean(share.password_hash),
     file_count: Number(share.file_count ?? 0),
     total_bytes: Number(share.total_bytes ?? 0),
@@ -494,7 +541,8 @@ export function publicShare(share, origin, { canManage = false, files = null, ow
     created_at: iso(share.created_at),
     updated_at: iso(share.updated_at),
     expires_at: iso(share.expires_at),
-    can_manage: canManage
+    can_manage: canManage,
+    can_edit: canEdit || canManage
   };
   if (files) {
     out.files = files.map((f) => ({ path: f.path, size: f.size, content_type: f.content_type, url: shareUrl(origin, share, f.path) }));

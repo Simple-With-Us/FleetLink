@@ -103,6 +103,7 @@ button.secondary:hover, .button.secondary:hover { background: var(--soft); color
 button.danger { background: #fff; color: var(--bad); border-color: #fca5a5; }
 button.danger:hover { background: var(--bad-soft); color: var(--bad); }
 button.small, .button.small { padding: 0.3rem 0.65rem; min-height: 34px; font-size: 0.86rem; }
+select.small { width: auto; max-width: 15rem; padding: 0.3rem 0.5rem; min-height: 34px; font-size: 0.86rem; }
 button.link { background: none; border: none; color: var(--muted); padding: 0.5rem 0.75rem; font-weight: 600; min-height: 40px; }
 button.link:hover { background: var(--soft); color: var(--ink); }
 button[disabled] { opacity: 0.55; cursor: not-allowed; }

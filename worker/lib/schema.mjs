@@ -195,8 +195,39 @@ INSERT INTO users (id, display_name, role, status, is_system, created_at, update
 VALUES ('${OPERATOR_USER_ID}', 'Operator', 'admin', 'active', 1, CAST(strftime('%s', 'now') AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER));
 `;
 
+export const AGENT_TEAM_ID = "team_fleet";
+
+// Team sharing and agents.  A team share is seen by every member and, with
+// team_access 'edit', changed by them too; it keeps its owner.  Agent accounts
+// are the fleet's AI seats, signed in by a trusted server (auth.mjs), never by
+// passkey.  Upload grants are one-time PUT URLs for agents that cannot send
+// file bytes through a tool call.  Existing team shares stay view-only.
+const TEAM_SHARING = `
+ALTER TABLE shares ADD COLUMN team_access TEXT NOT NULL DEFAULT 'view' CHECK (team_access IN ('view', 'edit'));
+ALTER TABLE users ADD COLUMN kind TEXT NOT NULL DEFAULT 'person' CHECK (kind IN ('person', 'agent'));
+CREATE TABLE upload_grants (
+  id TEXT PRIMARY KEY,
+  secret_hash TEXT NOT NULL UNIQUE,
+  share_id TEXT NOT NULL REFERENCES shares(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  api_token_id TEXT,
+  max_bytes INTEGER NOT NULL,
+  content_type TEXT,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER
+);
+CREATE INDEX upload_grants_expires ON upload_grants(expires_at);
+INSERT OR IGNORE INTO teams (id, name, created_by, created_at, updated_at)
+VALUES ('${AGENT_TEAM_ID}', 'Fleet agents', '${OPERATOR_USER_ID}', CAST(strftime('%s', 'now') AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER));
+INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at)
+VALUES ('${AGENT_TEAM_ID}', '${OPERATOR_USER_ID}', 'owner', CAST(strftime('%s', 'now') AS INTEGER));
+`;
+
 export const MIGRATIONS = [
-  { version: 1, name: "multi_user", sql: INIT }
+  { version: 1, name: "multi_user", sql: INIT },
+  { version: 2, name: "team_sharing", sql: TEAM_SHARING }
 ];
 
 /**
