@@ -175,15 +175,15 @@ test("agent seats act through the Agent-Sync server credential with their own ac
   assert.equal((await callJson(env, "POST", "/api/tokens", { headers: agent("JET"), json: { name: "x" } })).status, 403);
   assert.equal((await callJson(env, "POST", "/api/teams", { headers: agent("JET"), json: { name: "x" } })).status, 403);
 
-  // Personal first: GROK-WEB cannot see JET's share until JET shares it to the team.
-  const made = await tool(env, { headers: agent("JET") }, "fleetlink_create_share", { markdown: "# Findings", slug: "jet-findings" });
+  // Asked for personal: GROK-WEB cannot see JET's share until JET shares it to the team.
+  const made = await tool(env, { headers: agent("JET") }, "fleetlink_create_share", { markdown: "# Findings", slug: "jet-findings", personal: true });
   assert.equal(made.data.share.visibility, "personal");
   assert.equal((await tool(env, { headers: agent("GROK-WEB") }, "fleetlink_get_share", { slug: "jet-findings" })).error, "Share not found.");
   const teams = await tool(env, { headers: agent("JET") }, "fleetlink_list_teams");
-  assert.deepEqual(teams.data.teams.map((t) => [t.id, t.name, t.my_role]), [["team_fleet", "Fleet agents", "member"]]);
+  assert.deepEqual(teams.data.teams.map((t) => [t.id, t.name, t.my_role]), [["team_fleet", "Fleet", "admin"]]);
   const moved = await tool(env, { headers: agent("JET") }, "fleetlink_share_to_team", { slug: "jet-findings" });
   assert.equal(moved.error, null);
-  assert.deepEqual(moved.data.share.team, { id: "team_fleet", name: "Fleet agents", access: "edit" });
+  assert.deepEqual(moved.data.share.team, { id: "team_fleet", name: "Fleet", access: "edit" });
 
   // GROK-WEB collaborates on it: reads, adds, and replaces files.
   const grok = { headers: agent("GROK-WEB") };
@@ -196,17 +196,18 @@ test("agent seats act through the Agent-Sync server credential with their own ac
   assert.equal(Buffer.from(bin.data.content, "base64").toString(), "PNGDATA");
   assert.equal((await tool(env, grok, "fleetlink_update_share", { slug: "jet-findings", title: "Findings v2" })).data.share.title, "Findings v2");
   assert.match((await tool(env, grok, "fleetlink_make_personal", { slug: "jet-findings" })).error, /owner/);
-  assert.match((await tool(env, grok, "fleetlink_update_share", { slug: "jet-findings", new_slug: "grok-findings" })).error, /owner or a team owner/);
-  assert.match((await tool(env, grok, "fleetlink_delete_share", { slug: "jet-findings" })).error, /owner or a team owner/);
+  // Bots are Fleet team admins, so GROK-WEB manages JET's team share too, but only JET moves it.
+  assert.equal((await tool(env, grok, "fleetlink_update_share", { slug: "jet-findings", password: null })).error, null);
   assert.equal((await tool(env, grok, "fleetlink_delete_file", { slug: "jet-findings", path: "shot.png" })).error, null);
   const listed = await tool(env, grok, "fleetlink_list_shares", { scope: "teams" });
-  assert.deepEqual(listed.data.shares.map((s) => [s.slug, s.owner.id, s.can_edit, s.can_manage]), [["jet-findings", "usr_agent_jet", true, false]]);
+  assert.deepEqual(listed.data.shares.map((s) => [s.slug, s.owner.id, s.can_edit, s.can_manage]), [["jet-findings", "usr_agent_jet", true, true]]);
 
   // A person joins the agents' team from the admin console and sees the work.
   const jay = await signUp(env, "Jay");
   await makeAdmin(env, jay);
   const all = await callJson(env, "GET", "/api/admin/teams", { auth: jay });
-  assert.deepEqual(all.data.teams.map((t) => [t.id, t.members, t.shares, t.my_role]), [["team_fleet", 3, 1, null]]);
+  // The operator and the 37 fleet bots (JET and GROK-WEB among them).
+  assert.deepEqual(all.data.teams.map((t) => [t.id, t.members, t.shares, t.my_role]), [["team_fleet", 38, 1, null]]);
   assert.equal((await callJson(env, "POST", "/api/admin/teams/team_fleet/join", { auth: jay })).status, 200);
   assert.equal((await callJson(env, "POST", "/api/admin/teams/team_nope/join", { auth: jay })).status, 404);
   assert.equal((await callJson(env, "GET", "/api/shares?scope=team&team_id=team_fleet", { auth: jay })).data.shares.length, 1);
@@ -233,8 +234,8 @@ test("MCP upload_url creates a share when needed and a curl PUT lands the file",
 
   const again = await tool(env, jet, "fleetlink_upload_url", { slug: fresh.data.share.slug, path: "dist/notes.txt" });
   assert.equal(again.data.created, false);
-  // Another agent in the team has view access only, so it cannot get an upload URL.
-  assert.match((await tool(env, { headers: agent("ECHO") }, "fleetlink_upload_url", { slug: fresh.data.share.slug, path: "x" })).error, /edit access/);
+  // Bots are Fleet team admins, so another bot uploads even to a view-only team share.
+  assert.equal((await tool(env, { headers: agent("ECHO") }, "fleetlink_upload_url", { slug: fresh.data.share.slug, path: "x" })).error, null);
   // A failed grant does not leave an empty new share behind.
   assert.ok((await tool(env, jet, "fleetlink_upload_url", { slug: "fresh-name", path: "x", ttl_seconds: 5 })).error);
   assert.equal((await tool(env, jet, "fleetlink_get_share", { slug: "fresh-name" })).error, "Share not found.");

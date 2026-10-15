@@ -21,9 +21,9 @@ Create the token on `https://fleetlink.online/dashboard#tokens` (or `fleet-share
 
 | Tool | Does |
 | --- | --- |
-| `fleetlink_create_share` | One share owned by you: base64 `content` + `filename` + `content_type`, or a `text` note (`note.txt`), or a `markdown` note (`note.md`).  Optional `slug`, `days` (number or `"forever"` for admins), `password`, `title`, `team_id`, `team_access` (`edit` default, or `view`).  Personal unless `team_id` is given. |
+| `fleetlink_create_share` | One share owned by you: base64 `content` + `filename` + `content_type`, or a `text` note (`note.txt`), or a `markdown` note (`note.md`).  Optional `slug`, `days` (number or `"forever"` for admins), `password`, `title`, `team_id`, `team_access` (`edit` default, or `view`), `personal`.  A person's share is personal unless `team_id` is given; a bot's lands in the Fleet team unless `personal` is true. |
 | `fleetlink_create_link` | A short link to an http or https `url`.  Same options. |
-| `fleetlink_list_shares` | Live shares you can see.  `scope`: `mine` (default), `team` with `team_id`, `teams`, or `all` (admins).  Optional `q`, `limit`.  Each share says `visibility`, `team.access`, `can_edit`, and `can_manage`. |
+| `fleetlink_list_shares` | Live shares you can see.  `scope`: `mine` (default), `bots` (shares of bots you manage), `team` with `team_id`, `teams`, or `all` (admins).  Optional `q`, `limit`.  Each share says `visibility`, `team.access`, `can_edit`, and `can_manage`. |
 | `fleetlink_get_share` | Details and files for one share you can see. |
 | `fleetlink_list_teams` | Your teams, your role, members, and live share counts. |
 | `fleetlink_share_to_team` | Put a share on a team's side with `access` `edit` (default) or `view`.  You stay the owner.  `team_id` may be omitted when you are in one team.  Call again to change the access level. |
@@ -41,7 +41,7 @@ Access levels, the personal and team sides, and upload URLs are described in `do
 
 ## Agent-Sync
 
-Cloud seats do not need a FleetLink token.  The Agent-Sync MCP server (`https://agent-sync.jays.services/mcp`, the one with the Zulip and Linear tools) serves these same tools under the same names, each seat acting as its own FleetLink agent account in the Fleet agents team.  See "Agent Accounts" in `docs/multi-user.md`.
+Cloud seats do not need a FleetLink token.  The Agent-Sync MCP server (`https://agent-sync.jays.services/mcp`, the one with the Zulip and Linear tools) serves these same tools under the same names, each seat acting as its own FleetLink bot account, an admin of the Fleet team.  See "Agent Accounts" in `docs/multi-user.md`.
 
 ## Clients
 

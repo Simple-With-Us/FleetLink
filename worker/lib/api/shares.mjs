@@ -3,7 +3,7 @@ import { z } from "zod";
 import { badRequest, HttpError, iso, json, parseWith, readBody, text, wantsJson } from "../http.mjs";
 import { requireShareAccess, shareAccess } from "../policy.mjs";
 import {
-  createShare, CreateShareBody, deleteShare, deleteShareFile, getShareBySlug, isExpired, listShares,
+  createShare, CreateShareBody, deleteShare, deleteShareFile, fullLimits, getShareBySlug, isExpired, listShares,
   loadShareFor, LIMITS, publicShare, purgeShare, putShareFile, renewShare, shareFiles, updateShare, UpdateShareBody
 } from "../shares.mjs";
 import { createUploadGrant, UploadGrantInput, useUploadGrant } from "../uploads.mjs";
@@ -158,7 +158,7 @@ export function shareRoutes(router) {
   router.on("POST", "/api/shares/:slug/renew", async (ctx) => {
     const principal = await ctx.auth();
     const { share, unchanged } = await renewShare(ctx.env, principal, ctx.params.slug, parseWith(RenewBody, await readBody(ctx.request)));
-    return json({ share: await detail(ctx, principal, share, await shareAccess(ctx.env, principal, share)), unchanged, max_renewals: (principal.isAdmin ? LIMITS.admin : LIMITS.user).renewals });
+    return json({ share: await detail(ctx, principal, share, await shareAccess(ctx.env, principal, share)), unchanged, max_renewals: (fullLimits(principal) ? LIMITS.admin : LIMITS.user).renewals });
   });
   router.on("PUT", "/api/shares/:slug/files/*path", async (ctx) => {
     const principal = await ctx.auth();
@@ -211,7 +211,7 @@ export function shareRoutes(router) {
     const principal = await ctx.auth();
     const body = parseWith(LegacyRenewBody, await readBody(ctx.request));
     const { share, unchanged } = await renewShare(ctx.env, principal, body.slug.split("/")[0], { days: body.days });
-    const max = (principal.isAdmin ? LIMITS.admin : LIMITS.user).renewals;
+    const max = (fullLimits(principal) ? LIMITS.admin : LIMITS.user).renewals;
     return json({ success: true, slug: share.slug, expires: share.expires_at ? iso(share.expires_at) : "never", expire_at: share.expires_at ? share.expires_at * 1000 : null, renewals_used: share.renewals, max_renewals: max, unchanged });
   };
   router.on("POST", "/api/shares/renew", legacyRenew);
@@ -251,7 +251,8 @@ function legacyShape(origin, share) {
  *   DELETE /<slug>      delete the share; DELETE /<slug>/<path> deletes one file
  * Share settings for a new share come from headers: X-Expire-Days,
  * X-Fleet-Password, X-Fleet-Title, X-Fleet-Description, X-Fleet-Team,
- * X-Fleet-Team-Access (view or edit), and
+ * X-Fleet-Team-Access (view or edit), X-Fleet-Personal (1 keeps a bot's share
+ * out of the Fleet team), and
  * X-Fleet-Redirect for a short link.
  */
 export async function rawWrite(ctx, slug, rest) {
@@ -297,6 +298,7 @@ export async function rawWrite(ctx, slug, rest) {
       description: header("x-fleet-description"),
       team_id: header("x-fleet-team"),
       team_access: header("x-fleet-team-access"),
+      personal: header("x-fleet-personal"),
       source: "api"
     });
     created = true;
