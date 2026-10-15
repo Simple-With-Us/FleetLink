@@ -9,7 +9,19 @@
 
 export const OPERATOR_USER_ID = "usr_operator";
 
+// The first migration is a clean baseline.  It drops the tables the earlier
+// account code created (and any half-made copy of its own tables), with foreign
+// keys deferred to the end of the batch so drop order cannot trip them.
 const INIT = `
+PRAGMA defer_foreign_keys = true;
+DROP TABLE IF EXISTS share_files;
+DROP TABLE IF EXISTS shares;
+DROP TABLE IF EXISTS invites;
+DROP TABLE IF EXISTS api_tokens;
+DROP TABLE IF EXISTS passkeys;
+DROP TABLE IF EXISTS settings;
+DROP TABLE IF EXISTS meta;
+DROP TABLE IF EXISTS audit_events;
 DROP TABLE IF EXISTS agent_quota_requests;
 DROP TABLE IF EXISTS agent_tokens;
 DROP TABLE IF EXISTS team_members;

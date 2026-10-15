@@ -48,7 +48,7 @@ form.inline { display: inline; margin: 0; }
 .narrow { max-width: 30rem; margin: 2rem auto; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem 1.35rem; box-shadow: var(--shadow); margin-bottom: 1.25rem; }
 .card > h2:first-child, .card > h3:first-child { margin-top: 0; }
-.grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 .eyebrow { text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.78rem; font-weight: 700; color: var(--muted); margin-bottom: 0.3rem; }
 .muted { color: var(--muted); }
 .small { font-size: 0.88rem; }

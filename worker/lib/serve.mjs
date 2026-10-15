@@ -277,7 +277,7 @@ function listingPage(env, share, files, dir, url, origin, setCookie) {
     body: `<section><p class="eyebrow">Files in ${escapeHtml(shown)}</p><h1>${escapeHtml(title)}</h1>
       ${share.description ? `<p>${escapeHtml(share.description)}</p>` : ""}
       <ul class="files">${rows.join("") || "<li>No files yet.</li>"}</ul>
-      <p class="muted">${share.expires_at ? `Available until <time datetime="${new Date(share.expires_at * 1000).toISOString()}">${new Date(share.expires_at * 1000).toUTCString()}</time>.` : "This share does not expire."}</p></section>`
+      <p class="muted">${share.expires_at ? `Available until <time datetime="${new Date(share.expires_at * 1000).toISOString()}">${new Date(share.expires_at * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</time>.` : "This share does not expire."}</p></section>`
   }), 200, headers);
 }
 

@@ -7,7 +7,8 @@ export const LOGIN_JS = String.raw`
   if (!root) return;
   var msg = document.getElementById("auth-msg");
   var next = new URLSearchParams(location.search).get("next");
-  var target = next && next.charAt(0) === "/" && next.charAt(1) !== "/" ? next : "/dashboard";
+  // Only same-site paths: "/x", never "//host" or "/\host", which browsers treat as another site.
+  var target = next && /^\/(?![\/\\])[^\s]*$/.test(next) ? next : "/dashboard";
 
   function say(text, kind) {
     msg.hidden = false;

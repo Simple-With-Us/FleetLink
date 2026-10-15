@@ -174,6 +174,7 @@ export const DASHBOARD_JS = String.raw`
       form.reset();
       daysOptions(form.days, "link");
       loadShares(false);
+      loadMe();
     } catch (err) { FL.fail(err); } finally { FL.busy(button, false); }
   }
 

@@ -14,6 +14,9 @@ CREATE TABLE agent_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES
 INSERT INTO users VALUES ('u1', 'user', 'Old', NULL, 0, 3, 1);
 INSERT INTO passkey_credentials VALUES ('c1', 'u1', 'k');
 INSERT INTO agent_tokens VALUES ('t1', 'u1');
+CREATE TABLE user_shares (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, slug TEXT);
+INSERT INTO user_shares VALUES ('s1', 'u1', 'x');
+CREATE TABLE shares (slug TEXT PRIMARY KEY, owner TEXT);
 `;
 
 test("migrations replace the old account tables and seed the operator account", async () => {
@@ -24,6 +27,9 @@ test("migrations replace the old account tables and seed the operator account", 
   assert.ok(tables.includes("shares") && tables.includes("api_tokens") && tables.includes("invites"));
   assert.equal(tables.includes("agent_tokens"), false);
   assert.equal(tables.includes("passkey_credentials"), false);
+  assert.equal(tables.includes("user_shares"), false);
+  const shareColumns = (await db.prepare("PRAGMA table_info(shares)").all()).results.map((c) => c.name);
+  assert.ok(shareColumns.includes("owner_id"));
   const operator = await db.prepare("SELECT * FROM users WHERE id = 'usr_operator'").first();
   assert.equal(operator.role, "admin");
   assert.equal(operator.is_system, 1);
