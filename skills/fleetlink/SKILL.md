@@ -196,6 +196,8 @@ If PUT returns a storage error, object storage may not be accepting writes yet.
 
 ## TTLs and size caps
 
+Public `GET` and `HEAD` on a share past `expire_at` return `410` (HTML status page, or `{"error":"expired"}` when `Accept` includes `application/json`).  Directory indexes and nested files use the latest `expire_at` on objects under that slug.  The first fetch of an expired single object deletes that object from storage.
+
 Anonymous `PUT`, `POST /api/upload`, `POST /api/redirect`, `POST /api/portal/delete`, and `DELETE` return `401`.  A guest cannot upload.
 
 The worker still defines guest clamps, and those are the caps the guest branches apply: 10 files, 5 MB per file, 10 MB per batch, 1 hour file TTL, 6 hour redirect TTL.  The public write routes return `401` before those branches run.  Some error strings inside the branches still say "6 hours" for files and "24 hours" for redirects.  The stored expiry, if that code ran, would still be capped at 1 hour for files and 6 hours for redirects.  The looser numbers printed on the website are not the constants in the worker.
