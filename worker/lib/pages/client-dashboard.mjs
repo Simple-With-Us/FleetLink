@@ -105,7 +105,7 @@ export const DASHBOARD_JS = String.raw`
       if (!isOwner) body = { team_access: parts[1] };
       try {
         await FL.api("PATCH", "/api/shares/" + encodeURIComponent(share.slug), body);
-        FL.toast(parts[0] ? "Shared with the team (" + (parts[1] === "edit" ? "can edit" : "view only") + ").  You still own it." : "Personal again.  Only you can see it.");
+        FL.toast(parts[0] ? "Shared with the team (" + (parts[1] === "edit" ? "can edit" : "view only") + ").\u00a0 You still own it." : "Personal again.\u00a0 Only you can see it.");
         loadShares(false);
       } catch (err) { FL.fail(err); loadShares(false); }
     } }, options);

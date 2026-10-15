@@ -14,20 +14,28 @@
 import { audit } from "./audit.mjs";
 import { safeEqual } from "./bytes.mjs";
 import { first, now, run } from "./db.mjs";
-import { badRequest } from "./http.mjs";
+import { badRequest, HttpError } from "./http.mjs";
 import { AGENT_TEAM_ID } from "./schema.mjs";
 
 export const AGENT_SECRET = /^fls_[0-9a-f]{64}$/;
 export const SEAT = /^[A-Z][A-Z0-9-]{0,22}[A-Z0-9]$/;
 
+/**
+ * The configured agent server credential.  Asked for only when a request
+ * presents an fls_ credential, so a worker without one still serves everyone
+ * else, and an agent request fails closed with a 503 that names the setting.
+ */
 export function agentSecret(env) {
-  return String(env?.AGENT_SYNC_SECRET || "").trim();
+  const secret = typeof env?.AGENT_SYNC_SECRET === "string" ? env.AGENT_SYNC_SECRET.trim() : "";
+  if (!secret) throw new HttpError(503, "Agent access is unavailable: AGENT_SYNC_SECRET is not configured.");
+  if (!AGENT_SECRET.test(secret)) throw new HttpError(503, "Agent access is unavailable: AGENT_SYNC_SECRET is not fls_ plus 64 hex.");
+  return secret;
 }
 
-/** True when `presented` is this worker's agent server credential. */
+/** True when `presented` is this worker's agent server credential.  Throws 503 when none is configured. */
 export async function isAgentSecret(env, presented) {
   const expected = agentSecret(env);
-  return Boolean(expected && AGENT_SECRET.test(expected) && AGENT_SECRET.test(presented || "") && (await safeEqual(presented, expected)));
+  return AGENT_SECRET.test(presented || "") && (await safeEqual(presented, expected));
 }
 
 export function agentUserId(seat) {

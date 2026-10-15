@@ -159,7 +159,13 @@ test("agent seats act through the Agent-Sync server credential with their own ac
   assert.equal((await callJson(env, "GET", "/api/shares", { headers: { authorization: `Bearer ${AGENT_SECRET}` } })).status, 400);
   assert.equal((await callJson(env, "GET", "/api/shares", { headers: agent("no spaces") })).status, 400);
   const noSecret = await makeEnv();
-  assert.equal((await callJson(noSecret, "GET", "/api/shares", { headers: agent("JET") })).status, 401);
+  const unset = await callJson(noSecret, "GET", "/api/shares", { headers: agent("JET") });
+  assert.equal(unset.status, 503);
+  assert.match(unset.data.error, /AGENT_SYNC_SECRET is not configured/);
+  // Everyone else is unaffected by the missing setting.
+  assert.equal((await callJson(noSecret, "GET", "/health")).status, 200);
+  const malformed = await makeEnv({ AGENT_SYNC_SECRET: "too-short" });
+  assert.equal((await callJson(malformed, "GET", "/api/shares", { headers: agent("JET") })).status, 503);
 
   const jet = await tool(env, { headers: agent("JET") }, "fleetlink_whoami");
   assert.equal(jet.data.user.id, "usr_agent_jet");

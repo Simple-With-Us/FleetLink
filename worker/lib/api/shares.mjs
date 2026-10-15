@@ -6,14 +6,8 @@ import {
   createShare, CreateShareBody, deleteShare, deleteShareFile, getShareBySlug, isExpired, listShares,
   loadShareFor, LIMITS, publicShare, purgeShare, putShareFile, renewShare, shareFiles, updateShare, UpdateShareBody
 } from "../shares.mjs";
-import { createUploadGrant, useUploadGrant } from "../uploads.mjs";
+import { createUploadGrant, UploadGrantInput, useUploadGrant } from "../uploads.mjs";
 
-const UploadUrlBody = z.object({
-  path: z.string().min(1).max(512),
-  content_type: z.string().max(200).nullable().optional(),
-  max_bytes: z.number().int().positive().nullable().optional(),
-  ttl_seconds: z.number().int().positive().nullable().optional()
-}).strict();
 const RenewBody = z.object({ days: z.union([z.number(), z.string().max(20)]).nullable().optional() }).strict();
 const LegacyRenewBody = z.object({ slug: z.string().trim().min(1).max(200), days: z.union([z.number(), z.string().max(20)]).nullable().optional() }).strict();
 const LegacyDeleteBody = z.object({
@@ -183,7 +177,7 @@ export function shareRoutes(router) {
   router.on("POST", "/api/shares/:slug/upload-url", async (ctx) => {
     const principal = await ctx.auth();
     const { share } = await loadShareFor(ctx.env, principal, ctx.params.slug, "edit");
-    const input = parseWith(UploadUrlBody, await readBody(ctx.request));
+    const input = parseWith(UploadGrantInput.strict(), await readBody(ctx.request));
     return json({ upload: await createUploadGrant(ctx.env, principal, share, input, ctx.url.origin) }, 201);
   });
   // The upload URL is its own credential, so this route reads no other one.

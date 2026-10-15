@@ -8,9 +8,10 @@
  * as the person or agent who asked for it, so every access, quota, and token
  * limit is checked again.
  */
+import { z } from "zod";
 import { pepperedHash, newId, randomHex } from "./bytes.mjs";
 import { first, now, run } from "./db.mjs";
-import { badRequest, HttpError, iso, notFound } from "./http.mjs";
+import { badRequest, HttpError, iso, notFound, parseWith } from "./http.mjs";
 import { requireShareAccess } from "./policy.mjs";
 import { cleanPath, fileByteLimit, guessContentType, isExpired, putShareFile } from "./shares.mjs";
 import { getUser } from "./users.mjs";
@@ -19,8 +20,17 @@ export const UPLOAD_SECRET = /^flu_[0-9a-f]{64}$/;
 export const UPLOAD_TTL_DEFAULT_SECONDS = 15 * 60;
 export const UPLOAD_TTL_MAX_SECONDS = 30 * 60;
 
+/** What a caller may ask of an upload URL.  Extra keys (a tool's slug or title) are dropped. */
+export const UploadGrantInput = z.object({
+  path: z.string().min(1).max(512),
+  content_type: z.string().max(200).nullable().optional(),
+  max_bytes: z.number().int().positive().nullable().optional(),
+  ttl_seconds: z.number().int().positive().nullable().optional()
+}).strip();
+
 /** Mint a one-time PUT URL for `path` in a share the principal can edit. */
-export async function createUploadGrant(env, principal, share, { path, content_type: contentType = null, max_bytes: maxBytes = null, ttl_seconds: ttl = null }, apiOrigin) {
+export async function createUploadGrant(env, principal, share, input, apiOrigin) {
+  const { path, content_type: contentType = null, max_bytes: maxBytes = null, ttl_seconds: ttl = null } = parseWith(UploadGrantInput, input);
   await requireShareAccess(env, principal, share, "edit");
   if (share.kind !== "files") throw badRequest("Short links do not hold files.");
   if (isExpired(share)) throw new HttpError(410, "This share has expired.");

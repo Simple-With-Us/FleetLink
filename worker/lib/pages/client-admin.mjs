@@ -190,7 +190,7 @@ export const ADMIN_JS = String.raw`
         h("td", { text: String(t.members) }),
         h("td", { text: String(t.shares) }),
         h("td", null, t.my_role ? h("span", { class: "pill", text: "You: " + t.my_role }) : h("button", { type: "button", class: "small secondary", text: "Join As Owner", onclick: async function () {
-          try { await FL.api("POST", "/api/admin/teams/" + encodeURIComponent(t.id) + "/join", {}); FL.toast("Joined " + t.name + ".  Its shares show on your dashboard."); loadTeams(); } catch (err) { FL.fail(err); }
+          try { await FL.api("POST", "/api/admin/teams/" + encodeURIComponent(t.id) + "/join", {}); FL.toast("Joined " + t.name + ".\u00a0 Its shares show on your dashboard."); loadTeams(); } catch (err) { FL.fail(err); }
         } }))));
     });
     document.getElementById("team-empty").hidden = data.teams.length > 0;
