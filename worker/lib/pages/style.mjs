@@ -154,7 +154,7 @@ td .actions { gap: 0.35rem; }
 .hero .lead { font-size: 1.2rem; color: var(--muted); max-width: 36rem; }
 .hero .actions { margin-top: 1.5rem; }
 .hero .fine { margin-top: 1rem; font-size: 0.92rem; color: var(--muted); }
-.hero-intro { display: block; width: min(460px, 100%); aspect-ratio: 16 / 9; margin: -2.5rem 0 -0.5rem -2rem; mix-blend-mode: multiply; }
+.hero-intro { display: block; width: min(460px, 100%); aspect-ratio: 16 / 9; margin: -3rem 0 -2.5rem -2rem; mix-blend-mode: multiply; }
 .auth-intro { display: block; width: 132px; height: 132px; margin: 0 auto; mix-blend-mode: multiply; }
 .hero-mark { width: 64px; height: 64px; border-radius: 16px; box-shadow: 0 6px 24px rgba(25, 167, 230, 0.35); margin-bottom: 1.25rem; }
 .preview { background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-lg); overflow: hidden; transform: perspective(1400px) rotateY(-4deg) rotateX(2deg); }
