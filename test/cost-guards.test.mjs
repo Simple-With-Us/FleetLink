@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { counterAccepts, reapCostGuards, reapStatements, shouldTouchLastUsed, REAP_BATCH } from "../worker/lib/cost-guards.mjs";
+import {
+  checkUsageGuard,
+  counterAccepts,
+  getUsageStatus,
+  reapCostGuards,
+  reapStatements,
+  shouldTouchLastUsed,
+  trackUsage,
+  REAP_BATCH
+} from "../worker/lib/cost-guards.mjs";
 import { rejectUnmatchedCredential } from "../worker/lib/sessions.mjs";
 import { accountEnv, countRows, openAccountDb } from "./d1-memory.mjs";
 
@@ -50,3 +59,43 @@ test("an unmatched credential lookup does not insert a session or a user", async
   assert.equal(await countRows(db, "sessions"), 0);
   assert.equal(await countRows(db, "passkey_credentials"), 0);
 });
+
+test("usage guard alerts at 50% and 75%, and halts at 95%", () => {
+  const customCaps = { d1_writes: 100 };
+  const now = 1_700_000_000_000;
+
+  // Under 50% is ok
+  let res = trackUsage("d1_writes", 40, now, customCaps);
+  assert.equal(res.level, "ok");
+  assert.equal(res.allowed, true);
+  assert.equal(res.percent, 40);
+
+  // 50% triggers warning
+  res = trackUsage("d1_writes", 10, now, customCaps);
+  assert.equal(res.level, "warning");
+  assert.equal(res.allowed, true);
+  assert.equal(res.percent, 50);
+
+  // 75% triggers alert
+  res = trackUsage("d1_writes", 25, now, customCaps);
+  assert.equal(res.level, "alert");
+  assert.equal(res.allowed, true);
+  assert.equal(res.percent, 75);
+
+  // Check projected before hitting 95%
+  let guard = checkUsageGuard("d1_writes", 20, now, customCaps);
+  assert.equal(guard.allowed, false);
+  assert.equal(guard.level, "hard_cap");
+  assert.match(guard.reason, /95%/);
+
+  // 95% triggers hard cap stop
+  res = trackUsage("d1_writes", 20, now, customCaps);
+  assert.equal(res.level, "hard_cap");
+  assert.equal(res.allowed, false);
+  assert.equal(res.percent, 95);
+
+  const status = getUsageStatus(now, customCaps);
+  assert.equal(status.report.d1_writes.level, "hard_cap");
+  assert.equal(status.report.d1_writes.allowed, false);
+});
+

@@ -368,7 +368,7 @@ public struct CreateSlugView: View {
                     description: descriptionToUse,
                     domain: selectedDomain,
                     host: host,
-                    token: session.bearerSecret,
+                    token: session.activeToken,
                     sessionCookie: session.sessionCookieHeader
                 )
             case .note:
@@ -388,7 +388,7 @@ public struct CreateSlugView: View {
                     preview: previewFile?.part,
                     domain: selectedDomain,
                     host: host,
-                    token: session.bearerSecret,
+                    token: session.activeToken,
                     sessionCookie: session.sessionCookieHeader
                 )
             case .files:
@@ -402,7 +402,7 @@ public struct CreateSlugView: View {
                     preview: previewFile?.part,
                     domain: selectedDomain,
                     host: host,
-                    token: session.bearerSecret,
+                    token: session.activeToken,
                     sessionCookie: session.sessionCookieHeader
                 )
             }

@@ -41,7 +41,50 @@ async function loadShares(){
   var r=await fetch("/api/shares",{headers:{Accept:"application/json"}});
   if(!r.ok){host.textContent="Could not load shares.";return}
   var d=await r.json();
-  host.textContent=d.note || (d.shares&&d.shares.length?d.shares.length+" shares":"No account-indexed shares yet.");
+  host.replaceChildren();
+  if(!d.shares||!d.shares.length){host.append(el("p","No shares created yet."));return}
+  var table=document.createElement("table");
+  var header=document.createElement("tr");
+  ["Link", "Type", "Expires", "Action"].forEach(function(h){var th=document.createElement("th");th.textContent=h;header.append(th)});
+  table.append(header);
+  d.shares.forEach(function(s){
+    var tr=document.createElement("tr");
+    var tdLink=document.createElement("td");
+    var a=document.createElement("a");
+    a.href=s.url || ("/"+s.slug);
+    a.target="_blank";
+    a.textContent=s.slug;
+    tdLink.append(a);
+    tr.append(tdLink);
+
+    var tdType=document.createElement("td");
+    tdType.textContent=s.mode==="redirect"?"Short link":(s.file_count>1?s.file_count+" files":"1 file");
+    tr.append(tdType);
+
+    var tdExp=document.createElement("td");
+    tdExp.textContent=s.expires_at||"never";
+    tr.append(tdExp);
+
+    var tdAct=document.createElement("td");
+    var delBtn=el("button","Delete");
+    delBtn.type="button";
+    delBtn.style.color="#dc2626";
+    delBtn.onclick=function(){deleteShare(s.slug)};
+    tdAct.append(delBtn);
+    tr.append(tdAct);
+    table.append(tr);
+  });
+  host.append(table);
+}
+async function deleteShare(slug){
+  if(!confirm("Delete share '"+slug+"'?"))return;
+  var r=await fetch("/api/portal/delete",{
+    method:"POST",
+    headers:{"Content-Type":"application/json",Accept:"application/json"},
+    body:JSON.stringify({slug:slug})
+  });
+  if(!r.ok){toast(await errText(r,"Delete failed."),true);return}
+  toast("Share deleted.",false);loadShares();
 }
 async function loadTokens(){
   var host=document.querySelector("#tokens_body");
@@ -117,7 +160,7 @@ export function dashboardBody(user) {
     <div id="notice" hidden></div>
     ${accountCard(user)}
     <h2>Shares</h2>
-    <p>New account uploads are not indexed here yet.  Operator shares stay in the portal.</p>
+    <p>Your active shares and short links.</p>
     <div id="shares_body"><p>Loading shares…</p></div>
     <h2>Agent Tokens</h2>
     <p id="quota_line">Loading quota…</p>

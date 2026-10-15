@@ -19,6 +19,7 @@ import {
 } from "./sessions.mjs";
 import { addTeamMember, createTeam, listUserTeams, removeTeamMember } from "./teams.mjs";
 import { createAgentToken, listAgentTokens, requestAgentQuota, revokeAgentToken } from "./tokens.mjs";
+import { listUserShares } from "./user-shares.mjs";
 import * as webauthnLib from "./webauthn.mjs";
 
 const optionalText = z.string().optional();
@@ -456,9 +457,11 @@ export async function handleAccountRoutes(request, env, ctx, deps = {}) {
     if (path === "/api/shares" && request.method === "GET") {
       const gate = await requireUser(request, env);
       if (gate.response) return gate.response;
+      const shares = await listUserShares(env, gate.user.id);
       return json({
-        shares: [],
-        note: "Account share indexing is not enabled yet.  Operator shares stay in the portal."
+        shares,
+        count: shares.length,
+        note: shares.length ? "User shares loaded." : "Account share indexing is not enabled yet.  Operator shares stay in the portal."
       });
     }
     if (path === "/api/teams" && request.method === "GET") {

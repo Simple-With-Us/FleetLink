@@ -181,6 +181,23 @@ private struct BucketSlug: Decodable {
     let renewals_used: Int?
 }
 
+private struct UserSharesEnvelope: Decodable {
+    let shares: [UserShareItem]
+}
+
+private struct UserShareItem: Decodable {
+    let slug: String
+    let url: String
+    let mode: String?
+    let files: Int?
+    let file_count: Int?
+    let bytes: Int64?
+    let password_protected: Bool?
+    let created_at: String?
+    let expires_at: String?
+    let target_url: String?
+}
+
 @MainActor
 public final class PortalManager: ObservableObject {
     @Published public private(set) var shares: [PortalShare] = []
@@ -223,6 +240,27 @@ public final class PortalManager: ObservableObject {
                 return
             }
             if http.statusCode == 401 || http.statusCode == 403 {
+                let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                if (!trimmedToken.isEmpty || (sessionCookie != nil && !sessionCookie!.isEmpty)),
+                   let userSharesURL = URL(string: "\(normalizedHost(host))/api/shares") {
+                    var userReq = authorizedRequest(url: userSharesURL, method: "GET", token: trimmedToken, sessionCookie: sessionCookie)
+                    userReq.cachePolicy = .reloadIgnoringLocalCacheData
+                    if let (uData, uResp) = try? await URLSession.shared.data(for: userReq),
+                       let uHttp = uResp as? HTTPURLResponse, (200...299).contains(uHttp.statusCode),
+                       let uEnvelope = try? JSONDecoder().decode(UserSharesEnvelope.self, from: uData) {
+                        var merged: [String: PortalShare] = [:]
+                        for s in uEnvelope.shares {
+                            merged[s.slug] = share(from: s, host: host)
+                        }
+                        for item in local where merged[item.slug] == nil {
+                            merged[item.slug] = item
+                        }
+                        shares = merged.values.sorted { ($0.createdDate ?? .distantPast) > ($1.createdDate ?? .distantPast) }
+                        computeAnalytics()
+                        isLoading = false
+                        return
+                    }
+                }
                 shares = local
                 computeAnalytics()
                 if local.isEmpty {
@@ -519,6 +557,29 @@ public final class PortalManager: ObservableObject {
             is_team: nil,
             is_mine: true,
             target_url: slug.targetUrl
+        )
+    }
+
+    private func share(from item: UserShareItem, host: String) -> PortalShare {
+        let root = normalizedHost(host)
+        let isRedirect = item.mode == "redirect"
+        let count = item.files ?? item.file_count ?? 1
+        let suffix = (!isRedirect && count > 1) ? "/" : ""
+        let shareURL = (item.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? "\(root)/\(item.slug)\(suffix)" : item.url
+        return PortalShare(
+            slug: item.slug,
+            url: shareURL,
+            mode: item.mode ?? "files",
+            files: count,
+            bytes: item.bytes ?? 0,
+            password_protected: item.password_protected ?? false,
+            created_at: item.created_at ?? Self.isoString(from: Date()),
+            expires_at: item.expires_at ?? "never",
+            renewals_used: nil,
+            team_id: nil,
+            is_team: nil,
+            is_mine: true,
+            target_url: item.target_url
         )
     }
 

@@ -10,6 +10,8 @@ export async function openAccountDb() {
   const db = new SQL.Database();
   db.run("PRAGMA foreign_keys = ON");
   db.exec(readFileSync(new URL("../migrations/0001_users_passkeys.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../migrations/0002_teams_organizer_unique.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../migrations/0003_user_shares.sql", import.meta.url), "utf8"));
   return wrap(db);
 }
 

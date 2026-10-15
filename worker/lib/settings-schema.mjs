@@ -17,5 +17,6 @@ export const SettingsOverridesDocument = z.object({
   guest_max_file_bytes: settingsValueSchema.optional(),
   guest_max_batch_bytes: settingsValueSchema.optional(),
   guest_file_ttl_seconds: settingsValueSchema.optional(),
-  guest_redirect_ttl_seconds: settingsValueSchema.optional()
+  guest_redirect_ttl_seconds: settingsValueSchema.optional(),
+  user_shares_mode: settingsValueSchema.optional()
 }).strict();

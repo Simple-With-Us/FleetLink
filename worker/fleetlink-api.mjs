@@ -1,13 +1,15 @@
 import { appleAppSiteAssociation } from "./lib/aasa.mjs";
 import { handleAccountRoutes } from "./lib/account-routes.mjs";
-import { reapCostGuards } from "./lib/cost-guards.mjs";
+import { checkUsageGuard, reapCostGuards, trackUsage } from "./lib/cost-guards.mjs";
 import { mustForceAttachment } from "./lib/html-safety.mjs";
 import { handleMcp, handleOAuthProtectedResource, mcpWwwAuthenticate } from "./lib/mcp.mjs";
-import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
+import { passkeyLoginMarkup, passkeyLoginScript, renderLoginHtml } from "./lib/passkey-page.mjs";
 import { captureWorkerException } from "./lib/sentry-scrub.mjs";
 import { randomHex } from "./lib/bytes.mjs";
+import { sessionUser } from "./lib/sessions.mjs";
 import { SettingsOverridesDocument, SettingsUpdateBody } from "./lib/settings-schema.mjs";
 import { applyGrantTtl, lookupAgentToken, tighterCap } from "./lib/tokens.mjs";
+import { deleteUserShare, getUserShare, recordUserShare } from "./lib/user-shares.mjs";
 
 function allocateShareId() {
   return randomHex(16);
@@ -953,86 +955,7 @@ function renderPrivacyHtml(origin) {
 }
 __name(renderPrivacyHtml, "renderPrivacyHtml");
 __name2(renderPrivacyHtml, "renderPrivacyHtml");
-function renderLoginHtml(origin, errorMsg, isLoggedOut) {
-  return `<!DOCTYPE html><html lang="en"><head>
-  <title>Sign In &bull; FleetLink</title>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  ${renderOgTags({
-    title: "Sign In \u2014 FleetLink",
-    description: "Sign in to share a file or see your links.",
-    url: `${origin}/login`,
-    imageUrl: `${origin}/preview.png`
-  })}
-  <style>
-    :root {
-      --bg: #ffffff;
-      --card-bg: #f8fafc;
-      --border: #e2e8f0;
-      --text: #0f172a;
-      --text-muted: #64748b;
-      --primary: #2563eb;
-      --primary-hover: #1d4ed8;
-    }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 1.5rem; box-sizing: border-box; }
-    .card { background: #ffffff; border: 1px solid var(--border); border-radius: 12px; padding: 2.25rem; max-width: 440px; width: 100%; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.06); }
-    h1 { margin: 0 0 0.5rem 0; font-size: 1.5rem; color: #0f172a; letter-spacing: -0.02em; }
-    p { margin: 0 0 1.25rem 0; font-size: 0.9rem; color: var(--text-muted); line-height: 1.5; }
-    .form-group { margin-bottom: 1.15rem; }
-    label { display: block; font-weight: 600; font-size: 0.88rem; color: #334155; margin-bottom: 0.35rem; }
-    input[type="text"], input[type="password"] { width: 100%; box-sizing: border-box; padding: 0.7rem 0.85rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.95rem; outline: none; transition: border-color 0.15s; }
-    input[type="text"]:focus, input[type="password"]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
-    .checkbox-wrap { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.25rem; font-size: 0.88rem; color: #475569; }
-    .checkbox-wrap input { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
-    button { width: 100%; background: var(--primary); color: white; border: none; border-radius: 8px; padding: 0.75rem; font-size: 0.98rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
-    button:hover { background: var(--primary-hover); }
-    .msg-box { padding: 0.75rem 0.95rem; border-radius: 6px; font-size: 0.88rem; margin-bottom: 1.25rem; line-height: 1.4; }
-    .error-box { background: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; }
-    .success-box { background: #dcfce7; border: 1px solid #86efac; color: #15803d; }
-    .nav-links { display: flex; justify-content: space-between; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border); font-size: 0.85rem; }
-    .nav-links a { color: var(--primary); text-decoration: none; }
-    .nav-links a:hover { text-decoration: underline; }
-    .hint { font-size: 0.85rem; color: #334155; margin-top: 0.25rem; }
-    :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
-    button, .nav-links a { min-height: 44px; }
-  </style></head><body>
-  <div class="card">
-    <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem;">
-      <div style="font-size: 1.75rem;">\u26A1</div>
-      <div style="font-weight: 800; font-size: 1.2rem; color: #0f172a;">Fleet<span style="color:var(--primary);">Link</span></div>
-    </div>
-    ${isLoggedOut ? `<div class="msg-box success-box" role="status">You are signed out.</div>` : ""}
-    ${errorMsg ? `<div class="msg-box error-box"><strong>Error:</strong> ${escapeHtml(errorMsg)}</div>` : ""}
-    ${passkeyLoginMarkup()}
-    <form method="POST" action="/login" id="login-form">
-      <div class="form-group">
-        <label for="username">Name, email, or sign-in code</label>
-        <input type="text" id="username" name="username" placeholder="Name, email, or sign-in code" autocomplete="username" required autofocus>
-      </div>
-      <div class="form-group">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" placeholder="Password, if you have one" autocomplete="current-password">
-        <div class="hint">A sign-in code can go in either box.&nbsp; The password can stay empty when you use a code.</div>
-      </div>
-      <div class="checkbox-wrap">
-        <input type="checkbox" id="remember" name="remember" value="true" checked>
-        <label for="remember" style="margin:0;font-weight:normal;cursor:pointer;">Keep me signed in (30 days)</label>
-      </div>
-      <button type="submit" id="btn-login-submit">Sign in with operator secret</button>
-    </form>
-    </details>
-    ${passkeyLoginScript()}
-    <div class="nav-links">
-      <a href="/dashboard">Dashboard</a>
-      <a href="/">&larr; FleetLink Home</a>
-      <a href="/portal">Your links</a>
-      <a href="/privacy">Privacy Policy</a>
-    </div>
-  </div>
-</body></html>`;
-}
-__name(renderLoginHtml, "renderLoginHtml");
-__name2(renderLoginHtml, "renderLoginHtml");
+
 function renderHomeHtml(origin) {
   return `<!DOCTYPE html><html lang="en"><head><title>FleetLink — share a file or a short link</title>
   <meta charset="utf-8">
@@ -1190,8 +1113,14 @@ function renderHomeHtml(origin) {
         <a href="/instructions/" class="nav-link-btn">
           Instructions
         </a>
-        <a href="/portal" id="nav-portal-btn" class="nav-link-btn" style="display: inline-flex; background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;">
-          Your links
+        <a href="/portal" id="nav-portal-btn" class="nav-link-btn" style="display: none; background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;">
+          Operator
+        </a>
+        <a href="/dashboard" id="nav-dashboard-btn" class="nav-link-btn" style="display: none; background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;">
+          Dashboard
+        </a>
+        <a href="/signup" id="nav-signup-btn" class="nav-link-btn" style="display: inline-flex; background: #fdf4ff; color: #7e22ce; border-color: #e9d5ff;">
+          Sign Up
         </a>
         <div id="auth-container">
           <button type="button" id="auth-btn" class="auth-btn" onclick="openAuthModal()">
@@ -1411,8 +1340,17 @@ function renderHomeHtml(origin) {
 
     <div id="auth-modal" class="modal-overlay" role="presentation" aria-hidden="true">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
-        <h2 id="auth-modal-title">Sign in</h2>
-        <p>Enter the sign-in code for your FleetLink account.</p>
+        <h2 id="auth-modal-title">Sign in to FleetLink</h2>
+        <p>Use your passkey for instant access, or enter your sign-in code.</p>
+        <div style="margin-bottom: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem;">
+          <a href="/login" class="btn-primary" style="text-align: center; text-decoration: none; display: block; padding: 0.65rem 1rem; border-radius: 6px; font-weight: 600; background: #2563eb; color: #ffffff;">Sign in with Passkey</a>
+          <a href="/signup" class="btn-secondary" style="text-align: center; text-decoration: none; display: block; padding: 0.65rem 1rem; border-radius: 6px; font-weight: 600; border: 1px solid #d1d5db; background: #ffffff; color: #374151;">Create an Account</a>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: #6b7280; font-size: 0.85rem;">
+          <hr style="flex: 1; border: 0; border-top: 1px solid #e5e7eb;">
+          <span>or operator secret</span>
+          <hr style="flex: 1; border: 0; border-top: 1px solid #e5e7eb;">
+        </div>
         <div id="modal-error-msg" class="modal-error" role="alert"></div>
         <form onsubmit="handleAuthSubmit(event)">
           <label for="modal-secret-input" style="display:block;font-weight:600;font-size:0.88rem;color:#334155;margin-bottom:0.35rem;">Sign-in code</label>
@@ -1491,6 +1429,8 @@ function renderHomeHtml(origin) {
         var ttlForeverOpt = document.getElementById("ttl-forever-opt");
         var authCont = document.getElementById("auth-container");
         var portalBtn = document.getElementById("nav-portal-btn");
+        var dashboardBtn = document.getElementById("nav-dashboard-btn");
+        var signupBtn = document.getElementById("nav-signup-btn");
         var secretGroup = document.getElementById("wizard-inline-secret-group");
         var signOutBtn = document.getElementById("wizard-signout-btn");
         var promptText = document.getElementById("wizard-auth-prompt");
@@ -1503,12 +1443,14 @@ function renderHomeHtml(origin) {
           if (lockIcon) lockIcon.innerText = "\u{1F513}";
           if (label) label.innerText = "Signed in";
           if (authCont) authCont.style.display = "inline-flex";
-          if (portalBtn) portalBtn.style.display = "inline-flex";
+          if (portalBtn) portalBtn.style.display = (role === "admin") ? "inline-flex" : "none";
+          if (dashboardBtn) dashboardBtn.style.display = "inline-flex";
+          if (signupBtn) signupBtn.style.display = "none";
           if (wizard) wizard.classList.add("active");
           if (secretGroup) secretGroup.style.display = "none";
           if (roleBadge) {
             roleBadge.style.display = "inline-block";
-            roleBadge.innerText = "Signed in";
+            roleBadge.innerText = (role === "admin") ? "Admin" : "Signed in";
           }
           if (signOutBtn) signOutBtn.style.display = "inline-block";
           if (promptText) promptText.innerText = "You are signed in.  Add files or make a short link.  The link is ready to copy when sharing finishes.";
@@ -1516,7 +1458,9 @@ function renderHomeHtml(origin) {
             ttlForeverOpt.disabled = (role !== "admin");
           }
         } else {
-          if (portalBtn) portalBtn.style.display = "inline-flex";
+          if (portalBtn) portalBtn.style.display = "none";
+          if (dashboardBtn) dashboardBtn.style.display = "none";
+          if (signupBtn) signupBtn.style.display = "inline-flex";
           if (authCont) authCont.style.display = "inline-flex";
           if (authBtn) {
             authBtn.classList.remove("signed-in");
@@ -5181,6 +5125,14 @@ async function healthCheck(env) {
 __name(healthCheck, "healthCheck");
 __name2(healthCheck, "healthCheck");
 async function handleRequest(request, env, ctx) {
+    const reqGuard = checkUsageGuard("worker_requests", 1);
+    if (!reqGuard.allowed) {
+      return new Response(JSON.stringify({ error: reqGuard.error }), {
+        status: 429,
+        headers: { "Content-Type": "application/json; charset=utf-8", "Retry-After": "3600" }
+      });
+    }
+    trackUsage("worker_requests", 1);
     const url = new URL(request.url);
     if (request.method === "GET" && (url.pathname === "/health" || url.pathname === "/health/")) {
       return healthCheck(env);
@@ -5218,7 +5170,7 @@ async function handleRequest(request, env, ctx) {
     }
     if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
       return handleMcp(request, env, {
-        authenticate: (candidate) => authenticate(candidate, secrets),
+        authenticate: (candidate) => authenticate(candidate, secrets, env),
         call: (candidate) => handleRequest(candidate, env, ctx)
       });
     }
@@ -5229,13 +5181,18 @@ async function handleRequest(request, env, ctx) {
         key = key ? `${hostMatch.subdomain}/${key}` : hostMatch.subdomain;
       }
     }
-    if ((url.pathname === "/login" || url.pathname === "/login/" || url.pathname === "/signin" || url.pathname === "/signin/") && (request.method === "GET" || request.method === "HEAD")) {
+    const isLoginPath = url.pathname === "/login" || url.pathname === "/login/" || url.pathname === "/signin" || url.pathname === "/signin/";
+    const isSignupPath = url.pathname === "/signup" || url.pathname === "/signup/" || url.pathname === "/register" || url.pathname === "/register/";
+    if ((isLoginPath || isSignupPath) && (request.method === "GET" || request.method === "HEAD")) {
       const cookie = getCookie(request, "fl_session");
       const session = await verifySession(cookie, secrets);
-      if (session) {
-        return new Response(null, { status: 303, headers: { Location: session.role === "admin" ? "/portal" : "/?signed_in=1" } });
+      const user = !session && env?.DB ? await sessionUser(request, env) : null;
+      if (session || user) {
+        const dest = (session?.role === "admin" || user?.role === "admin") ? "/portal" : "/dashboard";
+        return new Response(null, { status: 303, headers: { Location: dest } });
       }
-      return new Response(renderLoginHtml(url.origin, url.searchParams.get("error"), url.searchParams.get("logged_out") === "1"), {
+      const initialMode = isSignupPath ? "register" : "login";
+      return new Response(renderLoginHtml(url.origin, url.searchParams.get("error"), url.searchParams.get("logged_out") === "1", initialMode), {
         headers: { "Content-Type": "text/html; charset=utf-8" }
       });
     }
@@ -5368,7 +5325,7 @@ async function handleRequest(request, env, ctx) {
       });
     }
     if (url.pathname === "/api/admin/settings" || url.pathname === "/api/admin/settings/") {
-      return handleAdminSettings(request, rawEnv, await authenticate(request, secrets));
+      return handleAdminSettings(request, rawEnv, await authenticate(request, secrets, env));
     }
     if (url.pathname === "/api/shortcut/download" && (request.method === "GET" || request.method === "HEAD")) {
       const shortcutXml = generateShortcutXml();
@@ -5383,8 +5340,19 @@ async function handleRequest(request, env, ctx) {
     }
     if (url.pathname === "/api/redirect" && request.method === "POST") {
       const redirectAuth = await authenticate(request, secrets);
-      let isAuthed = redirectAuth.isAdmin || redirectAuth.isAgent;
-      let role = redirectAuth.isAdmin ? "admin" : redirectAuth.isAgent ? "agent" : null;
+      let isAdmin = redirectAuth.isAdmin;
+      let isAgent = redirectAuth.isAgent;
+      let user = null;
+      let agentGrant = null;
+      if (!isAdmin && !isAgent) {
+        agentGrant = await lookupAgentToken(request, env);
+        if (agentGrant) isAgent = true;
+      }
+      if (!isAdmin && !isAgent && env?.DB) {
+        user = await sessionUser(request, env);
+      }
+      let isAuthed = isAdmin || isAgent || Boolean(user);
+      let role = isAdmin ? "admin" : isAgent ? "agent" : user ? "user" : null;
       let reqData = {};
       const contentTypeHeader = request.headers.get("Content-Type") || "";
       if (contentTypeHeader.includes("application/json")) {
@@ -5507,11 +5475,30 @@ async function handleRequest(request, env, ctx) {
         ...description ? { og_description: description } : {}
       };
       const htmlBody = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title || "Redirecting")}</title><link rel="canonical" href="${escapeHtml(normalized)}"><meta http-equiv="refresh" content="0; url=${escapeHtml(normalized)}"></head><body>Redirecting to <a href="${escapeHtml(normalized)}">${escapeHtml(normalized)}</a>...</body></html>`;
+      const r2RedirectGuard = checkUsageGuard("r2_writes", 1);
+      if (!r2RedirectGuard.allowed) {
+        return new Response(JSON.stringify({ error: r2RedirectGuard.error }), {
+          status: 429,
+          headers: { "Content-Type": "application/json; charset=utf-8" }
+        });
+      }
       await env.FLEET_SHARES.put(slug, htmlBody, {
         httpMetadata: { contentType: "text/html; charset=utf-8" },
         customMetadata
       });
+      trackUsage("r2_writes", 1);
       const shareUrl = `${shareOrigin}/${slug}`;
+      const redirectOwnerId = redirectAuth.user?.id || redirectAuth.agentGrant?.userId || null;
+      if (redirectOwnerId && env?.DB) {
+        await recordUserShare(env, redirectOwnerId, {
+          slug,
+          url: shareUrl,
+          mode: "redirect",
+          targetUrl: normalized,
+          expiresAt: expireAt ? new Date(expireAt).toISOString() : null,
+          passwordProtected: Boolean(password)
+        });
+      }
       const resHeaders = new Headers({ "Content-Type": "application/json; charset=utf-8" });
       if (reqData.set_session_role && role) {
         const sessionToken = await signSession(role, Date.now() + 30 * 24 * 3600 * 1e3, secrets);
@@ -5528,7 +5515,7 @@ async function handleRequest(request, env, ctx) {
       }), { status: 200, headers: resHeaders });
     }
     if (url.pathname === "/portal" || url.pathname === "/portal/" || url.pathname === "/admin" || url.pathname === "/admin/") {
-      const portalAuth = await authenticate(request, secrets);
+      const portalAuth = await authenticate(request, secrets, env);
       const isAdmin = portalAuth.isAdmin;
       if (!isAdmin) {
         if (url.searchParams.get("login") === "1") {
@@ -5549,7 +5536,7 @@ async function handleRequest(request, env, ctx) {
       });
     }
     if (url.pathname === "/api/portal/data" && request.method === "GET") {
-      const dataAuth = await authenticate(request, secrets);
+      const dataAuth = await authenticate(request, secrets, env);
       if (!dataAuth.isAdmin) {
         return new Response(JSON.stringify({ error: "Unauthorized: Admin privileges required." }), { status: 403, headers: { "Content-Type": "application/json" } });
       }
@@ -5557,7 +5544,7 @@ async function handleRequest(request, env, ctx) {
       return new Response(JSON.stringify(overview), { status: 200, headers: { "Content-Type": "application/json" } });
     }
     if (url.pathname === "/api/portal/delete" && request.method === "POST") {
-      const deleteAuth = await authenticate(request, secrets);
+      const deleteAuth = await authenticate(request, secrets, env);
       let isAdmin = deleteAuth.isAdmin;
       let isAgent = deleteAuth.isAgent;
       if (!isAdmin && !isAgent) {
@@ -5610,6 +5597,8 @@ async function handleRequest(request, env, ctx) {
           const keysToDelete = await collectShareObjectKeys(env, targetSlug);
           if (keysToDelete.length > 0) {
             await deleteObjectKeys(env, keysToDelete);
+            trackUsage("r2_writes", keysToDelete.length);
+            if (env?.DB) await deleteUserShare(env, targetSlug);
             totalDeleted += keysToDelete.length;
             deletedSlugs.push(targetSlug);
           }
@@ -5624,7 +5613,7 @@ async function handleRequest(request, env, ctx) {
       }
     }
     if ((url.pathname === "/api/portal/renew" || url.pathname === "/api/shares/renew") && request.method === "POST") {
-      const renewAuth = await authenticate(request, secrets);
+      const renewAuth = await authenticate(request, secrets, env);
       let isAdmin = renewAuth.isAdmin;
       let isAgent = renewAuth.isAgent;
       if (!isAdmin && !isAgent) {
@@ -5769,6 +5758,8 @@ async function handleRequest(request, env, ctx) {
       const uploadAuth = await authenticate(request, secrets);
       let isAdmin = uploadAuth.isAdmin;
       let isAgent = uploadAuth.isAgent;
+      let user = null;
+      let agentGrant = null;
       try {
         const formData = await request.formData();
         let setSessionRole = null;
@@ -5784,12 +5775,14 @@ async function handleRequest(request, env, ctx) {
             }
           }
         }
-        let agentGrant = null;
         if (!isAdmin && !isAgent) {
           agentGrant = await lookupAgentToken(request, env);
           if (agentGrant) isAgent = true;
         }
-        const isGuest = !isAdmin && !isAgent;
+        if (!isAdmin && !isAgent && env?.DB) {
+          user = await sessionUser(request, env);
+        }
+        const isGuest = !isAdmin && !isAgent && !user;
         if (isGuest) {
           return unauthorizedJson();
         }
@@ -5879,11 +5872,30 @@ async function handleRequest(request, env, ctx) {
             ...description ? { og_description: description } : {}
           };
           const htmlBody = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title2 || "Redirecting")}</title><link rel="canonical" href="${escapeHtml(normalized)}"><meta http-equiv="refresh" content="0; url=${escapeHtml(normalized)}"></head><body>Redirecting to <a href="${escapeHtml(normalized)}">${escapeHtml(normalized)}</a>...</body></html>`;
+          const r2RedirectGuard = checkUsageGuard("r2_writes", 1);
+          if (!r2RedirectGuard.allowed) {
+            return new Response(JSON.stringify({ error: r2RedirectGuard.error }), {
+              status: 429,
+              headers: { "Content-Type": "application/json; charset=utf-8" }
+            });
+          }
           await env.FLEET_SHARES.put(slug2, htmlBody, {
             httpMetadata: { contentType: "text/html; charset=utf-8" },
             customMetadata
           });
+          trackUsage("r2_writes", 1);
           const shareUrl2 = `${shareOrigin}/${slug2}`;
+          const redirectOwnerId = user?.id || agentGrant?.userId || null;
+          if (redirectOwnerId && env?.DB) {
+            await recordUserShare(env, redirectOwnerId, {
+              slug: slug2,
+              url: shareUrl2,
+              mode: "redirect",
+              targetUrl: normalized,
+              expiresAt: expireAt2 ? new Date(expireAt2).toISOString() : null,
+              passwordProtected: Boolean(password2)
+            });
+          }
           const resHeaders2 = new Headers({ "Content-Type": "application/json; charset=utf-8" });
           if (setSessionRole) {
             const maxAge = 30 * 24 * 60 * 60;
@@ -6008,7 +6020,16 @@ async function handleRequest(request, env, ctx) {
         const description = formData.get("description") ? String(formData.get("description")).trim() : "";
         const previewFile = formData.get("preview_image");
         let previewFilename = null;
-        if (previewFile && previewFile instanceof File && previewFile.size > 0) {
+        const hasPreview = previewFile && previewFile instanceof File && previewFile.size > 0;
+        const fileWriteCount = files.length + (hasPreview ? 1 : 0);
+        const r2FilesGuard = checkUsageGuard("r2_writes", fileWriteCount);
+        if (!r2FilesGuard.allowed) {
+          return new Response(JSON.stringify({ error: r2FilesGuard.error }), {
+            status: 429,
+            headers: { "Content-Type": "application/json; charset=utf-8" }
+          });
+        }
+        if (hasPreview) {
           if (previewFile.size > 5 * 1024 * 1024) {
             return new Response(JSON.stringify({ error: "Social preview image exceeds 5MB limit." }), { status: 400, headers: { "Content-Type": "application/json" } });
           }
@@ -6044,7 +6065,20 @@ async function handleRequest(request, env, ctx) {
             });
           }
         }
+        trackUsage("r2_writes", fileWriteCount);
         const shareUrl = files.length === 1 ? `${shareOrigin}/${slug}/${files[0].name}` : `${shareOrigin}/${slug}/`;
+        const uploadOwnerId = user?.id || agentGrant?.userId || null;
+        if (uploadOwnerId && env?.DB) {
+          await recordUserShare(env, uploadOwnerId, {
+            slug,
+            url: shareUrl,
+            mode: "files",
+            fileCount: files.length,
+            bytes: totalBatchBytes,
+            expiresAt: expireAt ? new Date(expireAt).toISOString() : null,
+            passwordProtected: Boolean(password)
+          });
+        }
         const resHeaders = new Headers({ "Content-Type": "application/json; charset=utf-8" });
         if (setSessionRole) {
           const maxAge = 30 * 24 * 60 * 60;
@@ -6666,12 +6700,21 @@ async function handleRequest(request, env, ctx) {
       }
     }
     if (request.method === "DELETE") {
-      const deleteMethodAuth = await authenticate(request, secrets);
-      if (!deleteMethodAuth.isAdmin) {
-        return new Response("Delete rejected: Unauthorized. Provide a valid X-Fleet-Admin header with an Admin secret.", { status: 401 });
-      }
+      const deleteMethodAuth = await authenticate(request, secrets, env);
       const apiSlug = shareSlugFromDeletePath(url.pathname);
       const shareSlug = apiSlug || (key && !String(key).includes("/") ? key : null);
+      if (!deleteMethodAuth.isAdmin) {
+        if (apiSlug && (deleteMethodAuth.user || deleteMethodAuth.isAgent)) {
+          if (deleteMethodAuth.user) {
+            const userShare = await getUserShare(env, apiSlug);
+            if (!userShare || userShare.user_id !== deleteMethodAuth.user.id) {
+              return new Response("Delete rejected: Unauthorized. You do not own this share.", { status: 403 });
+            }
+          }
+        } else {
+          return new Response("Delete rejected: Unauthorized. Provide a valid X-Fleet-Admin header with an Admin secret.", { status: 401 });
+        }
+      }
       if (shareSlug) {
         if (isSettingsStorageKey(shareSlug)) {
           return new Response("Delete rejected: That name is reserved.", { status: 400 });
@@ -6685,7 +6728,11 @@ async function handleRequest(request, env, ctx) {
             return new Response("Delete rejected: That name is reserved.", { status: 400 });
           }
           const keysToDelete = await collectShareObjectKeys(env, resolvedSlug);
-          if (keysToDelete.length > 0) await deleteObjectKeys(env, keysToDelete);
+          if (keysToDelete.length > 0) {
+            await deleteObjectKeys(env, keysToDelete);
+            trackUsage("r2_writes", keysToDelete.length);
+          }
+          if (env?.DB) await deleteUserShare(env, resolvedSlug);
           return new Response(`Successfully deleted ${resolvedSlug}
 `, {
             status: 200,

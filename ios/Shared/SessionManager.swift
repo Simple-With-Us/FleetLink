@@ -92,6 +92,14 @@ public final class SessionManager: ObservableObject {
         Keychain.remove(account: Self.passkeyBearerAccount)
     }
 
+    /// The token to send to authenticated endpoints: the operator secret if set,
+    /// or the passkey bearer token if signed in.
+    public var activeToken: String {
+        let trimmedSecret = bearerSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedSecret.isEmpty { return trimmedSecret }
+        return passkeyBearer?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
     /// Validate the stored bearer token against `GET /api/me`.
     /// Returns `true` when a live session is present.
     @discardableResult
