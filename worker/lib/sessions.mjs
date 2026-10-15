@@ -36,7 +36,7 @@ export async function prepareSession(env, userId, { client = "web", label = null
     expiresAt: ts + SESSION_TTL_SECONDS,
     statement: env.DB.prepare(
       "INSERT INTO sessions (id, token_hash, user_id, client, label, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(id, await pepperedHash(token, env.SESSION_SECRET), userId, client === "ios" ? "ios" : "web", label, ts, ts, ts + SESSION_TTL_SECONDS)
+    ).bind(id, await pepperedHash(token, env), userId, client === "ios" ? "ios" : "web", label, ts, ts, ts + SESSION_TTL_SECONDS)
   };
 }
 
@@ -59,7 +59,7 @@ export async function lookupSession(env, token) {
     `SELECT s.id AS session_id, s.expires_at AS session_expires_at, s.last_seen_at AS session_seen_at, u.*
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ? AND s.expires_at > ?`,
-    await pepperedHash(token, env.SESSION_SECRET),
+    await pepperedHash(token, env),
     ts
   );
   if (!row) return null;
@@ -75,7 +75,7 @@ export async function lookupSession(env, token) {
 
 export async function deleteSessionByToken(env, token) {
   if (!SESSION_TOKEN.test(token || "")) return;
-  await run(env.DB, "DELETE FROM sessions WHERE token_hash = ?", await pepperedHash(token, env.SESSION_SECRET));
+  await run(env.DB, "DELETE FROM sessions WHERE token_hash = ?", await pepperedHash(token, env));
 }
 
 export async function listSessions(env, userId, currentId) {

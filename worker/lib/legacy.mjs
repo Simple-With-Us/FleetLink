@@ -8,6 +8,7 @@
  * The sweep adopts the bucket in pages; a request for a slug that has not been
  * reached yet adopts that slug on the spot.
  */
+import { z } from "zod";
 import { newId } from "./bytes.mjs";
 import { first, getMeta, now, run, setMeta } from "./db.mjs";
 import { OPERATOR_USER_ID } from "./schema.mjs";
@@ -32,6 +33,22 @@ export function isSystemKey(key) {
 
 export async function legacyImportDone(env) {
   return (await getMeta(env.DB, DONE_KEY)) === "1";
+}
+
+/** The custom metadata the old worker wrote.  Anything else on the object is ignored. */
+const LegacyMeta = z.object({
+  expire_at: z.string().max(20).optional(),
+  password_hash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  redirect_url: z.string().max(4096).optional(),
+  target_url: z.string().max(4096).optional(),
+  og_title: z.string().max(400).optional(),
+  og_description: z.string().max(2000).optional(),
+  renewals_count: z.string().max(10).optional()
+}).passthrough();
+
+function legacyMeta(object) {
+  const parsed = LegacyMeta.safeParse(object.customMetadata || {});
+  return parsed.success ? parsed.data : null;
 }
 
 function expiryMillis(meta) {
@@ -60,7 +77,8 @@ async function adopt(env, rawSlug, objects, prefix) {
   if (!SLUG.test(slug) || RESERVED_SLUGS.has(slug) || isSystemKey(slug)) return "skipped";
   if (await first(env.DB, "SELECT id FROM shares WHERE slug = ?", slug)) return "exists";
 
-  const metas = objects.map((o) => o.customMetadata || {});
+  const metas = objects.map(legacyMeta);
+  if (metas.some((m) => m === null)) return "skipped";
   const expiries = metas.map(expiryMillis);
   const forever = expiries.some((e) => e == null);
   const latest = forever ? null : Math.max(...expiries);

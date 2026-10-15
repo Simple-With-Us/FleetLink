@@ -5,7 +5,7 @@
  * owner's password bypass.  User bytes are served with a sandbox policy so a
  * file can never run script as fleetlink.online (see docs/multi-user.md).
  */
-import { hmacHex, randomHex, verifySharePassword } from "./bytes.mjs";
+import { hmacHex, randomHex, sessionSecret, verifySharePassword } from "./bytes.mjs";
 import { first, now } from "./db.mjs";
 import { mustForceAttachment } from "./html-safety.mjs";
 import { cookie, escapeHtml, html, json, redirect, wantsJson } from "./http.mjs";
@@ -50,7 +50,7 @@ function unlockCookieName(share) {
 }
 
 async function unlockValue(env, share) {
-  return hmacHex(env.SESSION_SECRET || "fleetlink-unlock", `${share.id}:${share.password_hash}`);
+  return hmacHex(sessionSecret(env), `${share.id}:${share.password_hash}`);
 }
 
 async function unlocked(request, env, share, url) {

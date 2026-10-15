@@ -65,7 +65,7 @@ export async function createToken(env, user, settings, body) {
     user.id,
     teamId,
     input.name,
-    await pepperedHash(secret, env.SESSION_SECRET),
+    await pepperedHash(secret, env),
     secret.slice(0, 12),
     input.max_file_mb ? Math.round(input.max_file_mb * 1024 * 1024) : null,
     input.max_days ? Math.round(input.max_days * 86400) : null,
@@ -95,7 +95,7 @@ export async function lookupToken(env, secret) {
             t.expires_at AS t_expires_at, u.*
        FROM api_tokens t JOIN users u ON u.id = t.user_id
       WHERE t.token_hash = ?`,
-    await pepperedHash(secret, env.SESSION_SECRET)
+    await pepperedHash(secret, env)
   );
   if (!row) return null;
   if (row.t_expires_at != null && row.t_expires_at <= ts) return null;

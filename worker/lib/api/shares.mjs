@@ -1,10 +1,19 @@
 /** Share routes: the JSON API, raw PUT and DELETE on share paths, and the old endpoint names. */
+import { z } from "zod";
 import { badRequest, HttpError, iso, json, parseWith, readBody, text, wantsJson } from "../http.mjs";
 import { requireShareAccess } from "../policy.mjs";
 import {
   createShare, CreateShareBody, deleteShare, deleteShareFile, getShareBySlug, isExpired, listShares,
   loadShareFor, LIMITS, publicShare, purgeShare, putShareFile, renewShare, shareFiles, updateShare
 } from "../shares.mjs";
+
+const RenewBody = z.object({ days: z.union([z.number(), z.string().max(20)]).nullable().optional() }).strict();
+const LegacyRenewBody = z.object({ slug: z.string().trim().min(1).max(200), days: z.union([z.number(), z.string().max(20)]).nullable().optional() }).strict();
+const LegacyDeleteBody = z.object({
+  slug: z.string().trim().min(1).max(200).optional(),
+  slugs: z.array(z.string().trim().min(1).max(200)).max(100).optional()
+}).strict().refine((v) => v.slug || v.slugs?.length, "Missing slug(s) to delete.");
+const LegacyRedirectBody = CreateShareBody.extend({ redirect_url: z.string().max(4096).optional() });
 
 async function detail(ctx, principal, share, access) {
   const origin = await ctx.shareOrigin();
@@ -147,7 +156,7 @@ export function shareRoutes(router) {
   router.on("DELETE", "/api/shares/:slug", async (ctx) => json({ ok: true, ...(await deleteShare(ctx.env, await ctx.auth(), ctx.params.slug)) }));
   router.on("POST", "/api/shares/:slug/renew", async (ctx) => {
     const principal = await ctx.auth();
-    const { share, unchanged } = await renewShare(ctx.env, principal, ctx.params.slug, await readBody(ctx.request));
+    const { share, unchanged } = await renewShare(ctx.env, principal, ctx.params.slug, parseWith(RenewBody, await readBody(ctx.request)));
     return json({ share: await detail(ctx, principal, share, { manage: true }), unchanged, max_renewals: (principal.isAdmin ? LIMITS.admin : LIMITS.user).renewals });
   });
   router.on("PUT", "/api/shares/:slug/files/*path", async (ctx) => {
@@ -181,16 +190,14 @@ export function shareRoutes(router) {
   });
   router.on("POST", "/api/redirect", async (ctx) => {
     const principal = await ctx.auth();
-    const body = await readBody(ctx.request);
-    const input = parseWith(CreateShareBody, body);
-    const share = await createShare(ctx.env, principal, { ...input, url: input.url || input.target_url || body.redirect_url, kind: "link" });
+    const input = parseWith(LegacyRedirectBody, await readBody(ctx.request));
+    const share = await createShare(ctx.env, principal, { ...input, url: input.url || input.target_url || input.redirect_url, kind: "link" });
     return json(legacyShape(await ctx.shareOrigin(), share));
   });
   const legacyRenew = async (ctx) => {
     const principal = await ctx.auth();
-    const body = await readBody(ctx.request);
-    if (!body.slug) throw badRequest("Missing required parameter: slug.");
-    const { share, unchanged } = await renewShare(ctx.env, principal, String(body.slug).split("/")[0], body);
+    const body = parseWith(LegacyRenewBody, await readBody(ctx.request));
+    const { share, unchanged } = await renewShare(ctx.env, principal, body.slug.split("/")[0], { days: body.days });
     const max = (principal.isAdmin ? LIMITS.admin : LIMITS.user).renewals;
     return json({ success: true, slug: share.slug, expires: share.expires_at ? iso(share.expires_at) : "never", expire_at: share.expires_at ? share.expires_at * 1000 : null, renewals_used: share.renewals, max_renewals: max, unchanged });
   };
@@ -198,9 +205,8 @@ export function shareRoutes(router) {
   router.on("POST", "/api/portal/renew", legacyRenew);
   router.on("POST", "/api/portal/delete", async (ctx) => {
     const principal = await ctx.auth();
-    const body = await readBody(ctx.request);
-    const slugs = (Array.isArray(body.slugs) ? body.slugs : [body.slug]).map((s) => String(s ?? "").trim().replace(/^\/+|\/+$/g, "").split("/")[0]).filter(Boolean);
-    if (!slugs.length) throw badRequest("Missing slug(s) to delete.");
+    const body = parseWith(LegacyDeleteBody, await readBody(ctx.request));
+    const slugs = (body.slugs ?? [body.slug]).map((s) => s.replace(/^\/+|\/+$/g, "").split("/")[0]).filter(Boolean);
     const deleted = [];
     let count = 0;
     for (const slug of slugs) {

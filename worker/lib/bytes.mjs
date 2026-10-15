@@ -1,3 +1,5 @@
+import { HttpError } from "./http.mjs";
+
 const encoder = new TextEncoder();
 
 export function bytesToB64url(bytes) {
@@ -30,11 +32,21 @@ export async function sha256Hex(value) {
 }
 
 /**
- * Hash a bearer secret for storage.  The pepper (SESSION_SECRET) means a copy
- * of the database alone cannot be replayed as a list of live credentials.
+ * The SESSION_SECRET binding.  It peppers stored credential hashes and keys the
+ * password-unlock cookie, so a worker without it refuses to run those paths.
  */
-export function pepperedHash(value, pepper) {
-  return sha256Hex(pepper ? `${pepper}\0${value}` : value);
+export function sessionSecret(env) {
+  const secret = String(env?.SESSION_SECRET || "");
+  if (!secret) throw new HttpError(503, "Sign-in is unavailable: SESSION_SECRET is not configured.");
+  return secret;
+}
+
+/**
+ * Hash a bearer secret for storage.  The pepper means a copy of the database
+ * alone cannot be replayed as a list of live credentials.
+ */
+export function pepperedHash(value, env) {
+  return sha256Hex(`${sessionSecret(env)}\0${value}`);
 }
 
 /** Constant-time string comparison over SHA-256 digests. */

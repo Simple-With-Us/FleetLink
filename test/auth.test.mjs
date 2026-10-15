@@ -271,3 +271,13 @@ test("old endpoints stay closed", async () => {
   const status = await callJson(env, "GET", "/api/auth");
   assert.deepEqual(status.data, { authenticated: false });
 });
+
+test("without SESSION_SECRET, credential and unlock paths fail closed instead of using a default key", async () => {
+  const env = await makeEnv();
+  const ada = await signUp(env, "Ada");
+  await call(env, "PUT", "/locked-x/a.txt", { auth: ada, body: "a", headers: { "content-type": "text/plain", "x-fleet-password": "pw" } });
+  delete env.SESSION_SECRET;
+  assert.equal((await callJson(env, "GET", "/api/me", { auth: ada })).status, 503);
+  await assert.rejects(call(env, "GET", "/locked-x/a.txt?password=pw"), /SESSION_SECRET/);
+  assert.equal((await callJson(env, "GET", "/api/me", { auth: { operator: true } })).status, 200);
+});

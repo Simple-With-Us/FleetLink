@@ -64,7 +64,7 @@ export async function createInvite(env, actor, body) {
     `INSERT INTO invites (id, code_hash, code_prefix, role, team_id, note, max_uses, uses, created_by, created_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
     id,
-    await pepperedHash(code, env.SESSION_SECRET),
+    await pepperedHash(code, env),
     code.slice(0, 4),
     input.role || "user",
     input.team_id || null,
@@ -102,7 +102,7 @@ export async function findUsableInvite(env, code) {
   const row = await first(
     env.DB,
     "SELECT * FROM invites WHERE code_hash = ? AND revoked_at IS NULL AND uses < max_uses AND expires_at > ?",
-    await pepperedHash(normalized, env.SESSION_SECRET),
+    await pepperedHash(normalized, env),
     now()
   );
   if (!row) throw forbidden("That invite code is not valid, or it has already been used.");
