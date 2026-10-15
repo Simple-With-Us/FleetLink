@@ -15,6 +15,19 @@ export function latestExpireAtMillisFromListed(objects) {
   return latest;
 }
 
+export function allListedObjectsHaveExpiry(objects) {
+  if (!objects?.length) return false;
+  for (const obj of objects) {
+    if (parseExpireAtMillis(obj.customMetadata) == null) return false;
+  }
+  return true;
+}
+
+export function isDirectoryShareExpired(objects, now = Date.now()) {
+  if (!allListedObjectsHaveExpiry(objects)) return false;
+  return isExpiredAt(latestExpireAtMillisFromListed(objects), now);
+}
+
 export function isExpiredAt(expireAtMillis, now = Date.now()) {
   return expireAtMillis != null && now > expireAtMillis;
 }

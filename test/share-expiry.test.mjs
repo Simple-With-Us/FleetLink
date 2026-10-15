@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import worker from "../worker/fleetlink-api.mjs";
 import {
+  allListedObjectsHaveExpiry,
+  isDirectoryShareExpired,
   isExpiredAt,
   latestExpireAtMillisFromListed,
   parseExpireAtMillis
@@ -83,6 +85,14 @@ test("share-expiry helpers parse and compare timestamps", () => {
     { customMetadata: { expire_at: String(future) } }
   ]);
   assert.equal(latest, future);
+  assert.equal(allListedObjectsHaveExpiry([{ customMetadata: {} }]), false);
+  assert.equal(
+    isDirectoryShareExpired([
+      { customMetadata: { expire_at: String(past) } },
+      { customMetadata: {} }
+    ]),
+    false
+  );
 });
 
 test("GET expired file share returns 410 and removes the object", async () => {
@@ -147,6 +157,29 @@ test("GET expired redirect returns 410", async () => {
   const response = await worker.fetch(new Request("https://fleetlink.online/short"), env, ctx);
   assert.equal(response.status, 410);
   assert.equal(bucket.objects.has("short"), false);
+});
+
+test("GET directory with a permanent file is not 410 when another file expired", async () => {
+  const bucket = memoryBucket();
+  const past = Date.now() - 1_000;
+  const future = Date.now() + 3600_000;
+  await bucket.put("mix/expired.txt", "old", {
+    httpMetadata: { contentType: "text/plain" },
+    customMetadata: { expire_at: String(past) }
+  });
+  await bucket.put("mix/keep.txt", "stay", {
+    httpMetadata: { contentType: "text/plain" },
+    customMetadata: { expire_at: String(future) }
+  });
+  await bucket.put("mix/forever.txt", "perm", {
+    httpMetadata: { contentType: "text/plain" },
+    customMetadata: {}
+  });
+  const env = envWith(bucket);
+
+  const response = await worker.fetch(new Request("https://fleetlink.online/mix/"), env, ctx);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /forever\.txt/);
 });
 
 test("GET expired directory listing returns 410", async () => {

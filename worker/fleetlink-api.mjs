@@ -15,8 +15,8 @@ import {
 import { randomHex } from "./lib/bytes.mjs";
 import { SettingsOverridesDocument, SettingsUpdateBody } from "./lib/settings-schema.mjs";
 import {
+  isDirectoryShareExpired,
   isExpiredAt,
-  latestExpireAtMillisFromListed,
   parseExpireAtMillis,
   requestPrefersJson
 } from "./lib/share-expiry.mjs";
@@ -6172,8 +6172,7 @@ async function handleRequest(request, env, ctx) {
         const listPrefix = key.endsWith("/") ? key : key + "/";
         const listed = await env.FLEET_SHARES.list({ prefix: listPrefix, include: ["customMetadata"] });
         if (listed.objects.length > 0) {
-          const shareExpiresAt = latestExpireAtMillisFromListed(listed.objects);
-          if (isExpiredAt(shareExpiresAt)) {
+          if (isDirectoryShareExpired(listed.objects)) {
             return expiredShareResponse(request);
           }
           let detectedPreview = null;
