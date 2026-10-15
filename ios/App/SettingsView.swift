@@ -17,15 +17,13 @@ public struct SettingsView: View {
                 AccountView(session: session, passkeys: passkeys)
 
                 Section {
-                    SecureField("Sign-in code", text: $session.bearerSecret)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .accessibilityIdentifier("bearerTokenField")
-                        .accessibilityLabel("Automation sign-in code")
+                    Link(destination: URL(string: "\(serverHost)/dashboard#tokens")!) {
+                        Label("API tokens for agents and shortcuts", systemImage: "key")
+                    }
                 } header: {
                     Text("Automation")
                 } footer: {
-                    Text("Only for a script or shortcut that shares for you.\u{00A0} It is separate from the passkey sign-in above.\u{00A0} Leave it blank if you only use a passkey.")
+                    Text("A script, agent, or the share-sheet shortcut uses its own API token.\u{00A0} Create and revoke tokens on the website dashboard.")
                         .font(.caption)
                 }
 
@@ -42,7 +40,7 @@ public struct SettingsView: View {
                 }
 
                 Section("On the web") {
-                    Link(destination: URL(string: "\(serverHost)/instructions/")!) {
+                    Link(destination: URL(string: "\(serverHost)/instructions")!) {
                         Label("Instructions", systemImage: "book")
                     }
                     Link(destination: URL(string: "\(serverHost)/privacy")!) {
@@ -60,7 +58,7 @@ public struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.1 Beta")
+                        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

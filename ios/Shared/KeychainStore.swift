@@ -66,12 +66,10 @@ public struct SessionUser: Codable, Equatable, Sendable {
     public let role: String
     public let displayName: String?
     public let email: String?
-    public let agentTokenQuota: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, role, email
         case displayName = "display_name"
-        case agentTokenQuota = "agent_token_quota"
     }
 
     /// Primary line for the account card: a display name when the provider gave

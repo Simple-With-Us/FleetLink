@@ -1,7 +1,7 @@
 import * as esbuild from "esbuild";
 
 await esbuild.build({
-  entryPoints: ["worker/fleetlink-api.mjs"],
+  entryPoints: ["worker/index.mjs"],
   bundle: true,
   format: "esm",
   platform: "browser",

@@ -244,7 +244,7 @@ public struct CreateSlugView: View {
                         .textInputAutocapitalization(.never)
 
                     Picker("How long it stays up", selection: $selectedTTLSeconds) {
-                        ForEach(creationMode == .redirect ? redirectTTLs : uploadTTLs) { opt in
+                        ForEach((creationMode == .redirect ? redirectTTLs : uploadTTLs).filter { $0.seconds > 0 || session.user?.isAdmin == true }) { opt in
                             Text(opt.label).tag(opt.seconds)
                         }
                     }
@@ -368,8 +368,7 @@ public struct CreateSlugView: View {
                     description: descriptionToUse,
                     domain: selectedDomain,
                     host: host,
-                    token: session.bearerSecret,
-                    sessionCookie: session.sessionCookieHeader
+                    token: session.apiToken
                 )
             case .note:
                 let name = textFileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "notes.md" : textFileName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -388,8 +387,7 @@ public struct CreateSlugView: View {
                     preview: previewFile?.part,
                     domain: selectedDomain,
                     host: host,
-                    token: session.bearerSecret,
-                    sessionCookie: session.sessionCookieHeader
+                    token: session.apiToken
                 )
             case .files:
                 result = await portalManager.createUpload(
@@ -402,8 +400,7 @@ public struct CreateSlugView: View {
                     preview: previewFile?.part,
                     domain: selectedDomain,
                     host: host,
-                    token: session.bearerSecret,
-                    sessionCookie: session.sessionCookieHeader
+                    token: session.apiToken
                 )
             }
 

@@ -1,452 +1,698 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env python3
+"""fleet-share: the FleetLink command-line client.
 
-# Remote installer pin.  The SHA-256 defaults are the integrity check: a
-# download that does not match is deleted and not executed.  The git SHA is
-# the raw URL of a commit that already published those bytes.  It is an
-# ancestor, not the commit that records this pin, because a commit cannot
-# contain its own id.  A shallow clone may not have that ancestor.
-# FLEETLINK_SKILL_GIT_SHA, FLEETLINK_INSTALLER_SHA256, and
-# FLEETLINK_SKILL_MD_SHA256 override the defaults.
-FLEETLINK_PINNED_GIT_SHA_DEFAULT='6372081537a87fcf7b7f5bb5bffd1f8e8bf3f192'
-FLEETLINK_INSTALLER_SHA256_DEFAULT='e8bf443e751ad50c5dd795c2348cdda28752afda9d9d42d55dd60deb5094d6ce'
-FLEETLINK_SKILL_MD_SHA256_DEFAULT='0662a95f3ebbf32855498322d6cc1bdfbe88124ea540b87bcff66d61ae8c87f1'
+Every call acts as one FleetLink account.  Authenticate with an API token
+(create one on https://fleetlink.online/dashboard#tokens), then:
 
-mime_of() {
-  local path="$1"
-  local mt=""
-  if command -v file >/dev/null 2>&1; then
-    mt=$(file -b --mime-type "$path" 2>/dev/null || true)
-  fi
-  if [ -z "$mt" ] || [ "$mt" = "inode/x-empty" ]; then
-    case "${path##*.}" in
-      md) mt="text/markdown; charset=utf-8" ;;
-      txt|log) mt="text/plain; charset=utf-8" ;;
-      html|htm) mt="text/html; charset=utf-8" ;;
-      json) mt="application/json; charset=utf-8" ;;
-      png) mt="image/png" ;;
-      jpg|jpeg) mt="image/jpeg" ;;
-      gif) mt="image/gif" ;;
-      webp) mt="image/webp" ;;
-      svg) mt="image/svg+xml" ;;
-      pdf) mt="application/pdf" ;;
-      zip) mt="application/zip" ;;
-      *) mt="application/octet-stream" ;;
-    esac
-  fi
-  printf '%s' "$mt"
+    fleet-share login                       save a token for later commands
+    fleet-share notes.md ./report/          upload files and folders as one share
+    fleet-share link https://example.com    make a short link
+    fleet-share list | info | renew | delete
+    fleet-share tokens | teams | admin      account, team, and admin tools
+    fleet-share skill install               install the agent skill
+
+Python 3.8+ standard library only.  Credentials are never printed.
+"""
+import argparse
+import getpass
+import hashlib
+import json
+import mimetypes
+import os
+import stat
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+VERSION = "2.0.0"
+DEFAULT_DOMAIN = "https://fleetlink.online"
+
+# Remote skill installer pin.  The SHA-256 values are the integrity check: a
+# download that does not match is deleted and never run.  The git SHA names a
+# commit that already published those bytes; it is an ancestor of the commit
+# that records it, because a commit cannot contain its own id.
+FLEETLINK_PINNED_GIT_SHA_DEFAULT = 'aca06a821573f2ac10779765c179247aaffd91d2'
+FLEETLINK_INSTALLER_SHA256_DEFAULT = 'e8bf443e751ad50c5dd795c2348cdda28752afda9d9d42d55dd60deb5094d6ce'
+FLEETLINK_SKILL_MD_SHA256_DEFAULT = '8e69f3315a5793031c7f5a4b0309b1b3ab3e188265e93a9d01afcf5fe92049bf'
+
+TEXT_TYPES = {
+    ".md": "text/markdown; charset=utf-8",
+    ".markdown": "text/markdown; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".log": "text/plain; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".htm": "text/html; charset=utf-8",
+    ".csv": "text/csv; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".shortcut": "application/x-apple-shortcut",
+    ".mobileconfig": "application/x-apple-aspen-config",
 }
 
-usage() {
-  cat <<'EOF'
-Usage: fleet-share [--domain <url>] [--id <hash> | --slug <name>] [--password <pass>] [--preview <image>] [--agent] [--days <N> | --forever] <file-or-dir> [file-or-dir ...]
-       fleet-share skill install|update [--check] [--copy] [--copy-targets-only]
 
-Auth is FLEET_ADMIN_SECRET, or FLEET_AGENT_SECRET with --agent.  Otherwise set
-FLEETLINK_AUTH_FILE to a KEY=value file, or use ./fleet-link-auth.env in the
-current directory.  The value is never printed.  See skills/fleetlink/SKILL.md.
-EOF
-}
+class CliError(Exception):
+    pass
 
-fleet_share_realpath() {
-  if python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1" 2>/dev/null; then
-    return 0
-  fi
-  if readlink -f "$1" >/dev/null 2>&1; then
-    readlink -f "$1"
-    return 0
-  fi
-  printf '%s\n' "$1"
-}
 
-fleet_share_repo_root() {
-  local script_path script_dir candidate
-  script_path=$(fleet_share_realpath "$0")
-  script_dir=$(dirname -- "$script_path")
-  candidate=$(dirname -- "$script_dir")
-  if [ -f "$candidate/scripts/install-skill.sh" ] && [ -f "$candidate/skills/fleetlink/SKILL.md" ]; then
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-  if [ -n "${FLEETLINK_REPO_ROOT:-}" ] && [ -f "${FLEETLINK_REPO_ROOT}/scripts/install-skill.sh" ] && [ -f "${FLEETLINK_REPO_ROOT}/skills/fleetlink/SKILL.md" ]; then
-    printf '%s\n' "${FLEETLINK_REPO_ROOT}"
-    return 0
-  fi
-  return 1
-}
+# ---------------------------------------------------------------- credentials
 
-fleet_share_curl() {
-  local url=$1 dest=$2
-  if ! curl -fsSL "$url" -o "$dest"; then
-    echo "Could not download $url" >&2
-    echo "Run fleet-share from a FleetLink checkout, or set FLEETLINK_SKILL_RAW_BASE to a raw base URL that serves skills/fleetlink/SKILL.md and scripts/install-skill.sh." >&2
-    exit 1
-  fi
-}
+def config_dir():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "fleetlink")
 
-fleet_share_sha256() {
-  local file=$1
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$file" | awk '{print $1}'
-    return 0
-  fi
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$file" | awk '{print $1}'
-    return 0
-  fi
-  echo "Refusing to run: sha256sum or shasum is required to verify the downloaded skill." >&2
-  exit 1
-}
 
-fleet_share_require_hash() {
-  local file=$1 expected=$2 label=$3 actual
-  expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f' | tr -d '[:space:]')
-  if [ -z "$expected" ]; then
-    echo "Refusing to run: no pinned SHA-256 for $label." >&2
-    exit 1
-  fi
-  actual=$(fleet_share_sha256 "$file" | tr 'A-F' 'a-f' | tr -d '[:space:]')
-  if [ "$actual" != "$expected" ]; then
-    rm -f "$file"
-    echo "Refusing to run: $label hash mismatch." >&2
-    echo "expected $expected" >&2
-    echo "actual   $actual" >&2
-    exit 1
-  fi
-}
+def credentials_path():
+    return os.environ.get("FLEETLINK_CREDENTIALS") or os.path.join(config_dir(), "credentials")
 
-fleet_share_fetch_and_install() {
-  local base cache pin installer_expected skill_expected
-  if [ -z "${HOME:-}" ] || [ "$HOME" = "/" ]; then
-    echo "Refusing to download the FleetLink skill: HOME is unset or /." >&2
-    exit 1
-  fi
-  pin=${FLEETLINK_SKILL_GIT_SHA:-$FLEETLINK_PINNED_GIT_SHA_DEFAULT}
-  base=${FLEETLINK_SKILL_RAW_BASE:-https://raw.githubusercontent.com/Simple-With-Us/FleetLink/${pin}}
-  base=${base%/}
-  cache=${FLEETLINK_SKILL_CACHE:-$HOME/.cache/fleetlink}
-  installer_expected=${FLEETLINK_INSTALLER_SHA256:-$FLEETLINK_INSTALLER_SHA256_DEFAULT}
-  skill_expected=${FLEETLINK_SKILL_MD_SHA256:-$FLEETLINK_SKILL_MD_SHA256_DEFAULT}
-  mkdir -p "$cache/skills/fleetlink" "$cache/scripts"
-  fleet_share_curl "$base/skills/fleetlink/SKILL.md" "$cache/skills/fleetlink/SKILL.md"
-  fleet_share_curl "$base/scripts/install-skill.sh" "$cache/scripts/install-skill.sh"
-  fleet_share_require_hash "$cache/skills/fleetlink/SKILL.md" "$skill_expected" "SKILL.md"
-  fleet_share_require_hash "$cache/scripts/install-skill.sh" "$installer_expected" "install-skill.sh"
-  chmod +x "$cache/scripts/install-skill.sh"
-  bash "$cache/scripts/install-skill.sh" "$@"
-}
 
-fleet_share_skill() {
-  local sub repo
-  sub=${1:-}
-  if [ "$sub" != "install" ] && [ "$sub" != "update" ]; then
-    echo "Usage: fleet-share skill install|update [--check] [--copy] [--copy-targets-only]" >&2
-    exit 1
-  fi
-  shift
-  if repo=$(fleet_share_repo_root); then
-    bash "$repo/scripts/install-skill.sh" "$@"
-    return 0
-  fi
-  fleet_share_fetch_and_install "$@"
-}
+def strip_quotes(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "help" ]; then
-  usage
-  exit 0
-fi
 
-if [ "${1:-}" = "skill" ]; then
-  shift
-  fleet_share_skill "$@"
-  exit 0
-fi
+def read_kv_file(path):
+    out = {}
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            out[key.strip()] = strip_quotes(value)
+    return out
 
-DOMAIN="${FLEETLINK_DOMAIN:-https://fleetlink.online}"
 
-ID=""
-SLUG=""
-DAYS=""
-FOREVER=0
-PASSWORD=""
-PREVIEW=""
-USE_AGENT=0
+def resolve_auth(args):
+    """Return (header_name, value, label).  Order: flag, env, auth file, saved login, operator secret."""
+    if getattr(args, "agent", False):
+        raise CliError("The shared agent secret is retired.  Create an API token on your dashboard and set FLEETLINK_TOKEN.")
+    if args.token:
+        return ("Authorization", "Bearer " + args.token.strip(), "--token")
+    env_token = os.environ.get("FLEETLINK_TOKEN", "").strip()
+    if env_token and not args.operator:
+        return ("Authorization", "Bearer " + env_token, "FLEETLINK_TOKEN")
+    files = []
+    if os.environ.get("FLEETLINK_AUTH_FILE"):
+        if not os.path.isfile(os.environ["FLEETLINK_AUTH_FILE"]):
+            raise CliError("FLEETLINK_AUTH_FILE is set but the file does not exist.")
+        files.append(os.environ["FLEETLINK_AUTH_FILE"])
+    else:
+        files.extend(f for f in ("./fleet-link-auth.env", "./.fleet-link-auth.env") if os.path.isfile(f))
+    for path in files:
+        values = read_kv_file(path)
+        if values.get("FLEETLINK_TOKEN") and not args.operator:
+            return ("Authorization", "Bearer " + values["FLEETLINK_TOKEN"], path)
+        for key in ("FLEET_ADMIN_SECRET", "ADMIN_SECRET", "FLEET_AUTH_SECRET"):
+            if values.get(key):
+                return ("X-Fleet-Admin", values[key], path + " (operator)")
+        break
+    if not args.operator and os.path.isfile(credentials_path()):
+        saved = read_kv_file(credentials_path())
+        if saved.get("FLEETLINK_TOKEN"):
+            return ("Authorization", "Bearer " + saved["FLEETLINK_TOKEN"], "saved login")
+    for key in ("FLEET_ADMIN_SECRET", "ADMIN_SECRET"):
+        if os.environ.get(key, "").strip():
+            return ("X-Fleet-Admin", os.environ[key].strip(), key + " (operator)")
+    raise CliError(
+        "Not signed in.  Create an API token at " + domain(args) + "/dashboard#tokens, then run "
+        "`fleet-share login` or set FLEETLINK_TOKEN."
+    )
 
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --domain)
-      DOMAIN="$2"
-      shift 2
-      ;;
-    --id)
-      ID="$2"
-      shift 2
-      ;;
-    --slug)
-      SLUG="$2"
-      shift 2
-      ;;
-    --days)
-      DAYS="$2"
-      shift 2
-      ;;
-    --password)
-      PASSWORD="$2"
-      shift 2
-      ;;
-    --preview)
-      PREVIEW="$2"
-      shift 2
-      ;;
-    --agent)
-      USE_AGENT=1
-      shift
-      ;;
-    --forever)
-      FOREVER=1
-      shift
-      ;;
-    *)
-      break
-      ;;
-  esac
-done
 
-if [ "$#" -eq 0 ]; then
-  usage
-  exit 1
-fi
+def domain(args):
+    return (getattr(args, "domain", None) or os.environ.get("FLEETLINK_DOMAIN") or DEFAULT_DOMAIN).rstrip("/")
 
-strip_wrapping_quotes() {
-  local val=$1
-  case "$val" in
-    \"*\") val=${val#\"}; val=${val%\"} ;;
-    \'*\') val=${val#\'}; val=${val%\'} ;;
-  esac
-  printf '%s' "$val"
-}
 
-secret_from_file() {
-  local file=$1 pattern=$2 line val
-  line=$(grep -E "$pattern" "$file" | head -n1 || true)
-  if [ -z "$line" ]; then
-    printf ''
-    return 0
-  fi
-  val=${line#*=}
-  strip_wrapping_quotes "$val"
-}
+# ----------------------------------------------------------------------- http
 
-secret_from_auth_files() {
-  local pattern=$1 f
-  if [ -n "${FLEETLINK_AUTH_FILE:-}" ]; then
-    if [ ! -f "$FLEETLINK_AUTH_FILE" ]; then
-      echo "❌ Error: FLEETLINK_AUTH_FILE is set but the file does not exist." >&2
-      exit 1
-    fi
-    secret_from_file "$FLEETLINK_AUTH_FILE" "$pattern"
-    return 0
-  fi
-  for f in "./fleet-link-auth.env" "./.fleet-link-auth.env"; do
-    if [ -f "$f" ]; then
-      secret_from_file "$f" "$pattern"
-      return 0
-    fi
-  done
-  printf ''
-}
+class Api:
+    def __init__(self, args, auth=True):
+        self.base = domain(args)
+        self.header = resolve_auth(args) if auth else None
 
-first_env() {
-  local name val
-  for name in "$@"; do
-    val=${!name-}
-    if [ -n "$val" ]; then
-      printf '%s' "$val"
-      return 0
-    fi
-  done
-  return 1
-}
+    def request(self, method, path, body=None, data=None, headers=None, length=None):
+        url = path if path.startswith("http") else self.base + path
+        h = {"Accept": "application/json", "User-Agent": "fleet-share/" + VERSION}
+        if self.header:
+            h[self.header[0]] = self.header[1]
+        if body is not None:
+            data = json.dumps(body).encode()
+            h["Content-Type"] = "application/json"
+        if headers:
+            h.update(headers)
+        if length is not None:
+            h["Content-Length"] = str(length)
+        req = urllib.request.Request(url, data=data, method=method, headers=h)
+        try:
+            with urllib.request.urlopen(req, timeout=600) as res:
+                raw = res.read()
+                return json.loads(raw.decode() or "{}")
+        except urllib.error.HTTPError as err:
+            raw = err.read().decode("utf-8", "replace")
+            try:
+                message = json.loads(raw).get("error") or raw
+            except ValueError:
+                message = raw.strip() or err.reason
+            raise CliError("{} (HTTP {})".format(message, err.code))
+        except urllib.error.URLError as err:
+            raise CliError("Could not reach {}: {}".format(self.base, err.reason))
 
-if [ "$USE_AGENT" -eq 1 ]; then
-  AUTH_HEADER_NAME="X-Fleet-Agent"
-  AUTH_SECRET=$(first_env FLEET_AGENT_SECRET AGENT_SECRET || true)
-  if [ -z "$AUTH_SECRET" ]; then
-    AUTH_SECRET=$(secret_from_auth_files '^(FLEET_AGENT_SECRET|AGENT_SECRET)=')
-  fi
-else
-  AUTH_HEADER_NAME="X-Fleet-Admin"
-  AUTH_SECRET=$(first_env FLEET_ADMIN_SECRET ADMIN_SECRET FLEET_AUTH_SECRET AUTH_SECRET || true)
-  if [ -z "$AUTH_SECRET" ]; then
-    AUTH_SECRET=$(secret_from_auth_files '^(FLEET_ADMIN_SECRET|ADMIN_SECRET|FLEET_AUTH_SECRET|AUTH_SECRET)=')
-  fi
-fi
+    def get(self, path):
+        return self.request("GET", path)
 
-if [ -z "$AUTH_SECRET" ]; then
-  echo "❌ Error: Set FLEET_ADMIN_SECRET, or FLEET_AGENT_SECRET with --agent." >&2
-  echo "Or set FLEETLINK_AUTH_FILE to a KEY=value file.  The CLI does not search home directories." >&2
-  exit 1
-fi
+    def post(self, path, body=None):
+        return self.request("POST", path, body=body if body is not None else {})
 
-EXPIRE_HEADER="X-Expire-Days: 3"
-if [ "$FOREVER" -eq 1 ]; then
-  EXPIRE_HEADER="X-Expire-Days: forever"
-elif [ -n "$DAYS" ]; then
-  EXPIRE_HEADER="X-Expire-Days: $DAYS"
-fi
+    def patch(self, path, body):
+        return self.request("PATCH", path, body=body)
 
-MAX_FILE_BYTES=$((100 * 1024 * 1024))   # 100MB
-MAX_TOTAL_BYTES=$((500 * 1024 * 1024))  # 500MB
+    def put_json(self, path, body):
+        return self.request("PUT", path, body=body)
 
-# Pre-validate file sizes and calculate total
-TOTAL_BYTES=0
-for TARGET in "$@"; do
-  TARGET="${TARGET%/}"
-  if [ ! -e "$TARGET" ]; then
-    echo "Error: '$TARGET' not found, aborting."
-    exit 1
-  fi
-  if [ -d "$TARGET" ]; then
-    while read -r FILE; do
-      FSIZE=$(stat -f%z "$FILE" 2>/dev/null || stat -c%s "$FILE" 2>/dev/null || echo 0)
-      if [ "$FSIZE" -gt "$MAX_FILE_BYTES" ]; then
-        SIZE_MB=$((FSIZE / 1024 / 1024))
-        echo "❌ Upload rejected: '$FILE' is ${SIZE_MB}MB, exceeding the 100MB per-file limit."
-        exit 1
-      fi
-      TOTAL_BYTES=$((TOTAL_BYTES + FSIZE))
-    done < <(find "$TARGET" -type f)
-  else
-    FSIZE=$(stat -f%z "$TARGET" 2>/dev/null || stat -c%s "$TARGET" 2>/dev/null || echo 0)
-    if [ "$FSIZE" -gt "$MAX_FILE_BYTES" ]; then
-      SIZE_MB=$((FSIZE / 1024 / 1024))
-      echo "❌ Upload rejected: '$TARGET' is ${SIZE_MB}MB, exceeding the 100MB per-file limit."
-      exit 1
-    fi
-    TOTAL_BYTES=$((TOTAL_BYTES + FSIZE))
-  fi
-done
+    def delete(self, path, body=None):
+        return self.request("DELETE", path, body=body)
 
-if [ "$TOTAL_BYTES" -gt "$MAX_TOTAL_BYTES" ]; then
-  TOTAL_MB=$((TOTAL_BYTES / 1024 / 1024))
-  echo "❌ Upload rejected: Total batch size is ${TOTAL_MB}MB, exceeding the 500MB total limit."
-  exit 1
-fi
 
-upload_file() {
-  local TARGET_URL="$1"
-  local FILE_PATH="$2"
-  local CONTENT_TYPE="$3"
+def q(value):
+    return urllib.parse.quote(str(value), safe="")
 
-  local EXTRA_HEADERS=()
-  if [ -n "$PASSWORD" ]; then
-    EXTRA_HEADERS+=(-H "X-Fleet-Password: $PASSWORD")
-  fi
-  if [ -n "$PREVIEW" ]; then
-    EXTRA_HEADERS+=(-H "X-Fleet-Preview: $PREVIEW")
-  fi
 
-  local RESPONSE
-  RESPONSE=$(curl -s -w "\n%{http_code}" -X PUT "$TARGET_URL" \
-       -T "$FILE_PATH" \
-       -H "${AUTH_HEADER_NAME}: ${AUTH_SECRET}" \
-       -H "Content-Type: $CONTENT_TYPE" \
-       -H "$EXPIRE_HEADER" \
-       "${EXTRA_HEADERS[@]}") || true
+def qpath(value):
+    return "/".join(urllib.parse.quote(part, safe="") for part in value.split("/"))
 
-  local HTTP_CODE
-  HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-  local BODY
-  BODY=$(echo "$RESPONSE" | sed '$d')
-  case "$HTTP_CODE" in
-    ''|*[!0-9]*) HTTP_CODE=000 ;;
-  esac
 
-  if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-    echo ""
-    echo "❌ Upload rejected (HTTP $HTTP_CODE):"
-    echo "$BODY"
-    exit 1
-  fi
-}
+def emit(args, data, text_lines):
+    if getattr(args, "json", False):
+        print(json.dumps(data, indent=2))
+    else:
+        for line in text_lines:
+            print(line)
 
-if [ -n "$SLUG" ]; then
-  if [ "$#" -eq 1 ] && [ -f "$1" ]; then
-    TARGET="$1"
-    TARGET="${TARGET%/}"
-    EXT="${TARGET##*.}"
-    CTYPE=$(mime_of "$TARGET")
-    if [ "$EXT" = "md" ]; then CTYPE="text/markdown; charset=utf-8"; fi
-    if [ "$EXT" = "txt" ]; then CTYPE="text/plain; charset=utf-8"; fi
-    if [ "$EXT" = "html" ]; then CTYPE="text/html; charset=utf-8"; fi
-    if [ "$EXT" = "json" ]; then CTYPE="application/json; charset=utf-8"; fi
-    
-    echo "Uploading '$TARGET' as custom slug '/$SLUG'..."
-    upload_file "$DOMAIN/$SLUG" "$TARGET" "$CTYPE"
-    
-    echo ""
-    echo "✅ Shared successfully!"
-    echo "Public URL: $DOMAIN/$SLUG"
-    exit 0
-  else
-    SHARE_ID="$SLUG"
-  fi
-elif [ -n "$ID" ]; then
-  SHARE_ID="$ID"
-else
-  SHARE_ID=$(openssl rand -hex 16)
-fi
 
-BASE_URL="$DOMAIN/$SHARE_ID"
-echo "Uploading to batch: $SHARE_ID..."
+def human_bytes(n):
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return ("{:.0f} {}" if unit == "B" or n >= 10 else "{:.1f} {}").format(n, unit)
+        n /= 1024
 
-for TARGET in "$@"; do
-  TARGET="${TARGET%/}"
-  if [ ! -e "$TARGET" ]; then
-    echo "Error: '$TARGET' not found, skipping."
-    continue
-  fi
-  
-  if [ -d "$TARGET" ]; then
-    find "$TARGET" -type f | while read -r FILE; do
-      REL_PATH=${FILE#"$TARGET"/}
-      CTYPE=$(mime_of "$FILE")
-      EXT="${FILE##*.}"
-      if [ "$EXT" = "md" ]; then CTYPE="text/markdown; charset=utf-8"; fi
-      if [ "$EXT" = "txt" ]; then CTYPE="text/plain; charset=utf-8"; fi
-      if [ "$EXT" = "html" ]; then CTYPE="text/html; charset=utf-8"; fi
-      if [ "$EXT" = "json" ]; then CTYPE="application/json; charset=utf-8"; fi
-      
-      echo "Uploading '$FILE'..."
-      upload_file "$DOMAIN/$SHARE_ID/$(basename "$TARGET")/$REL_PATH" "$FILE" "$CTYPE"
-    done
-  else
-    FILENAME=$(basename -- "$TARGET")
-    EXT="${FILENAME##*.}"
-    CTYPE=$(mime_of "$TARGET")
-    if [ "$EXT" = "md" ]; then CTYPE="text/markdown; charset=utf-8"; fi
-    if [ "$EXT" = "txt" ]; then CTYPE="text/plain; charset=utf-8"; fi
-    if [ "$EXT" = "html" ]; then CTYPE="text/html; charset=utf-8"; fi
-    if [ "$EXT" = "json" ]; then CTYPE="application/json; charset=utf-8"; fi
-    
-    echo "Uploading '$TARGET'..."
-    upload_file "$DOMAIN/$SHARE_ID/$FILENAME" "$TARGET" "$CTYPE"
-  fi
-done
 
-echo ""
-echo "✅ Shared successfully!"
-echo "Base Directory URL: $BASE_URL/"
-echo "Direct links:"
-for TARGET in "$@"; do
-  TARGET="${TARGET%/}"
-  if [ -d "$TARGET" ]; then
-    find "$TARGET" -type f | while read -r FILE; do
-      REL_PATH=${FILE#"$TARGET"/}
-      echo "- $BASE_URL/$(basename "$TARGET")/$REL_PATH"
-    done
-  elif [ -e "$TARGET" ]; then
-    echo "- $BASE_URL/$(basename "$TARGET")"
-  fi
-done
-echo ""
+# ------------------------------------------------------------------- commands
+
+def collect_files(targets):
+    files = []
+    for target in targets:
+        target = target.rstrip("/") or target
+        if os.path.isdir(target):
+            base = os.path.basename(os.path.abspath(target))
+            for root, dirs, names in os.walk(target):
+                dirs.sort()
+                for name in sorted(names):
+                    full = os.path.join(root, name)
+                    rel = os.path.relpath(full, target).replace(os.sep, "/")
+                    files.append((full, base + "/" + rel))
+        elif os.path.isfile(target):
+            files.append((target, os.path.basename(target)))
+        else:
+            raise CliError("'{}' not found.".format(target))
+    if not files:
+        raise CliError("Nothing to upload.")
+    return files
+
+
+def content_type(path):
+    ext = os.path.splitext(path)[1].lower()
+    if ext in TEXT_TYPES:
+        return TEXT_TYPES[ext]
+    guessed, _ = mimetypes.guess_type(path)
+    return guessed or "application/octet-stream"
+
+
+def share_options(args):
+    body = {}
+    if args.slug:
+        body["slug"] = args.slug
+    if args.forever:
+        body["days"] = "forever"
+    elif args.days:
+        body["days"] = args.days
+    if args.password:
+        body["password"] = args.password
+    if args.title:
+        body["title"] = args.title
+    if args.team:
+        body["team_id"] = args.team
+    return body
+
+
+def cmd_upload(args):
+    files = collect_files(args.paths)
+    api = Api(args)
+    body = share_options(args)
+    if args.slug:
+        body["reuse"] = True
+    created = api.post("/api/shares", body)
+    share = created["share"]
+    fresh = not created.get("reused")
+    uploaded = []
+    try:
+        for index, (full, rel) in enumerate(files, 1):
+            size = os.path.getsize(full)
+            print("Uploading {} of {}: {} ({})".format(index, len(files), rel, human_bytes(size)), file=sys.stderr)
+            with open(full, "rb") as handle:
+                result = api.request(
+                    "PUT",
+                    "/api/shares/{}/files/{}".format(q(share["slug"]), qpath(rel)),
+                    data=handle,
+                    headers={"Content-Type": content_type(full)},
+                    length=size,
+                )
+            uploaded.append(result["url"])
+    except CliError:
+        if fresh and not uploaded:
+            try:
+                api.delete("/api/shares/" + q(share["slug"]))
+            except CliError:
+                pass
+        raise
+    detail = api.get("/api/shares/" + q(share["slug"]))["share"]
+    expires = detail["expires_at"] or "never"
+    emit(args, detail, ["Shared {} file{} as {}".format(len(uploaded), "" if len(uploaded) == 1 else "s", detail["url"]),
+                        "Expires: " + expires] + ["- " + url for url in uploaded])
+
+
+def cmd_link(args):
+    api = Api(args)
+    body = share_options(args)
+    body["url"] = args.url
+    share = api.post("/api/links", body)["share"]
+    emit(args, share, [share["url"] + " -> " + share["target_url"], "Expires: " + (share["expires_at"] or "never")])
+
+
+def share_line(share):
+    what = "link -> " + (share.get("target_url") or "") if share["kind"] == "link" else "{} files, {}".format(share["file_count"], human_bytes(share["total_bytes"]))
+    expires = share["expires_at"] or "never"
+    owner = (share.get("owner") or {}).get("display_name") or ""
+    team = (share.get("team") or {}).get("name")
+    extra = "  [team {}]".format(team) if team else ""
+    return "{:<24} {:<30} expires {:<26} {}{}".format(share["slug"], what, expires, owner, extra)
+
+
+def cmd_list(args):
+    api = Api(args)
+    params = {"limit": str(args.limit)}
+    if args.all:
+        params["scope"] = "all"
+    elif args.team:
+        params.update({"scope": "team", "team_id": args.team})
+    elif args.teams:
+        params["scope"] = "teams"
+    if args.search:
+        params["q"] = args.search
+    data = api.get("/api/shares?" + urllib.parse.urlencode(params))
+    lines = [share_line(s) for s in data["shares"]] or ["No live shares."]
+    emit(args, data, lines)
+
+
+def cmd_info(args):
+    share = Api(args).get("/api/shares/" + q(args.slug))["share"]
+    lines = [share["url"], "Kind: " + share["kind"], "Owner: " + (share["owner"].get("display_name") or share["owner"]["id"]),
+             "Expires: " + (share["expires_at"] or "never"), "Password: " + ("yes" if share["has_password"] else "no")]
+    if share.get("target_url"):
+        lines.append("Opens: " + share["target_url"])
+    for f in share.get("files") or []:
+        lines.append("- {}  ({})".format(f["url"], human_bytes(f["size"])))
+    emit(args, share, lines)
+
+
+def cmd_renew(args):
+    body = {"days": args.days} if args.days else {}
+    data = Api(args).post("/api/shares/{}/renew".format(q(args.slug)), body)
+    share = data["share"]
+    emit(args, data, ["{} now expires {}".format(share["slug"], share["expires_at"] or "never")])
+
+
+def cmd_delete(args):
+    if not args.yes and sys.stdin.isatty():
+        answer = input("Delete {} and all of its files? [y/N] ".format(args.slug))
+        if answer.strip().lower() not in ("y", "yes"):
+            raise CliError("Cancelled.")
+    data = Api(args).delete("/api/shares/" + q(args.slug))
+    emit(args, data, ["Deleted {}".format(data.get("slug", args.slug))])
+
+
+def cmd_whoami(args):
+    data = Api(args).get("/api/me")
+    user, usage, quotas = data["user"], data["usage"], data["quotas"]
+    quota = human_bytes(quotas["storage_bytes"]) if quotas["storage_bytes"] is not None else "unlimited"
+    lines = ["{} ({}){}".format(user["display_name"], user["role"], " <{}>".format(user["email"]) if user.get("email") else ""),
+             "Signed in with: " + data["auth"]["kind"],
+             "Storage: {} of {} across {} shares".format(human_bytes(usage["bytes"]), quota, usage["shares"])]
+    emit(args, data, lines)
+
+
+def cmd_login(args):
+    token = args.token or os.environ.get("FLEETLINK_TOKEN") or getpass.getpass("API token (input hidden): ")
+    token = token.strip()
+    if not token.startswith("fla_"):
+        raise CliError("That does not look like a FleetLink API token (fla_…).")
+    args.token = token
+    me = Api(args).get("/api/me")
+    path = credentials_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
+    with os.fdopen(fd, "w") as handle:
+        handle.write("FLEETLINK_TOKEN=" + token + "\n")
+    os.chmod(path, 0o600)
+    print("Signed in as {}.  Saved to {}.".format(me["user"]["display_name"], path))
+
+
+def cmd_logout(args):
+    path = credentials_path()
+    if os.path.exists(path):
+        os.remove(path)
+        print("Removed " + path + ".  The token itself still works until you revoke it on the dashboard.")
+    else:
+        print("No saved login.")
+
+
+def cmd_tokens(args):
+    api = Api(args)
+    if args.action == "list":
+        data = api.get("/api/tokens")
+        lines = ["{:<14} {:<24} {}{}".format(t["id"], t["name"], t["prefix"] + "…", "  team " + t["team_name"] if t.get("team_name") else "") for t in data["tokens"]]
+        emit(args, data, lines + ["{} of {} tokens in use.".format(len(data["tokens"]), data["quota"])])
+    elif args.action == "create":
+        if not args.name:
+            raise CliError("Name the token: fleet-share tokens create NAME")
+        body = {"name": args.name, "allow_links": not args.no_links}
+        if args.team:
+            body["team_id"] = args.team
+        if args.max_days:
+            body["max_days"] = args.max_days
+        if args.max_file_mb:
+            body["max_file_mb"] = args.max_file_mb
+        if args.expires_days:
+            body["expires_in_days"] = args.expires_days
+        data = api.post("/api/tokens", body)
+        emit(args, data, ["Created {} ({}).  Copy the token now; it is not shown again:".format(data["api_token"]["name"], data["api_token"]["id"]), data["token"]])
+    elif args.action == "revoke":
+        if not args.name:
+            raise CliError("Give the token id: fleet-share tokens revoke ID")
+        api.delete("/api/tokens/" + q(args.name))
+        print("Revoked " + args.name)
+
+
+def cmd_teams(args):
+    api = Api(args)
+    if args.action == "list":
+        data = api.get("/api/teams")
+        lines = []
+        for team in data["teams"]:
+            lines.append("{}  {}  (you: {}, {} members, {} live shares)".format(team["id"], team["name"], team["my_role"], len(team["members"]), team["share_count"]))
+        emit(args, data, lines or ["You are not in a team."])
+        return
+    if args.action == "create":
+        team = api.post("/api/teams", {"name": " ".join(args.rest)})["team"]
+        emit(args, team, ["Created team {} ({})".format(team["name"], team["id"])])
+    elif args.action == "add":
+        if len(args.rest) < 2:
+            raise CliError("fleet-share teams add TEAM_ID EMAIL [--role admin]")
+        team = api.post("/api/teams/{}/members".format(q(args.rest[0])), {"email": args.rest[1], "role": args.role or "member"})["team"]
+        emit(args, team, ["Added {} to {}".format(args.rest[1], team["name"])])
+    elif args.action == "remove":
+        if len(args.rest) < 2:
+            raise CliError("fleet-share teams remove TEAM_ID USER_ID")
+        api.delete("/api/teams/{}/members/{}".format(q(args.rest[0]), q(args.rest[1])))
+        print("Removed.")
+    elif args.action == "leave":
+        if not args.rest:
+            raise CliError("fleet-share teams leave TEAM_ID")
+        me = api.get("/api/me")["user"]["id"]
+        api.delete("/api/teams/{}/members/{}".format(q(args.rest[0]), q(me)))
+        print("Left the team.")
+
+
+def cmd_admin(args):
+    api = Api(args)
+    rest = args.rest
+    if args.action == "stats":
+        data = api.get("/api/admin/stats")
+        emit(args, data, ["Live shares: {} ({}).  Teams: {}.  Open invites: {}.  Sign-up: {}.".format(
+            data["shares"]["count"], human_bytes(data["shares"]["bytes"]), data["teams"], data["active_invites"], data["settings"]["signup_mode"])])
+    elif args.action == "users":
+        path = "/api/admin/users" + ("?q=" + q(args.search) if args.search else "")
+        data = api.get(path)
+        lines = ["{:<26} {:<20} {:<6} {:<9} {} shares, {}".format(u["id"], u["display_name"][:20], u["role"], u["status"], u["usage"]["shares"], human_bytes(u["usage"]["bytes"])) for u in data["users"]]
+        emit(args, data, lines)
+    elif args.action == "user":
+        if len(rest) < 2 or rest[0] not in ("set", "delete", "show"):
+            raise CliError("fleet-share admin user show|set|delete USER_ID [--role R] [--status S] [--storage-gb N] [--token-quota N]")
+        verb, user_id = rest[0], rest[1]
+        if verb == "show":
+            data = api.get("/api/admin/users/" + q(user_id))
+            emit(args, data, [json.dumps(data["user"], indent=2)])
+        elif verb == "delete":
+            api.delete("/api/admin/users/" + q(user_id))
+            print("Deleted " + user_id)
+        else:
+            body = {}
+            if args.role:
+                body["role"] = args.role
+            if args.status:
+                body["status"] = args.status
+            if args.storage_gb is not None:
+                body["storage_quota_bytes"] = None if args.storage_gb < 0 else int(args.storage_gb * 1024 ** 3)
+            if args.token_quota is not None:
+                body["token_quota"] = None if args.token_quota < 0 else args.token_quota
+            if not body:
+                raise CliError("Nothing to change.")
+            data = api.patch("/api/admin/users/" + q(user_id), body)
+            emit(args, data, ["Updated {}".format(data["user"]["display_name"])])
+    elif args.action == "invite":
+        body = {"role": args.role or "user", "max_uses": args.uses, "expires_in_days": args.days_valid}
+        if args.note:
+            body["note"] = args.note
+        if args.team:
+            body["team_id"] = args.team
+        data = api.post("/api/admin/invites", body)
+        link = "{}/login?invite={}".format(api.base, q(data["code"]))
+        emit(args, data, ["Invite code (not shown again): " + data["code"], "Sign-up link: " + link])
+    elif args.action == "invites":
+        data = api.get("/api/admin/invites")
+        lines = ["{:<14} {}-…  {:<7} {:<6} {} of {} used  expires {}".format(i["id"], i["prefix"], i["state"], i["role"], i["uses"], i["max_uses"], i["expires_at"]) for i in data["invites"]]
+        emit(args, data, lines or ["No invites."])
+    elif args.action == "revoke-invite":
+        if not rest:
+            raise CliError("fleet-share admin revoke-invite INVITE_ID")
+        api.delete("/api/admin/invites/" + q(rest[0]))
+        print("Revoked " + rest[0])
+    elif args.action == "settings":
+        if rest:
+            values = {}
+            for pair in rest:
+                if "=" not in pair:
+                    raise CliError("Use KEY=VALUE, or KEY= to clear a saved value.")
+                key, value = pair.split("=", 1)
+                values[key] = None if value == "" else (int(value) if value.isdigit() else value)
+            data = api.put_json("/api/admin/settings", {"values": values})
+        else:
+            data = api.get("/api/admin/settings")
+        emit(args, data, ["{} = {}  ({})".format(f["key"], ",".join(f["value"]) if isinstance(f["value"], list) else f["value"], f["source"]) for f in data["fields"]])
+    elif args.action == "sweep":
+        data = api.post("/api/admin/sweep")
+        emit(args, data, [json.dumps(data["report"])])
+
+
+# --------------------------------------------------------------- skill install
+
+def repo_root():
+    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    for candidate in (here, os.environ.get("FLEETLINK_REPO_ROOT", "")):
+        if candidate and os.path.isfile(os.path.join(candidate, "scripts/install-skill.sh")) and os.path.isfile(os.path.join(candidate, "skills/fleetlink/SKILL.md")):
+            return candidate
+    return None
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def fetch(url, dest):
+    try:
+        with urllib.request.urlopen(url, timeout=60) as res, open(dest, "wb") as out:
+            out.write(res.read())
+    except (urllib.error.URLError, OSError) as err:
+        raise CliError("Could not download {} ({}).  Run fleet-share from a FleetLink checkout, or set FLEETLINK_SKILL_RAW_BASE.".format(url, err))
+
+
+def require_hash(path, expected, label):
+    expected = (expected or "").strip().lower()
+    if not expected:
+        raise CliError("Refusing to run: no pinned SHA-256 for {}.".format(label))
+    actual = sha256_file(path)
+    if actual != expected:
+        os.remove(path)
+        raise CliError("Refusing to run: {} hash mismatch.\nexpected {}\nactual   {}".format(label, expected, actual))
+
+
+def cmd_skill(args):
+    extra = args.rest
+    root = repo_root()
+    if root:
+        return subprocess.call(["bash", os.path.join(root, "scripts/install-skill.sh")] + extra)
+    home = os.path.expanduser("~")
+    if not home or home == "/":
+        raise CliError("Refusing to download the FleetLink skill: HOME is unset or /.")
+    pin = os.environ.get("FLEETLINK_SKILL_GIT_SHA") or FLEETLINK_PINNED_GIT_SHA_DEFAULT
+    base = (os.environ.get("FLEETLINK_SKILL_RAW_BASE") or "https://raw.githubusercontent.com/Simple-With-Us/FleetLink/" + pin).rstrip("/")
+    cache = os.environ.get("FLEETLINK_SKILL_CACHE") or os.path.join(home, ".cache", "fleetlink")
+    os.makedirs(os.path.join(cache, "skills", "fleetlink"), exist_ok=True)
+    os.makedirs(os.path.join(cache, "scripts"), exist_ok=True)
+    skill = os.path.join(cache, "skills", "fleetlink", "SKILL.md")
+    installer = os.path.join(cache, "scripts", "install-skill.sh")
+    fetch(base + "/skills/fleetlink/SKILL.md", skill)
+    fetch(base + "/scripts/install-skill.sh", installer)
+    require_hash(skill, os.environ.get("FLEETLINK_SKILL_MD_SHA256") or FLEETLINK_SKILL_MD_SHA256_DEFAULT, "SKILL.md")
+    require_hash(installer, os.environ.get("FLEETLINK_INSTALLER_SHA256") or FLEETLINK_INSTALLER_SHA256_DEFAULT, "install-skill.sh")
+    os.chmod(installer, 0o755)
+    return subprocess.call(["bash", installer] + extra)
+
+
+# ---------------------------------------------------------------------- parser
+
+COMMANDS = {"upload", "link", "list", "ls", "info", "renew", "delete", "rm", "whoami", "login", "logout", "tokens", "teams", "admin", "skill", "help", "version"}
+
+
+def build_parser():
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--domain", help="FleetLink base URL (default {} or FLEETLINK_DOMAIN)".format(DEFAULT_DOMAIN))
+    common.add_argument("--token", help="API token for this call (prefer FLEETLINK_TOKEN or `fleet-share login`)")
+    common.add_argument("--operator", action="store_true", help="use the operator secret (FLEET_ADMIN_SECRET) even if a token is set")
+    common.add_argument("--json", action="store_true", help="print JSON")
+
+    shareopts = argparse.ArgumentParser(add_help=False)
+    shareopts.add_argument("--slug", "--id", dest="slug", help="share name (default: random); reuses a share you manage")
+    shareopts.add_argument("--days", help="lifetime in days")
+    shareopts.add_argument("--forever", action="store_true", help="never expire (admins)")
+    shareopts.add_argument("--password", help="require a password to open")
+    shareopts.add_argument("--title", help="title shown on the share page")
+    shareopts.add_argument("--team", help="team id to put the share in")
+
+    parser = argparse.ArgumentParser(prog="fleet-share", description="Share files and short links on FleetLink.", parents=[common])
+    sub = parser.add_subparsers(dest="command")
+
+    p = sub.add_parser("upload", parents=[common, shareopts], help="upload files and folders as one share")
+    p.add_argument("paths", nargs="+")
+    p.add_argument("--agent", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--preview", help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_upload)
+
+    p = sub.add_parser("link", parents=[common, shareopts], help="make a short link")
+    p.add_argument("url")
+    p.set_defaults(func=cmd_link)
+
+    p = sub.add_parser("list", aliases=["ls"], parents=[common], help="list your live shares")
+    p.add_argument("--team", help="shares in this team")
+    p.add_argument("--teams", action="store_true", help="shares in all your teams")
+    p.add_argument("--all", action="store_true", help="every share (admins)")
+    p.add_argument("--search")
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("info", parents=[common], help="details and files of one share")
+    p.add_argument("slug")
+    p.set_defaults(func=cmd_info)
+
+    p = sub.add_parser("renew", parents=[common], help="extend a share")
+    p.add_argument("slug")
+    p.add_argument("--days")
+    p.set_defaults(func=cmd_renew)
+
+    p = sub.add_parser("delete", aliases=["rm"], parents=[common], help="delete a share")
+    p.add_argument("slug")
+    p.add_argument("-y", "--yes", action="store_true")
+    p.set_defaults(func=cmd_delete)
+
+    p = sub.add_parser("whoami", parents=[common], help="who this credential acts as")
+    p.set_defaults(func=cmd_whoami)
+    p = sub.add_parser("login", parents=[common], help="save an API token for later commands")
+    p.set_defaults(func=cmd_login)
+    p = sub.add_parser("logout", parents=[common], help="forget the saved token")
+    p.set_defaults(func=cmd_logout)
+
+    p = sub.add_parser("tokens", parents=[common], help="list, create, or revoke your API tokens")
+    p.add_argument("action", choices=["list", "create", "revoke"])
+    p.add_argument("name", nargs="?")
+    p.add_argument("--team")
+    p.add_argument("--max-days", type=float)
+    p.add_argument("--max-file-mb", type=float)
+    p.add_argument("--expires-days", type=int)
+    p.add_argument("--no-links", action="store_true")
+    p.set_defaults(func=cmd_tokens)
+
+    p = sub.add_parser("teams", parents=[common], help="list, create, and manage teams")
+    p.add_argument("action", choices=["list", "create", "add", "remove", "leave"])
+    p.add_argument("rest", nargs="*")
+    p.add_argument("--role", choices=["member", "admin"])
+    p.set_defaults(func=cmd_teams)
+
+    p = sub.add_parser("admin", parents=[common], help="admin tools")
+    p.add_argument("action", choices=["stats", "users", "user", "invite", "invites", "revoke-invite", "settings", "sweep"])
+    p.add_argument("rest", nargs="*")
+    p.add_argument("--search")
+    p.add_argument("--role", choices=["user", "admin"])
+    p.add_argument("--status", choices=["active", "disabled"])
+    p.add_argument("--storage-gb", type=float, help="per-person storage quota; negative clears it")
+    p.add_argument("--token-quota", type=int, help="per-person token quota; negative clears it")
+    p.add_argument("--uses", type=int, default=1)
+    p.add_argument("--days-valid", type=int, default=14)
+    p.add_argument("--note")
+    p.add_argument("--team")
+    p.set_defaults(func=cmd_admin)
+
+    p = sub.add_parser("skill", help="install or update the FleetLink agent skill")
+    p.add_argument("action", choices=["install", "update"])
+    p.add_argument("rest", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_skill)
+    return parser
+
+
+def main(argv):
+    if argv and argv[0] in ("version", "--version"):
+        print("fleet-share " + VERSION)
+        return 0
+    if argv and argv[0] == "help":
+        argv = ["--help"]
+    # Bare paths mean upload, as before: `fleet-share notes.md`.
+    first = next((a for a in argv if not a.startswith("-")), None)
+    if first is not None and first not in COMMANDS:
+        argv = ["upload"] + argv
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not getattr(args, "func", None):
+        parser.print_help()
+        return 1
+    for attr in ("token", "operator", "agent", "json", "domain"):
+        if not hasattr(args, attr):
+            setattr(args, attr, None)
+    try:
+        result = args.func(args)
+        return result if isinstance(result, int) else 0
+    except CliError as err:
+        print("Error: {}".format(err), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

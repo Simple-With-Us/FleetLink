@@ -1,19 +1,18 @@
 import Foundation
 import SwiftUI
 
-/// Owns the signed-in passkey session and the separately-kept admin/agent secret.
+/// Owns the signed-in passkey session.
 ///
-/// 1. **Account session** — a bearer token from passkey registration or sign-in.
-///    It lives in the Keychain and is sent as `Authorization: Bearer`.
-/// 2. **Admin / agent bearer secret** — the pasted operator token.  It is not a
-///    passkey session and remains the credential for operator writes.
+/// The session is a bearer token from passkey sign-up or sign-in.  It lives in
+/// the Keychain and is sent as `Authorization: Bearer` on every account call, so
+/// everything the app lists, creates, renews, or deletes belongs to this account.
 ///
-/// The app never sets an `Origin` header by hand.  See `WebAuthSession` and the
-/// PR body for why.
+/// The app never sets an `Origin` header by hand.  See `WebAuthSession`.
 @MainActor
 public final class SessionManager: ObservableObject {
     private static let sessionCookieAccount = "account.session"
-    private static let bearerSecretAccount = "account.bearerSecret"
+    /// Where builds before multi-user kept a pasted operator secret.  It is removed on launch.
+    private static let retiredSecretAccount = "account.bearerSecret"
     private static let passkeyBearerAccount = "account.passkeyBearer"
     public static let sessionCookieName = "fl_session"
 
@@ -33,16 +32,15 @@ public final class SessionManager: ObservableObject {
     @Published public private(set) var isCheckingSession: Bool = false
     @Published public private(set) var lastError: String?
 
-    /// The admin/agent bearer secret.  Kept separate from the account session and
-    /// exposed so the Settings screen can keep offering it.
-    @Published public var bearerSecret: String {
-        didSet { Keychain.set(bearerSecret.trimmingCharacters(in: .whitespacesAndNewlines), account: Self.bearerSecretAccount) }
-    }
+    @Published public private(set) var usage: AccountUsage?
 
     public init() {
-        bearerSecret = Keychain.get(account: Self.bearerSecretAccount) ?? ""
+        Keychain.remove(account: Self.retiredSecretAccount)
         user = nil
     }
+
+    /// The credential for account API calls: the passkey session, or empty when signed out.
+    public var apiToken: String { passkeyBearer ?? "" }
 
     public var isSignedIn: Bool { user != nil }
 
@@ -122,7 +120,9 @@ public final class SessionManager: ObservableObject {
                 lastError = "Could not reach FleetLink.\u{00A0} Try again."
                 return false
             }
-            user = try JSONDecoder().decode(SessionUser.self, from: data)
+            let me = try JSONDecoder().decode(MeResponse.self, from: data)
+            user = me.user
+            usage = me.usage
             lastError = nil
             return true
         } catch {
@@ -150,6 +150,18 @@ public final class SessionManager: ObservableObject {
         clearBearerToken()
         clearSessionCookie()
         user = nil
+        usage = nil
         lastError = nil
     }
+}
+
+/// `GET /api/me`: the account, its usage, and its quotas.
+private struct MeResponse: Decodable {
+    let user: SessionUser
+    let usage: AccountUsage?
+}
+
+public struct AccountUsage: Codable, Equatable, Sendable {
+    public let shares: Int
+    public let bytes: Int64
 }

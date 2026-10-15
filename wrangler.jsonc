@@ -1,54 +1,31 @@
 {
-  // This file targets PRODUCTION.  `npm run deploy` runs scripts/deploy.mjs, which
-  // calls scripts/deploy-guard.mjs and refuses unless FLEETLINK_DEPLOY=1 is set,
-  // because this configuration overwrites the live fleet-share-api worker that
-  // fleetlink.online and fleetlink.app serve.  For local development use `npm run
-  // dev`, which never uploads.
-  "name": "fleet-share-api",
-  "main": "src/index.ts",
+  // Describes the production worker for local `wrangler dev` and for reading.
+  // Production deploys go through scripts/deploy.sh (Workers script-upload API),
+  // which uploads the same bundle with the same bindings and keeps the secret
+  // bindings already on the worker.  See DEPLOY.md.
+  "name": "fleetlink-api",
+  "main": "worker/index.mjs",
   "compatibility_date": "2026-09-28",
-  // These two flags are load-bearing security posture, not preferences.
-  // The live worker has had workers.dev and preview URLs off since the Oct 8 P0
-  // auth hotfix.  wrangler defaults both to true, so a deploy from this file
-  // without them would publish a second, un-proxied origin for a service whose
-  // only WAF rule is attached to the fleetlink.online and fleetlink.app zones.
-  // A share password or agent header in a URL is then visible on an origin that
-  // has no rule at all.  Verified off on the live worker by the hotfix probes.
+  // Load-bearing posture: no second, unproxied origin, and no Workers Logs,
+  // because share passwords can travel in request URLs.
   "workers_dev": false,
   "preview_urls": false,
-  // Same reasoning for Workers Logs.  A share password travels in the request
-  // URL, so turning observability on would write share passwords into Cloudflare
-  // Logs.  Legacy kept this off and the live worker still has it off; Sentry is
-  // the intended destination and src/sentry.ts scrubs those headers there.
   "observability": { "enabled": false },
-  // Preserve plain-text vars set on the live worker (PRIVATE_PREFIXES,
-  // PROTECTED_PREFIXES) across a deploy.  Secrets already survive; without this
-  // a deploy silently drops the dashboard vars it does not declare.
-  "keep_vars": true,
-  // Routes must be declared HERE, not in the dashboard.  Until this commit they
-  // existed only on the live worker, managed out of band, so this repo was not a
-  // complete description of what it serves.  Keep the four patterns in lockstep
-  // with the live zones fleetlink.online (cef9faa94d06f48af95d82a39824603a) and
-  // fleetlink.app (a1873254203e58e194403d2b224b8ae8).
   "routes": [
     { "pattern": "fleetlink.online/*", "zone_name": "fleetlink.online" },
     { "pattern": "*.fleetlink.online/*", "zone_name": "fleetlink.online" },
     { "pattern": "fleetlink.app/*", "zone_name": "fleetlink.app" },
     { "pattern": "*.fleetlink.app/*", "zone_name": "fleetlink.app" }
   ],
-  // Binding name must stay FILES: src/*.ts reads env.FILES.  Only the bucket changes.
-  "r2_buckets": [{ "binding": "FILES", "bucket_name": "fleet-shares" }],
-  "d1_databases": [{ "binding": "DB", "database_name": "fleetlink", "database_id": "2b9fad94-94ed-4a6f-b1d9-695a306dad43", "migrations_dir": "migrations" }],
-  "triggers": { "crons": ["0 * * * *"] },
+  "r2_buckets": [{ "binding": "FLEET_SHARES", "bucket_name": "fleet-shares" }],
+  // The worker creates and migrates its own tables (worker/lib/schema.mjs).
+  "d1_databases": [{ "binding": "DB", "database_name": "fleetlink", "database_id": "85ef083e-9435-49c5-8314-404db547792d" }],
+  "triggers": { "crons": ["*/15 * * * *"] },
   "vars": {
-    // Owner email goes here so a provider-verified sign-in becomes role=admin.
-    "ADMIN_EMAILS": "",
-    // Origin for OAuth callbacks and for same-origin cookie writes.  Kept separate from
-    // fleetlink.online so hosted user HTML can never reach a session cookie.
-    "ADMIN_HOST": "fleetlink.app",
-    "SHARE_HOSTS": "fleetlink.online,fleetlink.app",
-    "DEFAULT_SHARE_HOST": "fleetlink.online"
-    // SENTRY_DSN is a Worker secret (`wrangler secret put SENTRY_DSN`), never a var.
-    // SENTRY_RELEASE is set at deploy time from the git SHA by scripts/deploy.sh.
+    "WEBAUTHN_RP_ID": "fleetlink.online",
+    "WEBAUTHN_ORIGINS": "https://fleetlink.online",
+    "WEBAUTHN_RP_NAME": "FleetLink",
+    "SHARE_HOSTS": "fleetlink.online,fleetlink.app"
+    // Secrets (never vars): ADMIN_SECRET, SESSION_SECRET, SENTRY_DSN.
   }
 }

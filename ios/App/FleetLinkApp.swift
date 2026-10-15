@@ -89,6 +89,7 @@ struct FleetLinkApp: App {
                     .tag(3)
             }
             .environmentObject(session)
+            .task { await session.refreshSession() }
             .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
                 guard let incomingURL = userActivity.webpageURL else { return }
                 inputURLString = incomingURL.absoluteString

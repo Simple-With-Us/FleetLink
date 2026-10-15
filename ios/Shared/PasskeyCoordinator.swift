@@ -16,17 +16,17 @@ public final class PasskeyCoordinator: NSObject, ObservableObject {
         super.init()
     }
 
-    public func createPasskey(displayName: String, email: String) async {
+    public func createPasskey(displayName: String, email: String, invite: String = "") async {
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             owner?.report(error: "Enter a name to create a passkey.")
             return
         }
         await run(errorPrefix: "Could not create the passkey.") { [self] in
-            let started = try await post(
-                path: "api/auth/passkey/register/options",
-                body: ["displayName": name, "email": email.trimmingCharacters(in: .whitespacesAndNewlines)]
-            )
+            var body = ["displayName": name, "email": email.trimmingCharacters(in: .whitespacesAndNewlines)]
+            let code = invite.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !code.isEmpty { body["invite"] = code }
+            let started = try await post(path: "api/auth/passkey/register/options", body: body)
             let challenge = try Base64URL.decode(started.options.challenge)
             let userID = try Base64URL.decode(started.options.user?.id ?? "")
             let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: started.options.relyingPartyId)

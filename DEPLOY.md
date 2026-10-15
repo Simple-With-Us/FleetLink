@@ -1,57 +1,63 @@
-# FleetLink deploy runbook
+# FleetLink Deploy Runbook
 
-This is the approval list for putting FL-1 on `fleetlink-api`.  Nothing in this pull request deploys, creates a database, or changes production.  `scripts/provision-d1.sh` and `scripts/deploy.sh` are the only upload paths.  Do not deploy from `wrangler.jsonc`.  That file still describes the removed TypeScript worker.
+`scripts/deploy.sh` is the only path to production.  It bundles `worker/index.mjs`, uploads it to the `fleetlink-api` worker through the Workers script-upload API, sets the sweep schedule, keeps workers.dev and preview URLs off, and waits for `/health` to report the new release.  It refuses to run without `FLEETLINK_DEPLOY=1`.
 
-## RP ID decision (required before any passkey is created)
+## What The Worker Needs
 
-A passkey is bound to one relying party ID.  `fleetlink.online` and `fleetlink.app` are different registrable domains, so one passkey cannot be valid on both.
-
-**Decision: RP ID `fleetlink.online`, origin `https://fleetlink.online`.**  `ios/project.yml` sets `FleetLinkAccountOrigin` to `https://fleetlink.online`.  The worker allowlist must match that origin.  Ship an app build from this spec before anyone creates a passkey.
-
-Share HTML and the account ceremony both use `fleetlink.online`.  A session cookie from that ceremony is scoped to that host.  The origin list is the single origin `https://fleetlink.online`.  Adding `https://fleetlink.app` as well would let a ceremony on the other registrable domain set a session cookie there, and one passkey still cannot be valid on both.
-
-Set these Infisical values to the decision:
-
-- `WEBAUTHN_RP_ID` = `fleetlink.online`
-- `WEBAUTHN_ORIGINS` = `https://fleetlink.online`
-- `WEBAUTHN_RP_NAME` (optional, default `FleetLink`)
-
-Associated Domains already include `webcredentials:fleetlink.online` and `webcredentials:fleetlink.app`.  The server still accepts only the configured origin list.  `SessionManager` reads `FleetLinkAccountOrigin` from the built Info.plist.  When that key is absent the code fallback is `https://fleetlink.online`.  The checked-in plist and `ios/project.yml` both set that key, and XcodeGen keeps it when the project is regenerated.
-
-## Approvals and secrets
-
-| Item | Where it lives | Why it is required |
+| Item | Where it lives | Notes |
 | --- | --- | --- |
-| Cloudflare API token | shell env `CLOUDFLARE_API_TOKEN` | script upload, D1 create, secret bindings.  Needs Workers Scripts edit and D1 edit on the account that owns `fleetlink-api`. |
-| Cloudflare account id | shell env `CLOUDFLARE_ACCOUNT_ID` | the dedicated FleetLink account, not Usage.Jays.Services.  Do not delete `fleet-share-api`. |
-| D1 database | `scripts/provision-d1.sh`, then `D1_DATABASE_ID` | new database.  The id in `wrangler.jsonc` is from the removed rewrite and must not be reused. |
-| R2 bucket `fleet-shares` | dedicated FleetLink account, bound as `FLEET_SHARES` | `deploy.sh` declares the binding (override with `FLEETLINK_R2_BUCKET`).  Objects were copied from Usage.Jays.Services `fleet-shares`.  The old `fleet-share-api` worker still writes there until retired. |
-| `ADMIN_SECRET` | Infisical, published as a Worker secret | existing operator portal.  Also published as `FLEET_ADMIN_SECRET`. |
-| `AGENT_SECRET` | Infisical, published as a Worker secret | existing agent header.  Also published as `FLEET_AGENT_SECRET`. |
-| `SESSION_SECRET` | Infisical, published as a Worker secret | pepper for session and agent-token hashes.  Rotating it signs everyone out. |
-| `SENTRY_DSN` | Infisical, published as a Worker secret | worker reports.  The scrubber drops share passwords, cookies, and auth headers.  Leave Workers Logs off. |
-| `SENTRY_RELEASE` | `git rev-parse HEAD` at deploy, plain-text binding | Correlates Sentry events with the uploaded bundle.  `/health` returns it as `x-fleet-release`. |
-| `SENTRY_TRACES_SAMPLE_RATE` | Optional deploy env (default `0.2`) | Bounds sampled auth/upload/download/R2 transaction spans. |
-| `APPLE_TEAM_ID` | Infisical, plain text binding | `/.well-known/apple-app-site-association`.  Until this and the bundle id are set, the worker keeps the AASA document already deployed. |
-| `APPLE_BUNDLE_ID` | Infisical, plain text binding | expected `online.fleetlink.ios`.  Clip id defaults to `<bundle>.Clip` unless `APPLE_CLIP_BUNDLE_ID` is set. |
-| Infisical machine identity | `INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, `INFISICAL_PROJECT_ID` | `deploy.sh` exports secrets into a mode-0600 temp file and does not print values. |
-| `FLEETLINK_DEPLOY=1` | shell | `deploy.sh` refuses without it. |
+| Cloudflare API token | `CLOUDFLARE_API_TOKEN` | Workers Scripts edit, D1, and R2 on the FleetLink account. |
+| Cloudflare account id | `CLOUDFLARE_ACCOUNT_ID` | The dedicated FleetLink account. |
+| D1 database | `D1_DATABASE_ID` | Bound as `DB`.  `scripts/provision-d1.sh` creates one and prints its id.  The worker creates and migrates its own tables on first use. |
+| R2 bucket `fleet-shares` | bound as `FLEET_SHARES` | `FLEETLINK_R2_BUCKET` overrides the name. |
+| `ADMIN_SECRET` | Worker secret | The operator break-glass credential.  It acts as the built-in `operator` admin account.  Also published as `FLEET_ADMIN_SECRET`. |
+| `SESSION_SECRET` | Worker secret | Pepper for session, API token, and invite hashes, and the key for password-unlock cookies.  Rotating it signs everyone out and invalidates every API token and invite. |
+| `SENTRY_DSN` | Worker secret | Optional error reporting.  The scrubber drops passwords, cookies, and auth headers. |
+| `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `WEBAUTHN_RP_NAME` | plain text | `fleetlink.online`, `https://fleetlink.online`, `FleetLink`.  Passkeys are bound to the RP ID, so do not change it once people have passkeys. |
+| `APPLE_TEAM_ID`, `APPLE_BUNDLE_ID`, `APPLE_CLIP_BUNDLE_ID` | plain text | For `/.well-known/apple-app-site-association` and the App Clip banner. |
+| `SHARE_HOSTS` | plain text, optional | Extra hosts an admin may add to the `share_hosts` setting. |
+| `SENTRY_RELEASE`, `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` | plain text, set by `deploy.sh` | `/health` echoes the release as `x-fleet-release`. |
 
-`workers.dev` and preview URLs must stay off.  The script asks the subdomain endpoint to disable workers.dev.  Confirm in the dashboard after upload.  Observability stays off because share passwords travel in URLs.
+`AGENT_SECRET` is no longer read.  It may stay bound until it is deleted from the worker.
 
-## Order of operations
+## Deploying
 
-1. The RP ID decision above is `fleetlink.online` with origin `https://fleetlink.online`.  Set the Infisical values to that before any passkey is created.
-2. Enable R2 on the dedicated account when you want uploads.  Auth can ship before that.  HTML attachment still needs an end-to-end check once a real object can be stored.
-3. `bash scripts/provision-d1.sh` and record the printed database id as `D1_DATABASE_ID`.
-4. Put the secrets in Infisical.  Confirm none of them are committed.
-5. `FLEETLINK_DEPLOY=1 bash scripts/deploy.sh`
-6. Hit `GET /api/auth/token` and expect 410.  Delete a share with no credentials and expect 401.  Upload an `.html` file and a non-html name with `Content-Type: text/html` and expect `application/octet-stream` plus `Content-Disposition: attachment`.
-7. Create one passkey on `https://fleetlink.online` and open `/dashboard`.
+Code-only deploy that keeps every secret and setting already on the worker:
 
-## Follow-ups, not in this build
+```bash
+FLEETLINK_DEPLOY=1 FLEETLINK_SECRETS=keep \
+  CLOUDFLARE_ACCOUNT_ID=… D1_DATABASE_ID=… \
+  bash scripts/deploy.sh
+```
 
-- Account passwords.
-- OAuth and Sign in with Apple.  The iOS types are still in the tree and are not presented.
-- Indexing R2 objects by user so `/dashboard` can list that person's shares.  The panel says so.
-- A D1 `shares` table.  Team trial expiry updates one when it exists and otherwise only marks the team expired.
+Full deploy that also publishes secrets and plain-text settings from Infisical (project FleetLink, environment `prod`):
+
+```bash
+FLEETLINK_DEPLOY=1 \
+  CLOUDFLARE_ACCOUNT_ID=… D1_DATABASE_ID=… \
+  INFISICAL_CLIENT_ID=… INFISICAL_CLIENT_SECRET=… INFISICAL_PROJECT_ID=… \
+  bash scripts/deploy.sh
+```
+
+Values are read from the environment and never printed.  The Cloudflare token goes to curl through a mode-0600 config file, not argv.
+
+## After A Deploy
+
+1. `curl -sS https://fleetlink.online/health` shows `"ok": true` and the new `x-fleet-release`.
+2. `node scripts/prod-smoke.mjs` signs up two throwaway accounts with a software passkey, checks that each sees only its own shares and cannot change the other's, checks the security invariants, and deletes both accounts.  It needs `signup_mode` to be `open`, or an invite code in `FLEETLINK_SMOKE_INVITES` (two codes, comma separated).
+3. `curl -sS "https://fleetlink.online/zulip/zulip-fleet-guide.md?raw=1"` still returns the fleet guide.  Objects stored before ownership are adopted by the operator account on first visit and by the sweep.
+
+## First Admin
+
+The operator secret is an admin.  Use it once to make a person an admin, then work from that account:
+
+```bash
+FLEET_ADMIN_SECRET=… fleet-share admin invite --role admin --note "owner"
+# open the printed sign-up link, create a passkey, done
+```
+
+Or promote an existing account: `fleet-share admin user set USER_ID --role admin`.
+
+## Rolling Back
+
+Re-run `scripts/deploy.sh` from the previous commit.  The schema only moves forward: an older worker against the new tables will not work, so roll forward with a fix instead when the schema changed.

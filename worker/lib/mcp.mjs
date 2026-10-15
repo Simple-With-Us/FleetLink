@@ -1,218 +1,168 @@
+/**
+ * Remote MCP server on POST /mcp (Streamable HTTP, JSON responses, stateless).
+ * Tools call the share service directly with the caller's principal, so MCP
+ * follows exactly the same ownership and limit rules as the HTTP API.
+ */
 import { z } from "zod";
-import { sessionUser, userPublic } from "./sessions.mjs";
-import { lookupAgentToken, tighterCap, USER_TIER } from "./tokens.mjs";
+import { resolvePrincipal } from "./auth.mjs";
+import { HttpError } from "./http.mjs";
+import { loadSettings } from "./settings.mjs";
+import {
+  createShare, deleteShare, fileByteLimit, getShareBySlug, LIMITS, listShares, loadShareFor,
+  publicShare, purgeShare, putShareFile, renewShare, shareFiles
+} from "./shares.mjs";
+import { accountSummary } from "./users.mjs";
 
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "2.0.0";
+const MAX_BASE64_CHARS = Math.ceil((300 * 1024 * 1024) / 3) * 4;
 
-const ADMIN_FILE_BYTES = 300 * 1024 * 1024;
-const ADMIN_BATCH_BYTES = 1024 * 1024 * 1024;
-const ADMIN_MAX_FILES = 1000;
-const AGENT_FILE_BYTES = 100 * 1024 * 1024;
-const AGENT_BATCH_BYTES = 500 * 1024 * 1024;
-const AGENT_MAX_FILES = 50;
-const AGENT_FILE_TTL_SECONDS = 7 * 24 * 3600;
-const AGENT_FILE_DEFAULT_SECONDS = 3 * 24 * 3600;
-const AGENT_REDIRECT_TTL_SECONDS = 180 * 24 * 3600;
-const FOREVER_MAX_BYTES = 500 * 1024 * 1024;
-const MAX_BASE64_CHARS = Math.ceil(ADMIN_FILE_BYTES / 3) * 4;
-
-const daysField = z.union([z.number().finite().positive(), z.literal("forever")]).optional();
-const slugField = z.string().trim().min(1).max(200).optional();
-const titleField = z.string().trim().min(1).max(200).optional();
-const passwordField = z.string().min(1).max(256).optional();
+const days = z.union([z.number().finite().positive(), z.literal("forever")]).optional();
+const slug = z.string().trim().min(1).max(80).optional();
+const oneLine = (max) => z.string().max(max).refine((v) => !/[\r\n]/.test(v), "Use one line.");
 
 const CreateShareSchema = z.object({
   content: z.string().min(1).max(MAX_BASE64_CHARS).optional(),
   filename: z.string().trim().min(1).max(200).optional(),
-  content_type: z.string().trim().min(1).max(200).optional(),
-  text: z.string().min(1).max(ADMIN_FILE_BYTES).optional(),
-  markdown: z.string().min(1).max(ADMIN_FILE_BYTES).optional(),
-  slug: slugField,
-  days: daysField,
-  password: passwordField,
-  title: titleField
+  content_type: oneLine(200).optional(),
+  text: z.string().min(1).max(10 * 1024 * 1024).optional(),
+  markdown: z.string().min(1).max(10 * 1024 * 1024).optional(),
+  slug,
+  days,
+  password: oneLine(256).optional(),
+  title: oneLine(200).optional(),
+  team_id: z.string().max(64).optional()
 }).strict().superRefine((value, ctx) => {
   const modes = ["content", "text", "markdown"].filter((key) => value[key] != null);
-  if (modes.length !== 1) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provide exactly one of content, text, or markdown." });
-  }
+  if (modes.length !== 1) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provide exactly one of content, text, or markdown." });
   if (value.content != null && (!value.filename || !value.content_type)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "File shares require filename and content_type." });
-  }
-  if (value.filename && !safeSegment(value.filename)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid filename." });
-  }
-  if (value.slug && !safeSegment(value.slug)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid slug." });
-  }
-  if (value.content_type && /[\r\n]/.test(value.content_type)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid content_type." });
-  }
-  if ((value.title && /[\r\n]/.test(value.title)) || (value.password && /[\r\n]/.test(value.password))) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid arguments." });
   }
 });
 
 const CreateLinkSchema = z.object({
   url: z.string().trim().min(1).max(2048),
-  slug: slugField,
-  days: daysField,
-  password: passwordField,
-  title: titleField
-}).strict().superRefine((value, ctx) => {
-  if (/[\r\n]/.test(value.url)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid url." });
-  }
-  if (value.slug && !safeSegment(value.slug)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid slug." });
-  }
-  if ((value.title && /[\r\n]/.test(value.title)) || (value.password && /[\r\n]/.test(value.password))) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid arguments." });
-  }
-});
+  slug,
+  days,
+  password: oneLine(256).optional(),
+  title: oneLine(200).optional(),
+  team_id: z.string().max(64).optional()
+}).strict();
 
-const SlugSchema = z.object({
-  slug: z.string().trim().min(1).max(200)
-}).strict().superRefine((value, ctx) => {
-  if (!safeSegment(value.slug)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid slug." });
-  }
-});
-
+const SlugSchema = z.object({ slug: z.string().trim().min(1).max(80) }).strict();
+const RenewSchema = z.object({ slug: z.string().trim().min(1).max(80), days: z.number().finite().positive().optional() }).strict();
+const ListSchema = z.object({
+  scope: z.enum(["mine", "team", "teams", "all"]).optional(),
+  team_id: z.string().max(64).optional(),
+  q: z.string().max(100).optional(),
+  limit: z.number().int().min(1).max(200).optional()
+}).strict();
 const EmptySchema = z.object({}).strict();
 
-// One object per POST.  id may be omitted (notification), or a string, finite number, or null.
-export const McpRequestSchema = z.object({
-  jsonrpc: z.literal("2.0"),
-  id: z.union([z.string().min(1).max(256), z.number().finite(), z.null()]).optional(),
-  method: z.string().min(1).max(256),
-  params: z.record(z.unknown()).optional()
-}).strict();
-
-const InitializeParamsSchema = z.object({
-  protocolVersion: z.string().min(1).max(128).optional(),
-  capabilities: z.record(z.unknown()).optional(),
-  clientInfo: z.object({
-    name: z.string().min(1).max(256).optional(),
-    title: z.string().min(1).max(256).optional(),
-    version: z.string().min(1).max(256).optional()
-  }).passthrough().optional(),
-  _meta: z.record(z.unknown()).optional()
-}).passthrough();
-
-const ToolCallParamsSchema = z.object({
-  name: z.string().min(1).max(200),
-  arguments: z.record(z.unknown()).optional(),
-  _meta: z.record(z.unknown()).optional()
-}).strict();
-
-const UpstreamJsonSchema = z.union([z.record(z.unknown()), z.array(z.unknown())]);
-// Unknown keys fail the parse.  extractMessage then returns the raw body so a new upstream field stays visible.
-const UpstreamErrorSchema = z.object({ error: z.string() }).strict();
+const daysSchema = {
+  description: "Lifetime in days, or \"forever\" for an admin.  Omit for the default: 3 days for files, 30 for links.",
+  anyOf: [{ type: "number", exclusiveMinimum: 0 }, { type: "string", const: "forever" }]
+};
 
 const TOOLS = [
   {
     name: "fleetlink_create_share",
     title: "Create share",
-    description: "Create one FleetLink share.  Send a file as base64 content plus filename and content_type, or a note as text or markdown.  Optional slug, days, password, and title.  Size and expiry match the caller's HTTP upload limits.",
+    description: "Create a share owned by you.  Send a file as base64 content plus filename and content_type, or a note as text or markdown.  Optional slug, days, password, title, and team_id.",
     schema: CreateShareSchema,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        content: { type: "string", description: "Base64 file bytes.  Mutually exclusive with text and markdown." },
-        filename: { type: "string", description: "File name.  Required for content.  Defaults to note.txt or note.md for a note." },
-        content_type: { type: "string", description: "Content type for a file, such as text/plain." },
-        text: { type: "string", description: "Plain-text note.  Mutually exclusive with content and markdown." },
-        markdown: { type: "string", description: "Markdown note.  Stored as text/markdown." },
-        slug: { type: "string", description: "Share slug.  Omitted slugs are 6 random hex characters." },
-        days: {
-          description: "Retention in days, or forever for an admin share at or under 500 MB.  Omit to use the caller's HTTP default.",
-          anyOf: [{ type: "number", exclusiveMinimum: 0 }, { type: "string", const: "forever" }]
-        },
-        password: { type: "string", description: "Share password.  It is stored as a hash and is not returned." },
-        title: { type: "string" }
+        content: { type: "string", description: "Base64 file bytes.  Use instead of text or markdown." },
+        filename: { type: "string", description: "File name.  Required with content.  Notes default to note.txt or note.md." },
+        content_type: { type: "string", description: "Content type for content, such as image/png." },
+        text: { type: "string", description: "A plain-text note." },
+        markdown: { type: "string", description: "A Markdown note.  The link renders it." },
+        slug: { type: "string", description: "Share name.  Omit for a random one." },
+        days: daysSchema,
+        password: { type: "string", description: "Stored as a salted hash and never returned." },
+        title: { type: "string" },
+        team_id: { type: "string", description: "Put the share in one of your teams." }
       }
     },
-    run: createShare
-  },
-  {
-    name: "fleetlink_list_shares",
-    title: "List shares",
-    description: "List shares this credential can see.  An operator admin receives the bucket overview.  An account session receives the account share index.  Agent credentials are not allowed to list the bucket.",
-    schema: EmptySchema,
-    inputSchema: { type: "object", additionalProperties: false, properties: {} },
-    run: listShares
-  },
-  {
-    name: "fleetlink_renew_share",
-    title: "Renew share",
-    description: "Extend a share that already expires.  Same rules as POST /api/shares/renew.  At most 3 renewals.  Admin adds 7 days.  An agent adds 7 days for a file and 30 days for a redirect.",
-    schema: SlugSchema,
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["slug"],
-      properties: { slug: { type: "string" } }
-    },
-    run: (data, ctx) => postShare(ctx, "/api/shares/renew", data.slug)
-  },
-  {
-    name: "fleetlink_delete_share",
-    title: "Delete share",
-    description: "Delete the object at a slug and every key under it.  Same rules as POST /api/portal/delete.  An agent cannot delete a reserved or system path.",
-    schema: SlugSchema,
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["slug"],
-      properties: { slug: { type: "string" } }
-    },
-    run: (data, ctx) => postShare(ctx, "/api/portal/delete", data.slug)
+    run: toolCreateShare
   },
   {
     name: "fleetlink_create_link",
-    title: "Create link",
-    description: "Create a redirect share.  Same rules as PUT with X-Fleet-Redirect, including agent-token grant caps.  The destination must be http or https and at most 2048 characters.",
+    title: "Create short link",
+    description: "Create a short link owned by you that redirects to an http or https URL.",
     schema: CreateLinkSchema,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["url"],
       properties: {
-        url: { type: "string", description: "http or https destination." },
+        url: { type: "string", description: "Destination, http or https, at most 2048 characters." },
         slug: { type: "string" },
-        days: {
-          description: "Retention in days, or forever for an admin.  Omit to use the caller's HTTP default.",
-          anyOf: [{ type: "number", exclusiveMinimum: 0 }, { type: "string", const: "forever" }]
-        },
+        days: daysSchema,
         password: { type: "string" },
-        title: { type: "string" }
+        title: { type: "string" },
+        team_id: { type: "string" }
       }
     },
-    run: createLink
+    run: toolCreateLink
+  },
+  {
+    name: "fleetlink_list_shares",
+    title: "List shares",
+    description: "List live shares you can see.  scope is mine (default), team (with team_id), teams (every team you are in), or all (admins).",
+    schema: ListSchema,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        scope: { type: "string", enum: ["mine", "team", "teams", "all"] },
+        team_id: { type: "string" },
+        q: { type: "string", description: "Match the name or title." },
+        limit: { type: "integer", minimum: 1, maximum: 200 }
+      }
+    },
+    run: toolListShares
+  },
+  {
+    name: "fleetlink_get_share",
+    title: "Get share",
+    description: "Details and file list for one share you can see.",
+    schema: SlugSchema,
+    inputSchema: { type: "object", additionalProperties: false, required: ["slug"], properties: { slug: { type: "string" } } },
+    run: toolGetShare
+  },
+  {
+    name: "fleetlink_renew_share",
+    title: "Renew share",
+    description: "Extend a share you manage.  Non-admins can renew a share three times, within the normal lifetime limits.",
+    schema: RenewSchema,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["slug"],
+      properties: { slug: { type: "string" }, days: { type: "number", exclusiveMinimum: 0 } }
+    },
+    run: toolRenewShare
+  },
+  {
+    name: "fleetlink_delete_share",
+    title: "Delete share",
+    description: "Delete a share you manage, with all of its files.",
+    schema: SlugSchema,
+    inputSchema: { type: "object", additionalProperties: false, required: ["slug"], properties: { slug: { type: "string" } } },
+    run: toolDeleteShare
   },
   {
     name: "fleetlink_whoami",
     title: "Who am I",
-    description: "Return this credential's identity and the upload limits the HTTP API enforces for it.  Tokens and secrets are not included.",
+    description: "Your account, how this credential authenticates, your usage and quotas, and your upload limits.  No secret is returned.",
     schema: EmptySchema,
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
-    run: whoami
+    run: toolWhoami
   }
 ];
-
-function safeSegment(value) {
-  if (!value || value.length > 200) return false;
-  if (/[\r\n\0/\\]/.test(value) || value.includes("..") || /\s/.test(value)) return false;
-  return true;
-}
-
-function randomSlug() {
-  const bytes = crypto.getRandomValues(new Uint8Array(3));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 function decodeBase64(value) {
   const cleaned = String(value).replace(/\s/g, "");
@@ -227,271 +177,20 @@ function decodeBase64(value) {
   }
 }
 
-function zodMessage(error) {
-  const custom = error.issues
-    .filter((issue) => issue.code === "custom" && issue.message && !looksSensitive(issue.message))
-    .map((issue) => issue.message);
-  return custom.length ? custom.join(" ") : "Invalid arguments.";
-}
-
-function looksSensitive(text) {
-  return /fla_[0-9a-f]+/i.test(text)
-    || /Bearer\s+\S+/i.test(text)
-    || /\bat\s+\S+\s+\(/i.test(text);
-}
-
-function redactText(value) {
-  return String(value)
-    .replace(/fla_[0-9a-f]+/gi, "[redacted]")
-    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
-    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1");
-}
-
-const DROPPED_KEYS = new Set([
-  "password",
-  "password_hash",
-  "secret",
-  "token",
-  "authorization",
-  "cookie",
-  "stack",
-  "session",
-  "session_secret",
-  "admin_secret",
-  "agent_secret"
-]);
-
-function scrub(value) {
-  if (Array.isArray(value)) return value.map(scrub);
-  if (value && typeof value === "object") {
-    const out = {};
-    for (const [key, item] of Object.entries(value)) {
-      if (DROPPED_KEYS.has(key.toLowerCase())) continue;
-      out[key] = scrub(item);
-    }
-    return out;
-  }
-  if (typeof value === "string") return redactText(value);
-  return value;
-}
-
-function safeClientMessage(status, raw) {
-  if (status >= 500) return "The request could not be completed.";
-  const text = redactText(raw).replace(/\s+/g, " ").trim();
-  const generic = status === 404
-    ? "Share not found."
-    : status === 401
-      ? "Authentication required."
-      : status === 403
-        ? "Not allowed."
-        : status === 413
-          ? "Upload exceeds the size limit."
-          : "Invalid request.";
-  if (!text || text.length > 400 || looksSensitive(text) || text.includes("[redacted]")) return generic;
-  return text;
-}
-
-function extractMessage(text) {
-  try {
-    const raw = JSON.parse(text);
-    const parsed = UpstreamErrorSchema.safeParse(raw);
-    if (parsed.success) return parsed.data.error;
-  } catch {
-    /* plain text from PUT */
-  }
-  return text;
-}
-
-function interpret(status, text) {
-  if (status >= 200 && status < 300) {
-    try {
-      const raw = JSON.parse(text);
-      const parsed = UpstreamJsonSchema.safeParse(raw);
-      if (parsed.success) return { ok: true, status, data: scrub(parsed.data) };
-    } catch {
-      /* upload and redirect replies are plain text */
-    }
-    return { ok: true, status, data: shareFromPlain(text) };
-  }
-  return { ok: false, status, message: safeClientMessage(status, extractMessage(text)) };
-}
-
-function shareFromPlain(text) {
-  const url = text.match(/https?:\/\/[^\s]+/)?.[0]?.replace(/[)>.,]+$/, "") || null;
-  const target = text.match(/->\s*(https?:\/\/\S+)/)?.[1]?.replace(/[)>.,]+$/, "") || null;
-  const expires = text.match(/\(Expires:\s*([^)]+)\)/)?.[1]?.trim() || null;
-  let slug = null;
-  let key = null;
-  if (url) {
-    try {
-      const path = new URL(url).pathname.replace(/^\/+/, "");
-      key = decodeURIComponent(path);
-      slug = key.split("/")[0] || null;
-    } catch {
-      slug = null;
-    }
-  }
-  return {
-    url: url ? redactText(url) : null,
-    target_url: target ? redactText(target) : null,
-    slug,
-    key,
-    expires
-  };
-}
-
-function requestHost(request) {
-  try {
-    return new URL(request.url).host;
-  } catch {
-    return "fleetlink.online";
-  }
-}
-
-export function mcpWwwAuthenticate(request) {
-  const host = requestHost(request);
-  return `Bearer realm="fleetlink", resource_metadata="https://${host}/.well-known/oauth-protected-resource"`;
-}
-
-export function oauthProtectedResourceBody(request) {
-  const host = requestHost(request);
-  return {
-    resource: `https://${host}/mcp`,
-    bearer_methods_supported: ["header"],
-    resource_name: "FleetLink MCP"
-  };
-}
-
-export function handleOAuthProtectedResource(request) {
-  return jsonResponse(oauthProtectedResourceBody(request), 200);
-}
-
-function jsonResponse(body, status, extra) {
-  const headers = new Headers(extra);
-  headers.set("content-type", "application/json");
-  headers.set("cache-control", "no-store");
-  return new Response(JSON.stringify(body), { status, headers });
-}
-
-function rpcResult(id, result) {
-  return jsonResponse({ jsonrpc: "2.0", id, result }, 200);
-}
-
-function rpcError(id, code, message, status = 200) {
-  return jsonResponse({ jsonrpc: "2.0", id, error: { code, message } }, status);
-}
-
-function unauthorized(request) {
-  return jsonResponse({ error: "Authentication required." }, 401, {
-    "www-authenticate": mcpWwwAuthenticate(request)
-  });
-}
-
-function methodNotAllowed() {
-  return jsonResponse({ error: "Method not allowed." }, 405, { allow: "POST" });
-}
-
 function toolResult(payload, isError = false) {
-  const text = isError ? String(payload) : JSON.stringify(scrub(payload), null, 2);
-  const result = { content: [{ type: "text", text }] };
+  const result = { content: [{ type: "text", text: isError ? String(payload) : JSON.stringify(payload, null, 2) }] };
   if (isError) result.isError = true;
   return result;
 }
 
-function forwardAuth(request, headers) {
-  for (const name of ["authorization", "cookie", "x-fleet-admin", "x-fleet-agent"]) {
-    if (headers.has(name)) continue;
-    const value = request.headers.get(name);
-    if (value) headers.set(name, value);
-  }
-}
-
-async function callApi(ctx, url, init) {
-  const headers = new Headers(init.headers || {});
-  forwardAuth(ctx.request, headers);
-  try {
-    const response = await ctx.call(new Request(url, {
-      method: init.method,
-      headers,
-      body: init.body
-    }));
-    const text = await response.text();
-    return interpret(response.status, text);
-  } catch {
-    return { ok: false, status: 500, message: "The request could not be completed." };
-  }
-}
-
-function writeDenied(caller, outcome) {
-  if (caller.kind === "account" && outcome.status === 401) {
-    return "This credential cannot write shares.  Use an agent token or an operator secret.";
-  }
-  return outcome.message;
-}
-
-function agentLimits(grant) {
-  let maxFile = AGENT_FILE_BYTES;
-  let maxBatch = AGENT_BATCH_BYTES;
-  let maxFiles = AGENT_MAX_FILES;
-  if (grant) {
-    maxFile = tighterCap(maxFile, grant.maxFileBytes);
-    maxFile = tighterCap(maxFile, grant.maxTotalBytes);
-    maxBatch = tighterCap(maxBatch, grant.maxTotalBytes);
-    maxFiles = tighterCap(maxFiles, grant.maxFiles);
-  }
-  const grantTtl = grant && Number(grant.maxTtlSeconds) > 0 ? Number(grant.maxTtlSeconds) : null;
-  return {
-    max_file_bytes: maxFile,
-    max_batch_bytes: maxBatch,
-    max_files: maxFiles,
-    max_file_ttl_seconds: grantTtl ? Math.min(AGENT_FILE_TTL_SECONDS, grantTtl) : AGENT_FILE_TTL_SECONDS,
-    default_file_ttl_seconds: grantTtl ? Math.min(AGENT_FILE_DEFAULT_SECONDS, grantTtl) : AGENT_FILE_DEFAULT_SECONDS,
-    max_redirect_ttl_seconds: grantTtl ? Math.min(AGENT_REDIRECT_TTL_SECONDS, grantTtl) : AGENT_REDIRECT_TTL_SECONDS,
-    default_redirect_ttl_seconds: grantTtl ? Math.min(AGENT_REDIRECT_TTL_SECONDS, grantTtl) : AGENT_REDIRECT_TTL_SECONDS,
-    allow_redirects: grant ? grant.allowRedirects !== false : true,
-    forever_allowed: false
-  };
-}
-
-function adminLimits() {
-  return {
-    max_file_bytes: ADMIN_FILE_BYTES,
-    max_batch_bytes: ADMIN_BATCH_BYTES,
-    max_files: ADMIN_MAX_FILES,
-    max_file_ttl_seconds: null,
-    default_file_ttl_seconds: null,
-    max_redirect_ttl_seconds: null,
-    default_redirect_ttl_seconds: null,
-    allow_redirects: true,
-    forever_allowed: true,
-    forever_max_bytes: FOREVER_MAX_BYTES
-  };
-}
-
-async function resolveCaller(request, env, authenticate) {
-  const operator = await authenticate(request);
-  if (operator?.isAdmin || operator?.isAgent) {
-    return {
-      kind: "operator",
-      role: operator.isAdmin ? "admin" : "agent",
-      isAdmin: Boolean(operator.isAdmin)
-    };
-  }
-  const grant = await lookupAgentToken(request, env);
-  if (grant) return { kind: "agent_token", role: "agent", isAdmin: false, grant };
-  const user = await sessionUser(request, env);
-  if (user) return { kind: "account", role: user.role || "user", isAdmin: false, user };
-  return null;
-}
-
-async function createShare(data, ctx) {
+async function toolCreateShare(data, ctx) {
   let bytes;
   let contentType;
   let filename = data.filename;
   if (data.content != null) {
     bytes = decodeBase64(data.content);
     if (!bytes) return toolResult("Invalid base64 content.", true);
-    if (bytes.byteLength === 0) return toolResult("File is empty.", true);
+    if (!bytes.byteLength) return toolResult("The file is empty.", true);
     contentType = data.content_type;
   } else if (data.markdown != null) {
     bytes = new TextEncoder().encode(data.markdown);
@@ -502,181 +201,181 @@ async function createShare(data, ctx) {
     contentType = "text/plain; charset=utf-8";
     filename = filename || "note.txt";
   }
-  const slug = (data.slug || randomSlug()).toLowerCase();
-  const key = `${slug}/${filename}`;
-  const headers = new Headers();
-  headers.set("content-type", contentType);
-  headers.set("content-length", String(bytes.byteLength));
-  if (data.days != null) headers.set("x-expire-days", String(data.days));
-  if (data.password) headers.set("x-fleet-password", data.password);
-  if (data.title) headers.set("x-fleet-title", data.title);
-  const path = key.split("/").map(encodeURIComponent).join("/");
-  const outcome = await callApi(ctx, `${ctx.origin}/${path}`, { method: "PUT", headers, body: bytes });
-  if (!outcome.ok) return toolResult(writeDenied(ctx.caller, outcome), true);
-  return toolResult({
-    url: outcome.data.url,
-    slug: outcome.data.slug || slug,
-    key: outcome.data.key || key,
-    expires: outcome.data.expires,
-    content_type: contentType
-  });
-}
-
-async function createLink(data, ctx) {
-  const slug = (data.slug || randomSlug()).toLowerCase();
-  const headers = new Headers();
-  headers.set("x-fleet-redirect", data.url.trim());
-  if (data.days != null) headers.set("x-expire-days", String(data.days));
-  if (data.password) headers.set("x-fleet-password", data.password);
-  if (data.title) headers.set("x-fleet-title", data.title);
-  const outcome = await callApi(ctx, `${ctx.origin}/${encodeURIComponent(slug)}`, { method: "PUT", headers });
-  if (!outcome.ok) return toolResult(writeDenied(ctx.caller, outcome), true);
-  return toolResult({
-    url: outcome.data.url,
-    slug: outcome.data.slug || slug,
-    target_url: outcome.data.target_url,
-    expires: outcome.data.expires
-  });
-}
-
-async function postShare(ctx, path, slug) {
-  const outcome = await callApi(ctx, `${ctx.origin}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ slug })
-  });
-  if (!outcome.ok) return toolResult(writeDenied(ctx.caller, outcome), true);
-  return toolResult(outcome.data);
-}
-
-async function listShares(_data, ctx) {
-  const path = ctx.caller.kind === "account" ? "/api/shares" : "/api/portal/data";
-  const outcome = await callApi(ctx, `${ctx.origin}${path}`, { method: "GET" });
-  if (!outcome.ok) return toolResult(outcome.message, true);
-  return toolResult(outcome.data);
-}
-
-function whoami(_data, ctx) {
-  if (ctx.caller.kind === "account") {
-    return toolResult({
-      identity: { kind: "account", ...userPublic(ctx.caller.user) },
-      limits: {
-        can_write: false,
-        note: "Share writes use an agent token or an operator credential.  Account share indexing is not enabled yet.",
-        agent_token_quota: ctx.caller.user.agent_token_quota ?? 3,
-        token_tier: {
-          max_file_bytes: USER_TIER.fileBytes,
-          max_batch_bytes: USER_TIER.totalBytes,
-          max_files: USER_TIER.files,
-          max_ttl_seconds: USER_TIER.maxTtl
-        }
-      }
-    });
+  const share = await createShare(ctx.env, ctx.principal, { ...data, kind: "files", source: "mcp" });
+  try {
+    await putShareFile(ctx.env, ctx.principal, share, { path: filename, body: bytes, size: bytes.byteLength, contentType, settings: ctx.settings });
+  } catch (err) {
+    await purgeShare(ctx.env, share).catch(() => {});
+    throw err;
   }
-  if (ctx.caller.kind === "agent_token") {
-    return toolResult({
-      identity: {
-        kind: "agent_token",
-        id: ctx.caller.grant.id,
-        user_id: ctx.caller.grant.userId,
-        role: ctx.caller.grant.role
-      },
-      limits: { can_write: true, ...agentLimits(ctx.caller.grant) }
-    });
-  }
-  const admin = ctx.caller.role === "admin";
+  const fresh = await getShareBySlug(ctx.env, share.slug);
+  return toolResult({ share: publicShare(fresh, ctx.origin, { canManage: true, files: await shareFiles(ctx.env, share.id) }) });
+}
+
+async function toolCreateLink(data, ctx) {
+  const share = await createShare(ctx.env, ctx.principal, { ...data, kind: "link", source: "mcp" });
+  return toolResult({ share: publicShare(share, ctx.origin, { canManage: true }) });
+}
+
+async function toolListShares(data, ctx) {
+  const { rows, next } = await listShares(ctx.env, ctx.principal, { scope: data.scope || (data.team_id ? "team" : "mine"), team_id: data.team_id, q: data.q, limit: data.limit });
+  return toolResult({ shares: rows.map(({ row, canManage }) => publicShare(row, ctx.origin, { canManage })), next });
+}
+
+async function toolGetShare(data, ctx) {
+  const { share, access } = await loadShareFor(ctx.env, ctx.principal, data.slug, "view");
+  const files = share.kind === "files" ? await shareFiles(ctx.env, share.id) : null;
+  return toolResult({ share: publicShare(share, ctx.origin, { canManage: access.manage, files }) });
+}
+
+async function toolRenewShare(data, ctx) {
+  const { share, unchanged } = await renewShare(ctx.env, ctx.principal, data.slug, data);
+  return toolResult({ share: publicShare(share, ctx.origin, { canManage: true }), unchanged });
+}
+
+async function toolDeleteShare(data, ctx) {
+  return toolResult({ ok: true, ...(await deleteShare(ctx.env, ctx.principal, data.slug)) });
+}
+
+async function toolWhoami(_data, ctx) {
+  const summary = await accountSummary(ctx.env, ctx.principal.user, ctx.settings);
+  const tier = ctx.principal.isAdmin ? LIMITS.admin : LIMITS.user;
   return toolResult({
-    identity: { kind: "operator", role: ctx.caller.role },
-    limits: { can_write: true, ...(admin ? adminLimits() : agentLimits(null)) }
+    ...summary,
+    auth: {
+      kind: ctx.principal.kind,
+      token: ctx.principal.token ? { id: ctx.principal.token.id, name: ctx.principal.token.name, team_id: ctx.principal.token.team_id } : undefined
+    },
+    limits: {
+      max_file_bytes: fileByteLimit(ctx.principal),
+      max_share_bytes: tier.shareBytes,
+      max_share_files: tier.shareFiles,
+      max_file_days: tier.fileDays,
+      max_link_days: tier.linkDays,
+      max_ttl_seconds: ctx.principal.token?.max_ttl_seconds ?? null,
+      links_allowed: !ctx.principal.token || ctx.principal.token.allow_links,
+      forever_allowed: ctx.principal.isAdmin
+    }
   });
 }
 
-function toolCatalog() {
-  return TOOLS.map((tool) => ({
-    name: tool.name,
-    title: tool.title,
-    description: tool.description,
-    inputSchema: tool.inputSchema
-  }));
+// One object per POST.  id may be omitted (notification), or a string, finite number, or null.
+export const McpRequestSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: z.union([z.string().min(1).max(256), z.number().finite(), z.null()]).optional(),
+  method: z.string().min(1).max(256),
+  params: z.record(z.unknown()).optional()
+}).strict();
+
+const ToolCallParamsSchema = z.object({
+  name: z.string().min(1).max(200),
+  arguments: z.record(z.unknown()).optional(),
+  _meta: z.record(z.unknown()).optional()
+}).strict();
+
+function requestHost(request) {
+  try {
+    return new URL(request.url).host;
+  } catch {
+    return "fleetlink.online";
+  }
+}
+
+export function mcpWwwAuthenticate(request) {
+  return `Bearer realm="fleetlink", resource_metadata="https://${requestHost(request)}/.well-known/oauth-protected-resource"`;
+}
+
+export function oauthProtectedResourceBody(request) {
+  return { resource: `https://${requestHost(request)}/mcp`, bearer_methods_supported: ["header"], resource_name: "FleetLink MCP" };
+}
+
+function jsonResponse(body, status, extra) {
+  const headers = new Headers(extra);
+  headers.set("content-type", "application/json");
+  headers.set("cache-control", "no-store");
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
+export function handleOAuthProtectedResource(request) {
+  return jsonResponse(oauthProtectedResourceBody(request), 200);
+}
+
+const rpcResult = (id, result) => jsonResponse({ jsonrpc: "2.0", id, result }, 200);
+const rpcError = (id, code, message, status = 200) => jsonResponse({ jsonrpc: "2.0", id, error: { code, message } }, status);
+
+function issueMessage(error) {
+  const custom = error.issues.filter((issue) => issue.code === "custom").map((issue) => issue.message);
+  if (custom.length) return custom.join(" ");
+  const issue = error.issues[0];
+  return issue ? `${issue.path.join(".") || "arguments"}: ${issue.message}` : "Invalid arguments.";
 }
 
 async function dispatchTool(name, args, ctx) {
   const tool = TOOLS.find((item) => item.name === name);
   if (!tool) return toolResult("Unknown tool.", true);
   const parsed = tool.schema.safeParse(args ?? {});
-  if (!parsed.success) return toolResult(zodMessage(parsed.error), true);
+  if (!parsed.success) return toolResult(issueMessage(parsed.error), true);
   try {
     return await tool.run(parsed.data, ctx);
-  } catch {
+  } catch (err) {
+    if (err instanceof HttpError) return toolResult(err.message, true);
     return toolResult("The request could not be completed.", true);
   }
 }
 
-async function handleRpc(payload, ctx) {
-  const parsed = McpRequestSchema.safeParse(payload);
-  if (!parsed.success) return rpcError(null, -32600, "Invalid request", 400);
-  const message = parsed.data;
+async function handleRpc(message, ctx) {
   if (!Object.prototype.hasOwnProperty.call(message, "id")) {
     return new Response(null, { status: 202, headers: { "cache-control": "no-store" } });
   }
   const id = message.id;
   if (message.method === "initialize") {
-    if (message.params !== undefined && !InitializeParamsSchema.safeParse(message.params).success) {
-      return rpcError(id, -32602, "Invalid params");
-    }
     return rpcResult(id, {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "fleetlink", version: SERVER_VERSION },
-      instructions: "FleetLink shares files and short links.  Call a tool to upload, renew, delete, or inspect the signed-in credential.  Tool errors are short messages and never include tokens."
+      instructions: "FleetLink shares files and short links.  Everything you create is owned by your account.  Tool errors are short messages and never include credentials."
     });
   }
   if (message.method === "ping") return rpcResult(id, {});
-  if (message.method === "tools/list") return rpcResult(id, { tools: toolCatalog() });
+  if (message.method === "tools/list") {
+    return rpcResult(id, { tools: TOOLS.map(({ name, title, description, inputSchema }) => ({ name, title, description, inputSchema })) });
+  }
   if (message.method === "tools/call") {
     const params = ToolCallParamsSchema.safeParse(message.params);
     if (!params.success) return rpcError(id, -32602, "Invalid params");
-    const result = await dispatchTool(params.data.name, params.data.arguments ?? {}, ctx);
-    return rpcResult(id, result);
+    return rpcResult(id, await dispatchTool(params.data.name, params.data.arguments ?? {}, ctx));
   }
   return rpcError(id, -32601, "Method not found");
 }
 
-/**
- * Streamable HTTP MCP.  JSON-RPC responses are application/json.
- * GET is 405 because this server does not open an SSE stream.
- */
-export async function handleMcp(request, env, deps) {
+export async function handleMcp(request, env, origin) {
+  if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405, { allow: "POST" });
+  let principal;
   try {
-    if (request.method !== "POST") return methodNotAllowed();
-    const caller = await resolveCaller(request, env, deps.authenticate);
-    if (!caller) return unauthorized(request);
-    const version = (request.headers.get("mcp-protocol-version") || "").trim();
-    if (version && version !== MCP_PROTOCOL_VERSION) {
-      return jsonResponse({ error: "Unsupported protocol version." }, 400);
-    }
-    const contentType = (request.headers.get("content-type") || "").toLowerCase();
-    if (!contentType.startsWith("application/json")) {
-      return jsonResponse({ error: "Content-Type must be application/json." }, 415);
-    }
-    let raw;
-    try {
-      raw = JSON.parse(await request.text());
-    } catch {
-      return rpcError(null, -32700, "Parse error", 400);
-    }
-    // Batches are one Invalid request.  This server does not run any element of the array.
-    if (Array.isArray(raw)) return rpcError(null, -32600, "Invalid request", 400);
-    const parsed = McpRequestSchema.safeParse(raw);
-    if (!parsed.success) return rpcError(null, -32600, "Invalid request", 400);
-    const origin = new URL(request.url).origin;
-    return await handleRpc(parsed.data, {
-      request,
-      env,
-      caller,
-      origin,
-      call: deps.call
-    });
+    principal = await resolvePrincipal(request, env);
+  } catch (err) {
+    const status = err instanceof HttpError ? err.status : 401;
+    return jsonResponse({ error: err instanceof HttpError ? err.message : "Authentication required." }, status, { "www-authenticate": mcpWwwAuthenticate(request) });
+  }
+  if (!principal) return jsonResponse({ error: "Authentication required." }, 401, { "www-authenticate": mcpWwwAuthenticate(request) });
+  // A browser cookie is ambient; MCP takes header credentials only.
+  if (principal.viaCookie) return jsonResponse({ error: "Send an API token as Authorization: Bearer." }, 401, { "www-authenticate": mcpWwwAuthenticate(request) });
+  const version = (request.headers.get("mcp-protocol-version") || "").trim();
+  if (version && version !== MCP_PROTOCOL_VERSION) return jsonResponse({ error: "Unsupported protocol version." }, 400);
+  if (!(request.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) {
+    return jsonResponse({ error: "Content-Type must be application/json." }, 415);
+  }
+  let raw;
+  try {
+    raw = JSON.parse(await request.text());
+  } catch {
+    return rpcError(null, -32700, "Parse error", 400);
+  }
+  if (Array.isArray(raw)) return rpcError(null, -32600, "Invalid request", 400);
+  const parsed = McpRequestSchema.safeParse(raw);
+  if (!parsed.success) return rpcError(null, -32600, "Invalid request", 400);
+  try {
+    return await handleRpc(parsed.data, { request, env, principal, origin, settings: await loadSettings(env) });
   } catch {
     return rpcError(null, -32603, "Internal error", 500);
   }

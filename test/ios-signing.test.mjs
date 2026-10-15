@@ -38,8 +38,8 @@ test("iOS account and passkey URLs use fleetlink.online", () => {
   assert.match(passkey, /"fleetlink\.online"/);
   assert.doesNotMatch(passkey, /fleetlink\.app/);
   assert.match(entitlements, /webcredentials:fleetlink\.online/);
-  assert.match(project, /MARKETING_VERSION: "1\.0\.18"/);
-  assert.match(project, /CURRENT_PROJECT_VERSION: "202610141907"/);
+  assert.match(project, /MARKETING_VERSION: "2\.0\.0"/);
+  assert.match(project, /CURRENT_PROJECT_VERSION: "202610151415"/);
 });
 
 test("loadSigning masks Infisical values and fails closed without the distribution identity", async () => {
