@@ -80,7 +80,7 @@ The schema is `worker/lib/schema.mjs`.  The worker applies pending migrations it
 
 - `users`: role (`user`, `admin`), status (`active`, `disabled`, `deleted`), optional unique email, optional per-person quotas.
 - `passkeys`, `webauthn_challenges`, `sessions`, `api_tokens`, `invites`.
-- `teams`, `team_members` (roles `owner`, `admin`, `member`).
+- `teams`, `team_members` (roles `owner`, `admin`, `member`).  Deleting a team keeps its shares with their owners and removes the API tokens and invites bound to it.
 - `shares`: slug, owner, optional team, kind (`files` or `link`), optional password hash, expiry, renewals, file count, byte total.
 - `share_files`: one row per object with its R2 key, size, and type.  New uploads use `s/<share id>/<path>`, so a slug never collides with an old object or a system asset.
 - `settings`: admin-editable values.

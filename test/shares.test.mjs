@@ -220,6 +220,12 @@ test("raw PUT creates a share from headers, adds files, and DELETE removes them"
   assert.equal(single.data.url, "https://fleetlink.online/solo.txt");
   assert.equal(await (await call(env, "GET", "/solo.txt")).text(), "solo");
 
+  // The file keeps the spelling it was uploaded with; the name matches without case.
+  const mixed = await callJson(env, "PUT", "/Report.PDF", { auth: { token }, body: "%PDF", headers: { accept: "application/json", "content-type": "application/pdf" } });
+  assert.equal(mixed.data.slug, "report.pdf");
+  assert.equal(mixed.data.path, "Report.PDF");
+  assert.match((await call(env, "GET", "/REPORT.pdf")).headers.get("content-disposition"), /filename="Report\.PDF"/);
+
   // A short link through PUT.
   const link = await call(env, "PUT", "/go-docs", { auth: { token }, headers: { "x-fleet-redirect": "https://example.com/docs" } });
   assert.equal(link.status, 200);

@@ -170,7 +170,8 @@ export async function handleRequest(request, env, exec, deps = {}) {
       } catch {
         throw new HttpError(400, "The path is not valid URL encoding.");
       }
-      return await rawWrite(ctx, decodedSlug.toLowerCase(), decodedRest);
+      // Slugs match without case; the original spelling names a one-file share's file.
+      return await rawWrite(ctx, decodedSlug, decodedRest);
     } catch (err) {
       if (!(err instanceof HttpError)) throw err;
       return rawError(request, err);
