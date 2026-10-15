@@ -59,6 +59,10 @@ public final class ArtifactLoader: ObservableObject {
                 state = .redirect(from: url, to: redirectURL)
                 return
             }
+            if http.statusCode == 410 {
+                state = .expired
+                return
+            }
             if http.statusCode == 404 {
                 let bodyString = String(data: data, encoding: .utf8) ?? ""
                 let folded = bodyString.lowercased()

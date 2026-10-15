@@ -7,6 +7,12 @@ import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
 import { captureWorkerException } from "./lib/sentry-scrub.mjs";
 import { randomHex } from "./lib/bytes.mjs";
 import { SettingsOverridesDocument, SettingsUpdateBody } from "./lib/settings-schema.mjs";
+import {
+  isExpiredAt,
+  latestExpireAtMillisFromListed,
+  parseExpireAtMillis,
+  requestPrefersJson
+} from "./lib/share-expiry.mjs";
 import { applyGrantTtl, lookupAgentToken, tighterCap } from "./lib/tokens.mjs";
 
 function allocateShareId() {
@@ -53,6 +59,21 @@ function renderStatusPage(title, message) {
     :focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
   </style></head><body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a href="/">FleetLink home</a></p></main></body></html>`;
 }
+function expiredShareResponse(request) {
+  const headers = { "cache-control": "no-store" };
+  if (requestPrefersJson(request)) {
+    return new Response(JSON.stringify({ error: "expired" }), {
+      status: 410,
+      headers: { ...headers, "content-type": "application/json; charset=utf-8" }
+    });
+  }
+  return new Response(
+    renderStatusPage("This link has expired", "The file or short link was temporary, and the time is up."),
+    { status: 410, headers: { ...headers, "content-type": "text/html; charset=utf-8" } }
+  );
+}
+__name(expiredShareResponse, "expiredShareResponse");
+__name2(expiredShareResponse, "expiredShareResponse");
 __name(escapeHtml, "escapeHtml");
 __name2(escapeHtml, "escapeHtml");
 function isSocialCrawler(userAgent) {
@@ -6135,8 +6156,12 @@ async function handleRequest(request, env, ctx) {
       }
       if (!object && (!key.includes(".") || key.endsWith("/"))) {
         const listPrefix = key.endsWith("/") ? key : key + "/";
-        const listed = await env.FLEET_SHARES.list({ prefix: listPrefix });
+        const listed = await env.FLEET_SHARES.list({ prefix: listPrefix, include: ["customMetadata"] });
         if (listed.objects.length > 0) {
+          const shareExpiresAt = latestExpireAtMillisFromListed(listed.objects);
+          if (isExpiredAt(shareExpiresAt)) {
+            return expiredShareResponse(request);
+          }
           let detectedPreview = null;
           const imageCandidates = ["preview.png", "cover.png", "screenshot.png", "thumbnail.png", "og.png", "preview.jpg", "cover.jpg"];
           for (const cand of imageCandidates) {
@@ -6191,10 +6216,10 @@ async function handleRequest(request, env, ctx) {
         }
         return new Response(renderStatusPage("Link not found", "That link does not match a file or a short link."), { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
       }
-      const expireAt = object.customMetadata?.expire_at;
-      if (expireAt && Date.now() > parseInt(expireAt)) {
+      const expireAtMillis = parseExpireAtMillis(object.customMetadata);
+      if (isExpiredAt(expireAtMillis)) {
         await env.FLEET_SHARES.delete(object.key);
-        return new Response(renderStatusPage("This link has expired", "The file or short link was temporary, and the time is up."), { status: 404, headers: { "content-type": "text/html; charset=utf-8" } });
+        return expiredShareResponse(request);
       }
       let ogImageUrl = null;
       if (object.customMetadata?.preview_image) {

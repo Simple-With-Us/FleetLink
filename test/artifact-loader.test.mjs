@@ -27,3 +27,8 @@ test("load replaces the share password instead of keeping the previous one", () 
   assert.match(functionBody("fetch"), /X-Fleet-Password/);
   assert.match(functionBody("selectItem"), /password: activePassword/);
 });
+
+test("load treats HTTP 410 as an expired share", () => {
+  const load = functionBody("load");
+  assert.match(load, /statusCode == 410/);
+});
