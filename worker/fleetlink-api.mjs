@@ -4,7 +4,14 @@ import { reapCostGuards } from "./lib/cost-guards.mjs";
 import { mustForceAttachment } from "./lib/html-safety.mjs";
 import { handleMcp, handleOAuthProtectedResource, mcpWwwAuthenticate } from "./lib/mcp.mjs";
 import { passkeyLoginMarkup, passkeyLoginScript } from "./lib/passkey-page.mjs";
-import { captureWorkerException } from "./lib/sentry-scrub.mjs";
+import {
+  beginWorkerTrace,
+  captureWorkerException,
+  captureWorkerLog,
+  finishWorkerTrace,
+  recordWorkerSpan,
+  workerRelease
+} from "./lib/sentry-scrub.mjs";
 import { randomHex } from "./lib/bytes.mjs";
 import { SettingsOverridesDocument, SettingsUpdateBody } from "./lib/settings-schema.mjs";
 import {
@@ -5191,12 +5198,15 @@ async function healthCheck(env) {
     storage: storageOk ? "ok" : "error",
     db: dbOk ? "ok" : "error"
   };
+  const headers = {
+    "content-type": "application/json",
+    "cache-control": "no-store"
+  };
+  const release = workerRelease(env);
+  if (release) headers["x-fleet-release"] = release;
   return new Response(JSON.stringify(body), {
     status: body.ok ? 200 : 503,
-    headers: {
-      "content-type": "application/json",
-      "cache-control": "no-store"
-    }
+    headers
   });
 }
 __name(healthCheck, "healthCheck");
@@ -5224,7 +5234,10 @@ async function handleRequest(request, env, ctx) {
     const agentSecret = (rawEnv.AGENT_SECRET || rawEnv.FLEET_AGENT_SECRET || "").trim();
     const secrets = { adminSecret, agentSecret };
     const accountResponse = await handleAccountRoutes(request, env, ctx);
-    if (accountResponse) return accountResponse;
+    if (accountResponse) {
+      if (url.pathname.startsWith("/api/auth")) recordWorkerSpan(request, "auth", url.pathname);
+      return accountResponse;
+    }
     if (request.headers.get("X-Fleet-Auth")) {
       const legacyHeaders = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
       if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
@@ -6135,6 +6148,7 @@ async function handleRequest(request, env, ctx) {
       if (isSettingsStorageKey(key)) {
         return new Response("Not Found", { status: 404, headers: { "cache-control": "no-store" } });
       }
+      recordWorkerSpan(request, "download", url.pathname);
       if (!key.endsWith("/") && !key.includes(".")) {
         const indexObj = await env.FLEET_SHARES.get(key + "/index.html");
         if (indexObj) {
@@ -6665,7 +6679,10 @@ async function handleRequest(request, env, ctx) {
             headers: { "content-type": "text/plain; charset=utf-8" }
           });
         } catch (err) {
-          console.error(JSON.stringify({ event: "put_redirect_failed", error: err.message || String(err) }));
+          recordWorkerSpan(request, "r2", "put");
+          const logPending = captureWorkerLog("error", "put_redirect_failed", { event: "put_redirect_failed" }, env);
+          if (ctx && ctx.waitUntil) ctx.waitUntil(logPending);
+          else logPending.catch(() => {});
           return new Response(`Upload rejected: Storage error writing to R2 - ${err.message || String(err)}`, { status: 500 });
         }
       }
@@ -6673,6 +6690,7 @@ async function handleRequest(request, env, ctx) {
       const putSlug = putParts[0].toLowerCase();
       key = putParts.length > 1 ? `${putSlug}/${putParts.slice(1).join("/")}` : putSlug;
       slugCaseCache.set(putSlug, putSlug);
+      recordWorkerSpan(request, "upload", url.pathname);
       try {
         await env.FLEET_SHARES.put(key, request.body, {
           httpMetadata,
@@ -6686,7 +6704,10 @@ async function handleRequest(request, env, ctx) {
           headers: { "content-type": "text/plain; charset=utf-8" }
         });
       } catch (err) {
-        console.error(JSON.stringify({ event: "put_failed", error: err.message || String(err) }));
+        recordWorkerSpan(request, "r2", "put");
+        const logPending = captureWorkerLog("error", "put_failed", { event: "put_failed" }, env);
+        if (ctx && ctx.waitUntil) ctx.waitUntil(logPending);
+        else logPending.catch(() => {});
         return new Response(`Upload rejected: Storage error writing to R2 - ${err.message || String(err)}`, { status: 500 });
       }
     }
@@ -6741,9 +6762,13 @@ async function handleRequest(request, env, ctx) {
   }
 var index_default = {
   async fetch(request, env, ctx) {
+    beginWorkerTrace(request, env);
     try {
-      return await handleRequest(request, env, ctx);
+      const response = await handleRequest(request, env, ctx);
+      finishWorkerTrace(request, env, ctx, response.status);
+      return response;
     } catch (err) {
+      finishWorkerTrace(request, env, ctx, 500);
       const pending = captureWorkerException(err, request, env);
       if (ctx && ctx.waitUntil) ctx.waitUntil(pending);
       else pending.catch(() => {});
