@@ -4,7 +4,7 @@ import { badRequest, HttpError, iso, json, parseWith, readBody, text, wantsJson 
 import { requireShareAccess } from "../policy.mjs";
 import {
   createShare, CreateShareBody, deleteShare, deleteShareFile, getShareBySlug, isExpired, listShares,
-  loadShareFor, LIMITS, publicShare, purgeShare, putShareFile, renewShare, shareFiles, updateShare
+  loadShareFor, LIMITS, publicShare, purgeShare, putShareFile, renewShare, shareFiles, updateShare, UpdateShareBody
 } from "../shares.mjs";
 
 const RenewBody = z.object({ days: z.union([z.number(), z.string().max(20)]).nullable().optional() }).strict();
@@ -150,7 +150,7 @@ export function shareRoutes(router) {
   });
   router.on("PATCH", "/api/shares/:slug", async (ctx) => {
     const principal = await ctx.auth();
-    const share = await updateShare(ctx.env, principal, ctx.params.slug, await readBody(ctx.request));
+    const share = await updateShare(ctx.env, principal, ctx.params.slug, parseWith(UpdateShareBody, await readBody(ctx.request)));
     return json({ share: await detail(ctx, principal, share, { manage: true }) });
   });
   router.on("DELETE", "/api/shares/:slug", async (ctx) => json({ ok: true, ...(await deleteShare(ctx.env, await ctx.auth(), ctx.params.slug)) }));

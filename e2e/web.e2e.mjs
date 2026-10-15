@@ -13,8 +13,14 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { z } from "zod";
 import { makeEnv, OPERATOR_SECRET } from "../test/helpers/harness.mjs";
 import { serve } from "../test/helpers/server.mjs";
+
+/** The slice of GET /api/admin/users this test relies on, so a contract change fails here. */
+const AdminUsers = z.object({
+  users: z.array(z.object({ id: z.string(), display_name: z.string(), role: z.enum(["user", "admin"]), status: z.enum(["active", "disabled"]) }).passthrough())
+}).passthrough();
 
 const shots = join(dirname(fileURLToPath(import.meta.url)), "screenshots");
 mkdirSync(shots, { recursive: true });
@@ -122,7 +128,7 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     await page.waitForURL("**/dashboard");
 
     // Make Ada an admin with the operator secret, then use the admin console.
-    const users = await (await fetch(`${base}/api/admin/users`, { headers: { "x-fleet-admin": OPERATOR_SECRET } })).json();
+    const users = AdminUsers.parse(await (await fetch(`${base}/api/admin/users`, { headers: { "x-fleet-admin": OPERATOR_SECRET } })).json());
     const adaId = users.users.find((u) => u.display_name === "Ada").id;
     await fetch(`${base}/api/admin/users/${adaId}`, { method: "PATCH", headers: { "x-fleet-admin": OPERATOR_SECRET, "content-type": "application/json" }, body: JSON.stringify({ role: "admin" }) });
     await page.goto("/login");
