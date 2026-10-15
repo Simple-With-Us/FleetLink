@@ -49,6 +49,6 @@
     "SHARE_HOSTS": "fleetlink.online,fleetlink.app",
     "DEFAULT_SHARE_HOST": "fleetlink.online"
     // SENTRY_DSN is a Worker secret (`wrangler secret put SENTRY_DSN`), never a var.
-    // SENTRY_RELEASE is set at deploy time from the git SHA by scripts/deploy.mjs.
+    // SENTRY_RELEASE is set at deploy time from the git SHA by scripts/deploy.sh.
   }
 }
