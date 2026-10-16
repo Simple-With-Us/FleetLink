@@ -225,7 +225,7 @@ INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at)
 VALUES ('${AGENT_TEAM_ID}', '${OPERATOR_USER_ID}', 'owner', CAST(strftime('%s', 'now') AS INTEGER));
 `;
 
-// Safety valve: hourly traffic counters, and indexes for the daily counts.
+// Safety valve: five-minute traffic counters, and indexes for the daily counts.
 const SAFETY_VALVE = `
 CREATE TABLE valve_usage (
   bucket INTEGER PRIMARY KEY,

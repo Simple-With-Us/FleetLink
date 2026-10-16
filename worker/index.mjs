@@ -175,16 +175,18 @@ export async function handleRequest(request, env, exec, deps = {}) {
   }
 
   await ensureSchema(env.DB);
+  recordUsage(env, exec, { requests: 1 });
   const settings = await loadSettings(env);
   const shareOrigin = `https://${settings.default_share_host}`;
   const { subdomain } = shareHostMatch(url.hostname, settings.share_hosts);
 
   if (path === "/mcp" || path === "/mcp/") {
     recordWorkerSpan(request, "mcp", path);
-    return handleMcp(request, env, shareOrigin);
+    const wait = rateLimit(request, "mcp", settings.rate_mcp_per_ip_minute);
+    if (wait) return json({ error: "Too many requests.  Slow down and try again shortly.", retry_after_seconds: wait }, 429, { "Retry-After": String(wait) });
+    return handleMcp(request, env, shareOrigin, exec);
   }
 
-  recordUsage(env, exec, { requests: 1 });
   const ctx = requestContext(request, env, exec, deps);
   const limited = floodCheck(request, path, subdomain, settings);
   if (limited) return limited;

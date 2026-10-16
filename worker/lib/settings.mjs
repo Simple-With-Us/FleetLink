@@ -93,6 +93,7 @@ function rateFields() {
   const defs = {
     rate_download_per_ip_minute: ["Rate limit: downloads per client per minute", "Requests for shared files from one client address.  0 turns it off.", "RATE_DOWNLOAD_PER_IP_MINUTE", 120],
     rate_auth_per_ip_minute: ["Rate limit: sign-in and sign-up per client per minute", "Requests to /api/auth from one client address.  0 turns it off.", "RATE_AUTH_PER_IP_MINUTE", 20],
+    rate_mcp_per_ip_minute: ["Rate limit: MCP calls per client per minute", "Requests to /mcp from one client address.  0 turns it off.", "RATE_MCP_PER_IP_MINUTE", 120],
     rate_upload_per_ip_minute: ["Rate limit: uploads per client per minute", "Raw file writes from one client address.  0 turns it off.", "RATE_UPLOAD_PER_IP_MINUTE", 60]
   };
   return build(defs, 1_000_000);

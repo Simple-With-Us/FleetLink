@@ -12,6 +12,7 @@
  * cost no database calls, and they are per isolate: they blunt a flood from one
  * client, they do not replace an edge rate-limit rule.
  */
+import { z } from "zod";
 import { audit } from "./audit.mjs";
 import { first, getMeta, now, run, setMeta } from "./db.mjs";
 import { HttpError } from "./http.mjs";
@@ -21,7 +22,9 @@ export const VALVE_TZ = "America/Chicago";
 const STATE_KEY = "valve_state";
 const METRICS_CACHE_MS = 30_000;
 const FLUSH_MS = 10_000;
+const BUCKET = 300;
 const HOUR = 3600;
+const DAY = 86400;
 
 export const TRIPWIRES = {
   new_users_per_day: { metric: "new_users_today", threshold: "valve_new_users_per_day", label: "New users today", pauses: "intake" },
@@ -67,7 +70,7 @@ export async function flushUsage(env, ts = now()) {
       env.DB,
       `INSERT INTO valve_usage (bucket, bytes_served, requests) VALUES (?, ?, ?)
        ON CONFLICT(bucket) DO UPDATE SET bytes_served = bytes_served + excluded.bytes_served, requests = requests + excluded.requests`,
-      ts - (ts % HOUR), bytes, requests
+      ts - (ts % BUCKET), bytes, requests
     );
   } catch {
     b.bytes += bytes;
@@ -83,7 +86,7 @@ export function recordUsage(env, exec, { bytes = 0, requests = 1 } = {}) {
   b.requests += requests;
   if (Date.now() - b.last < FLUSH_MS) return;
   b.last = Date.now();
-  const job = flushUsage(env).then(() => evaluateValve(env)).catch(() => {});
+  const job = flushUsage(env).then(() => evaluateValve(env, { fresh: true })).catch(() => {});
   if (exec?.waitUntil) exec.waitUntil(job);
 }
 
@@ -105,7 +108,7 @@ export async function readMetrics(env, { fresh = false, ts = now() } = {}) {
       `SELECT COALESCE(SUM(bytes_served), 0) AS bytes,
               COALESCE(SUM(CASE WHEN bucket >= ? THEN requests ELSE 0 END), 0) AS reqs
          FROM valve_usage WHERE bucket >= ?`,
-      ts - (ts % HOUR) - HOUR, ts - (ts % HOUR) - 23 * HOUR
+      ts - HOUR - ((ts - HOUR) % BUCKET), ts - DAY - ((ts - DAY) % BUCKET)
     )
   ]);
   const values = {
@@ -123,16 +126,34 @@ export async function readMetrics(env, { fresh = false, ts = now() } = {}) {
 
 const stateCache = new WeakMap();
 
+const Reason = z.object({
+  tripwire: z.string(), label: z.string().optional(), value: z.number(), threshold: z.number(), pauses: z.enum(["intake", "traffic"])
+});
+const State = z.object({
+  tripped: z.boolean(), tripped_at: z.number().optional(), reset_at: z.number().optional(), reasons: z.array(Reason).optional()
+});
+
+/** A stored state that does not parse or fit the shape fails closed: tripped, until an admin resets it. */
+export function parseState(raw) {
+  try {
+    const parsed = State.safeParse(JSON.parse(raw));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Falls through to the closed state.
+  }
+  return {
+    tripped: true,
+    tripped_at: now(),
+    reasons: [{ tripwire: "state_unreadable", label: "Stored valve state is unreadable", value: 1, threshold: 0, pauses: "intake" }]
+  };
+}
+
 export async function readState(env, { fresh = false } = {}) {
   const hit = stateCache.get(env.DB);
   if (!fresh && hit && Date.now() - hit.at < 5_000) return hit.value;
   let value = { tripped: false };
-  try {
-    const raw = await getMeta(env.DB, STATE_KEY);
-    if (raw) value = JSON.parse(raw);
-  } catch {
-    value = { tripped: false };
-  }
+  const raw = await getMeta(env.DB, STATE_KEY);
+  if (raw) value = parseState(raw);
   stateCache.set(env.DB, { at: Date.now(), value });
   return value;
 }
@@ -238,6 +259,11 @@ export function rateLimit(request, kind, limit, at = Date.now()) {
   }
   entry.n += 1;
   return entry.n > limit ? Math.max(1, Math.ceil(((slot + 1) * WINDOW_MS - at) / 1000)) : 0;
+}
+
+/** Drop usage buckets older than the longest window. */
+export async function pruneUsage(env, ts = now()) {
+  return run(env.DB, "DELETE FROM valve_usage WHERE bucket < ?", ts - 2 * DAY);
 }
 
 export function resetRateLimits() {

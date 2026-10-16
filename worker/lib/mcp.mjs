@@ -13,6 +13,7 @@ import {
   makePersonal, publicShare, purgeShare, putShareFile, renewShare, shareFiles, shareToTeam, updateShare
 } from "./shares.mjs";
 import { getObject } from "./storage.mjs";
+import { assertValveOpen, recordUsage } from "./valve.mjs";
 import { listTeams } from "./teams.mjs";
 import { createUploadGrant, UPLOAD_TTL_MAX_SECONDS } from "./uploads.mjs";
 import { accountSummary } from "./users.mjs";
@@ -456,9 +457,16 @@ async function toolReadFile(data, ctx) {
   if (row.size > cap) {
     return toolResult(`That file is ${row.size} bytes, over the ${cap}-byte read limit.  Fetch it from its link instead: ${ctx.origin}/${share.slug}/${path.split("/").map(encodeURIComponent).join("/")}`, true);
   }
+  try {
+    await assertValveOpen(ctx.env, "download", ctx.settings);
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 503) return toolResult(err.message, true);
+    throw err;
+  }
   const object = await getObject(ctx.env, row.r2_key);
   if (!object) return toolResult("File not found.", true);
   const bytes = new Uint8Array(await object.arrayBuffer());
+  recordUsage(ctx.env, ctx.exec, { bytes: bytes.byteLength, requests: 0 });
   const meta = { slug: share.slug, path, size: bytes.byteLength, content_type: row.content_type };
   if (textual) return toolResult({ ...meta, encoding: "utf-8", text: new TextDecoder().decode(bytes) });
   let binary = "";
@@ -607,7 +615,7 @@ async function handleRpc(message, ctx) {
   return rpcError(id, -32601, "Method not found");
 }
 
-export async function handleMcp(request, env, origin) {
+export async function handleMcp(request, env, origin, exec) {
   if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405, { allow: "POST" });
   let principal;
   try {
@@ -634,7 +642,7 @@ export async function handleMcp(request, env, origin) {
   const parsed = McpRequestSchema.safeParse(raw);
   if (!parsed.success) return rpcError(null, -32600, "Invalid request", 400);
   try {
-    return await handleRpc(parsed.data, { request, env, principal, origin, settings: await loadSettings(env) });
+    return await handleRpc(parsed.data, { request, env, principal, origin, exec, settings: await loadSettings(env) });
   } catch {
     return rpcError(null, -32603, "Internal error", 500);
   }

@@ -20,6 +20,7 @@ export async function makeEnv(extra = {}) {
     RATE_DOWNLOAD_PER_IP_MINUTE: "0",
     RATE_AUTH_PER_IP_MINUTE: "0",
     RATE_UPLOAD_PER_IP_MINUTE: "0",
+    RATE_MCP_PER_IP_MINUTE: "0",
     ...extra
   };
 }

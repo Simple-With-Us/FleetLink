@@ -134,3 +134,59 @@ test("per-client rate limits answer 429 with Retry-After on downloads and auth",
   assert.equal(auth[9], 429);
   assert.notEqual(auth[7], 429);
 });
+
+async function mcpTool(env, auth, name, args = {}, headers = {}) {
+  const res = await callJson(env, "POST", "/mcp", { auth, headers, json: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } });
+  return res;
+}
+
+test("MCP read_file bytes are metered, count toward bandwidth, and pause when the valve trips", async () => {
+  const { env, admin } = await setup({ VALVE_BANDWIDTH_BYTES_24H: "20" });
+  assert.equal(await share(env, admin, "m", "0123456789"), 201);
+  for (let i = 0; i < 3; i++) {
+    const res = await mcpTool(env, admin, "fleetlink_read_file", { slug: "m", path: "a.txt" });
+    assert.equal(res.data.result.isError, undefined);
+  }
+  await flushUsage(env);
+  assert.equal((await valve(env, admin)).tripwires.find((t) => t.key === "bandwidth_24h").value, 30);
+  await sweep(env);
+  assert.equal((await valve(env, admin)).tripped, true);
+  const paused = await mcpTool(env, admin, "fleetlink_read_file", { slug: "m", path: "a.txt" });
+  assert.equal(paused.data.result.isError, true);
+  assert.match(paused.data.result.content[0].text, /paused/);
+});
+
+test("the MCP route is rate limited per client and counts toward the request tripwire", async () => {
+  const { env, admin } = await setup({ RATE_MCP_PER_IP_MINUTE: "30", VALVE_REQUESTS_PER_HOUR: "5" });
+  resetRateLimits();
+  const codes = [];
+  for (let i = 0; i < 33; i++) codes.push((await mcpTool(env, admin, "fleetlink_whoami", {}, { "cf-connecting-ip": "192.0.2.7" })).status);
+  assert.equal(codes[29], 200);
+  assert.equal(codes[32], 429);
+  await flushUsage(env);
+  await sweep(env);
+  assert.equal((await valve(env, admin)).reasons[0]?.tripwire, "requests_1h");
+});
+
+test("the request tripwire looks at the last hour only, not the hour before it", async () => {
+  const { env, admin } = await setup({ VALVE_REQUESTS_PER_HOUR: "100" });
+  const ts = Math.floor(Date.now() / 1000);
+  const slot = (s) => s - (s % 300);
+  await env.DB.prepare("INSERT INTO valve_usage (bucket, bytes_served, requests) VALUES (?, 0, 90), (?, 0, 90)").bind(slot(ts - 4000), slot(ts - 3000)).run();
+  const seen = (await valve(env, admin)).tripwires.find((t) => t.key === "requests_1h").value;
+  assert.ok(seen >= 90 && seen < 100, `counted ${seen}`);
+  await sweep(env);
+  assert.equal((await valve(env, admin)).tripped, false);
+});
+
+test("a stored valve state that does not parse or fit the shape fails closed", async () => {
+  const { env, admin } = await setup();
+  for (const bad of ["{not json", '{"tripped":"yes"}', '{"tripped":false,"reasons":"x"}', "[]"]) {
+    await env.DB.prepare("INSERT INTO meta (key, value) VALUES ('valve_state', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(bad).run();
+    const v = (await callJson(env, "GET", "/api/admin/valve", { auth: admin })).data;
+    assert.equal(v.tripped, true, bad);
+    assert.equal(v.reasons[0].tripwire, "state_unreadable");
+  }
+  await callJson(env, "POST", "/api/admin/valve/reset", { auth: admin });
+  assert.equal((await valve(env, admin)).tripped, false);
+});
