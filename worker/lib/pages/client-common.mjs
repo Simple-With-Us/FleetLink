@@ -12,6 +12,14 @@ export const APP_JS = String.raw`
     document.querySelectorAll("video[data-intro]").forEach(function (v) { v.removeAttribute("autoplay"); v.pause(); });
   }
 
+  // Scrolled past the hero, the public top bar slims to the wordmark plus Sign In.
+  var topBar = document.querySelector("header.top.is-public");
+  if (topBar) {
+    var syncTopBar = function () { topBar.classList.toggle("is-scrolled", window.scrollY > 40); };
+    window.addEventListener("scroll", syncTopBar, { passive: true });
+    syncTopBar();
+  }
+
   FL.h = function (tag, attrs) {
     var el = document.createElement(tag);
     if (attrs) {

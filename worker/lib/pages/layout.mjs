@@ -1,5 +1,6 @@
 import { escapeHtml } from "../http.mjs";
 import { ASSET_VERSION } from "./assets.mjs";
+import { BRAND_FILES } from "./brand-data.mjs";
 
 export function appClipMeta(env) {
   const bundle = String(env?.APPLE_CLIP_BUNDLE_ID || (env?.APPLE_BUNDLE_ID ? `${env.APPLE_BUNDLE_ID}.Clip` : "online.fleetlink.ios.Clip")).trim();
@@ -60,7 +61,7 @@ ${head}
 </head>
 <body class="${escapeHtml(bodyClass)}">
 <a class="skip" href="#main">Skip to content</a>
-<header class="top"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
+<header class="top${principal ? "" : " is-public"}"><div class="bar"><a class="brand" href="/">${logoImg(64)}<span class="brand-text">FleetLink</span>${BRAND_FILES["fleetlink-wordmark.png"] ? `<img class="brand-wordmark" src="/assets/fleetlink-wordmark.png?v=${ASSET_VERSION}" alt="FleetLink">` : ""}</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
 <main id="main"${fullBleed ? "" : ' class="wrap"'}>${body}</main>
 <footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : '<a href="/login">Sign In</a><a href="/login#signup">Create Account</a>'}<a href="/#features">Features</a><a href="/agents">For Agents</a><a href="/instructions">How It Works</a><a href="/privacy">Privacy</a><a href="mailto:support@fleetlink.online">Support</a></nav></div></footer>
 ${scriptTags}
