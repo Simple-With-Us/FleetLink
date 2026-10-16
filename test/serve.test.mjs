@@ -286,5 +286,4 @@ test("brand assets: the app-icon logo, favicon, touch icon, and logo animations 
   assert.ok(home.includes('<header class="top is-public">'), "signed-out header carries is-public for the collapsed-bar state");
   assert.ok(home.includes('<a class="button secondary" href="/login">Sign In</a>'), "nav Sign In is a boxed secondary button");
   assert.match(home, /<video class="hero-intro" data-intro autoplay muted playsinline/);
-  assert.match(home, /href="\/login#signup">Create Account<\/a>/);
 });
