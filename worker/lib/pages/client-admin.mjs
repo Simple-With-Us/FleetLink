@@ -44,7 +44,7 @@ export const ADMIN_JS = String.raw`
     var badges = [h("span", { class: "pill" + (user.role === "admin" ? "" : " gray"), text: user.role })];
     if (user.status === "disabled") badges.push(h("span", { class: "pill red", text: "disabled" }));
     if (user.is_system) badges.push(h("span", { class: "pill amber", text: "system" }));
-    if (user.kind === "agent") badges.push(h("span", { class: "pill green", text: "agent" }));
+    if (user.kind === "agent") badges.push(h("span", { class: "pill green", text: "bot" }));
     var actions = h("div", { class: "actions" });
     if (!user.is_system && user.id !== selfId) {
       actions.append(h("button", { type: "button", class: "small secondary", text: user.role === "admin" ? "Make User" : "Make Admin", onclick: function () {
@@ -180,7 +180,21 @@ export const ADMIN_JS = String.raw`
   }
 
   // Audit
+  async function loadFleet() {
+    var fleet = await FL.api("GET", "/api/admin/fleet");
+    var line = document.getElementById("fleet-owner");
+    line.textContent = (fleet.owner ? "Fleet owner: " + fleet.owner.display_name + "." : "No fleet owner yet.") +
+      "  " + fleet.bots + " bots, " + fleet.unmanaged + " without a manager.";
+    var actions = document.getElementById("fleet-actions");
+    actions.replaceChildren();
+    if (!fleet.owner || fleet.owner.id !== selfId) actions.append(h("button", { type: "button", class: "small secondary", text: "Make Me The Fleet Owner", onclick: async function () {
+      if (!FL.confirm("Put every fleet bot under your account and make you the Fleet team's owner?")) return;
+      try { await FL.api("POST", "/api/admin/fleet/claim", {}); FL.toast("The fleet's bots are under your account now."); loadFleet(); loadTeams(); } catch (err) { FL.fail(err); }
+    } }));
+  }
+
   async function loadTeams() {
+    loadFleet().catch(FL.fail);
     var data = await FL.api("GET", "/api/admin/teams");
     var body = document.getElementById("team-rows");
     body.replaceChildren();

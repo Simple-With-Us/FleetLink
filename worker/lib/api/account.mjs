@@ -1,7 +1,8 @@
 /** Routes for a person's own account: passkeys, sessions, profile, tokens, and teams. */
 import { z } from "zod";
 import { audit } from "../audit.mjs";
-import { now, run } from "../db.mjs";
+import { first, now, run } from "../db.mjs";
+import { ensureFleetOwner } from "../fleet.mjs";
 import { badRequest, cookie, json, parseWith, readBody, redirect, wantsJson } from "../http.mjs";
 import {
   addPasskeyOptions, addPasskeyVerify, listPasskeys, loginOptions, loginVerify,
@@ -10,7 +11,7 @@ import {
 import { clearSessionCookieHeader, deleteSessionByToken, listSessions, revokeOtherSessions, revokeSession, SESSION_COOKIE } from "../sessions.mjs";
 import { addMember, createTeam, deleteTeam, getTeam, listTeams, removeMember, renameTeam, updateMember } from "../teams.mjs";
 import { createToken, listTokens, revokeToken } from "../tokens.mjs";
-import { accountSummary, assertEmailFree, cleanDisplayName, cleanEmail, closeAccount } from "../users.mjs";
+import { accountSummary, assertEmailFree, cleanDisplayName, cleanEmail, closeAccount, effectiveQuotas } from "../users.mjs";
 
 const UpdateMeBody = z.object({
   display_name: z.string().max(200).optional(),
@@ -20,8 +21,18 @@ const UpdateMeBody = z.object({
 const DeleteMeBody = z.object({ confirm: z.literal("delete my account") }).strict();
 
 async function principalSummary(ctx, principal) {
+  const ownerId = await ensureFleetOwner(ctx.env);
   const summary = await accountSummary(ctx.env, principal.user, await ctx.settings());
+  if (principal.user.kind !== "agent") {
+    const bots = await first(ctx.env.DB, "SELECT COUNT(*) AS n FROM users WHERE kind = 'agent' AND manager_id = ? AND status != 'deleted'", principal.user.id);
+    summary.bots = { count: Number(bots?.n ?? 0), fleet_owner: ownerId === principal.user.id };
+  }
   summary.auth = { kind: principal.kind };
+  // A token that follows its manager reports the manager's current quotas.
+  if (principal.limitsUser) {
+    summary.quotas = effectiveQuotas(principal.limitsUser, await ctx.settings());
+    summary.auth.limits_from = "manager";
+  }
   if (principal.token) summary.auth.token = { id: principal.token.id, name: principal.token.name, team_id: principal.token.team_id };
   return summary;
 }

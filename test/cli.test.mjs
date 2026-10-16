@@ -202,3 +202,63 @@ test("share, unshare, and upload-url move a share between personal and team and 
     await f.done();
   }
 });
+
+test("cat, add, rm-file, update, tools and tool give the CLI everything the MCP server has", async () => {
+  const f = await fixture();
+  try {
+    const env = { ...f.base, FLEETLINK_TOKEN: f.adaToken };
+    assert.equal((await run(["notes.md", "--slug", "cli-full"], { cwd: f.work, env })).status, 0);
+    const cat = await run(["cat", "cli-full", "notes.md"], { env });
+    assert.equal(cat.stdout, "# Notes\n");
+    writeFileSync(join(f.work, "pic.bin"), Buffer.from([0, 1, 2, 255]));
+    const added = await run(["add", "cli-full", "pic.bin", "--path", "img/pic.bin"], { cwd: f.work, env });
+    assert.equal(added.status, 0, added.stderr);
+    const saved = join(f.home, "out.bin");
+    assert.equal((await run(["cat", "cli-full", "img/pic.bin", "-o", saved], { env })).status, 0);
+    assert.deepEqual([...readFileSync(saved)], [0, 1, 2, 255]);
+    assert.equal((await run(["rm-file", "cli-full", "img/pic.bin"], { env })).status, 0);
+    const updated = await run(["update", "cli-full", "--title", "Full", "--rename", "cli-full-2"], { env });
+    assert.equal(updated.status, 0, updated.stderr);
+    assert.match(updated.stdout, /Updated cli-full-2/);
+    assert.equal((await run(["update", "cli-full-2"], { env })).status, 1);
+
+    const tools = await run(["tools"], { env });
+    assert.match(tools.stdout, /fleetlink_upload_url/);
+    const called = await run(["tool", "fleetlink_get_share", "--arg", "slug=cli-full-2"], { env });
+    assert.equal(called.status, 0, called.stderr);
+    assert.equal(JSON.parse(called.stdout).share.title, "Full");
+    const refused = await run(["tool", "fleetlink_get_share", "--args-json", "{\"slug\":\"nope-nope\"}"], { env });
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /Share not found/);
+  } finally {
+    await f.done();
+  }
+});
+
+test("bots and admin fleet commands", async () => {
+  const f = await fixture();
+  try {
+    await callJson(f.env, "PATCH", `/api/admin/users/${f.ada.user.id}`, { auth: { operator: true }, json: { role: "admin" } });
+    // Bot management needs a person (passkey session or operator), not a token.
+    const op = { ...f.base, FLEET_ADMIN_SECRET: "test-operator-secret-value" };
+    const fleet = await run(["admin", "fleet"], { env: op });
+    assert.equal(fleet.status, 0, fleet.stderr);
+    assert.match(fleet.stdout, /Fleet owner: none\.  37 bots, 37 without a manager\./);
+    const teams = await run(["admin", "teams"], { env: op });
+    assert.match(teams.stdout, /team_fleet\s+Fleet/);
+    const added = await run(["bots", "add", "QA-BOT", "--name", "QA"], { env: op });
+    assert.equal(added.status, 0, added.stderr);
+    assert.match(added.stdout, /Added QA \(usr_agent_qa_bot\)/);
+    const listed = await run(["bots", "list"], { env: op });
+    assert.match(listed.stdout, /usr_agent_qa_bot\s+QA-BOT\s+active/);
+    const token = await run(["bots", "token", "QA-BOT", "--name", "ci", "--follow-my-limits"], { env: op });
+    assert.match(token.stdout, /It follows your limits as they change\./);
+    assert.match(token.stdout, /fla_[0-9a-f]{64}/);
+    const asBot = await run(["whoami", "--json"], { env: { ...f.base, FLEETLINK_TOKEN: /fla_[0-9a-f]{64}/.exec(token.stdout)[0] } });
+    assert.equal(JSON.parse(asBot.stdout).user.id, "usr_agent_qa_bot");
+    assert.match((await run(["bots", "tokens", "QA-BOT"], { env: op })).stdout, /ci .*follows your limits/);
+    assert.match((await run(["bots", "disable", "QA-BOT"], { env: op })).stdout, /disabled/);
+  } finally {
+    await f.done();
+  }
+});

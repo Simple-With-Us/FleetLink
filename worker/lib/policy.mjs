@@ -1,3 +1,4 @@
+import { first } from "./db.mjs";
 import { forbidden, HttpError, notFound } from "./http.mjs";
 import { membership } from "./teams.mjs";
 
@@ -13,6 +14,9 @@ const LEVELS = ["view", "edit", "manage", "owner"];
  *           level, and delete the share
  *   owner:  also choose which team sees it, or make it personal again
  *
+ * A bot's manager (users.manager_id, fleet.mjs) has the owner's rights on
+ * everything the bot owns, personal shares included.
+ *
  * Sharing to a team never moves ownership.  Team owners and admins manage a
  * team share; members view it, and edit it when the share's team_access is
  * 'edit'.  Opening the public link is not covered here; links are public.
@@ -21,6 +25,8 @@ export async function shareAccess(env, principal, share) {
   if (!principal || !share) return NONE;
   if (principal.isAdmin) return { view: true, edit: true, manage: true, owner: true, role: "admin" };
   if (share.owner_id === principal.user.id) return { view: true, edit: true, manage: true, owner: true, role: "owner" };
+  const owner = await first(env.DB, "SELECT manager_id FROM users WHERE id = ?", share.owner_id);
+  if (owner?.manager_id && owner.manager_id === principal.user.id) return { view: true, edit: true, manage: true, owner: true, role: "manager" };
   if (share.team_id) {
     const member = await membership(env, share.team_id, principal.user.id);
     if (member) {
