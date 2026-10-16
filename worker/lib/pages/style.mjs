@@ -59,7 +59,7 @@ pre { background: var(--navy); color: #dbe7ff; padding: 0.9rem 1rem; border-radi
 .top nav a.button:hover { color: #fff; background: var(--brand-dark); }
 .top nav a.button.secondary { background: #fff; color: var(--ink); border-color: #c7d2e3; }
 .top nav a.button.secondary:hover { background: var(--soft); color: var(--ink); border-color: #c7d2e3; }
-.top .brand-wordmark { display: none; height: 28px; width: auto; }
+.top .brand-wordmark { display: none; height: 28px; width: auto; border-radius: 0; box-shadow: none; }
 .top.is-public.is-scrolled nav a:not(.button) { display: none; }
 .top.is-public.is-scrolled .brand:has(.brand-wordmark) img:not(.brand-wordmark), .top.is-public.is-scrolled .brand:has(.brand-wordmark) .brand-text { display: none; }
 .top.is-public.is-scrolled .brand:has(.brand-wordmark) .brand-wordmark { display: inline-block; }
