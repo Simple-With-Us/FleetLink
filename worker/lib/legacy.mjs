@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { newId } from "./bytes.mjs";
 import { first, getMeta, now, run, setMeta } from "./db.mjs";
+import { fleetOwner } from "./fleet.mjs";
 import { OPERATOR_USER_ID } from "./schema.mjs";
 import { cleanPath, guessContentType, RESERVED_SLUGS } from "./shares.mjs";
 import { bucket, deleteKeys, STORAGE_PREFIX } from "./storage.mjs";
@@ -114,7 +115,7 @@ async function adopt(env, rawSlug, objects, prefix) {
          file_count, total_bytes, renewals, created_at, updated_at, expires_at)
        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 'legacy', ?, ?, ?, ?, ?, ?)`
     ).bind(
-      shareId, slug, OPERATOR_USER_ID, target ? "link" : "files", target, meta.og_title || null, meta.og_description || null,
+      shareId, slug, (await fleetOwner(env))?.id ?? OPERATOR_USER_ID, target ? "link" : "files", target, meta.og_title || null, meta.og_description || null,
       meta.password_hash || null, files.length, files.reduce((n, f) => n + f.size, 0),
       Math.max(0, parseInt(meta.renewals_count || "0", 10) || 0), ts, ts, expiresAt
     )

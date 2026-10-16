@@ -5,6 +5,7 @@ import { all, first, now, run } from "./db.mjs";
 import { badRequest, forbidden, HttpError, iso, notFound, parseWith } from "./http.mjs";
 import { REFUSALS, requireShareAccess, shareAccess, slugTaken } from "./policy.mjs";
 import { deleteKeys, objectKey, putObject } from "./storage.mjs";
+import { fleetOwner } from "./fleet.mjs";
 import { FLEET_TEAM_ID } from "./fleet-roster.mjs";
 import { membership, requireTeamRole, teamRoles } from "./teams.mjs";
 import { assertTokenTeam, requireLinksAllowed } from "./tokens.mjs";
@@ -201,10 +202,12 @@ export async function createShare(env, principal, input) {
   const expiresAt = resolveExpiry(principal, kind, input.days, ts);
   const password = cleanPassword(input.password);
   const teamId = await resolveTeam(env, principal, await defaultTeam(env, principal, input));
+  // The operator credential is the fleet owner's break-glass identity, so what it makes is theirs.
+  const ownerId = principal.kind === "operator" ? ((await fleetOwner(env))?.id ?? principal.user.id) : principal.user.id;
   const row = {
     id: newId("shr", 10),
     slug: requested || randomSlug(),
-    owner_id: principal.user.id,
+    owner_id: ownerId,
     team_id: teamId,
     team_access: input.team_access === "view" ? "view" : "edit",
     kind,
@@ -298,7 +301,7 @@ export async function assertCanStore(env, principal, share, { path, size, settin
   const quota = effectiveQuotas(quotaUser, settings).storage_bytes;
   if (quota != null) {
     const usage = await userUsage(env.DB, owner.id);
-    if (usage.bytes - replacing + size > quota) {
+    if (usage.quota_bytes - replacing + size > quota) {
       throw new HttpError(413, `That would pass the ${formatBytes(quota)} storage quota for this account.  Delete or let some shares expire first.`);
     }
   }
