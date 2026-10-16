@@ -27,7 +27,7 @@ function initials(name) {
 function navLinks(principal, active) {
   const link = (href, label, key) => `<a href="${href}"${active === key ? ' aria-current="page"' : ""}>${label}</a>`;
   if (!principal) {
-    return `${link("/#features", "Features", "features")}${link("/agents", "For Agents", "agents")}${link("/instructions", "How It Works", "instructions")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a><a class="button" href="/login#signup">Create Account</a>`;
+    return `${link("/#features", "Features", "features")}${link("/agents", "For Agents", "agents")}${link("/instructions", "How It Works", "instructions")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a>`;
   }
   const items = [link("/dashboard", "Dashboard", "dashboard")];
   if (principal.isAdmin) items.push(link("/admin", "Admin", "admin"));
