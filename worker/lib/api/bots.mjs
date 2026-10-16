@@ -35,11 +35,25 @@ const AgentTokenBody = z.object({
   limits_from: z.enum(["own", "manager"]).optional()
 }).strict();
 
-async function botView(env, row) {
+/**
+ * Usage and token counts for a set of bots, in two grouped queries whatever
+ * the number of bots (not two per bot).
+ */
+async function botStats(env, ids) {
+  if (!ids.length) return { usage: new Map(), tokens: new Map() };
+  const marks = ids.map(() => "?").join(", ");
   const [usage, tokens] = await Promise.all([
-    first(env.DB, "SELECT COUNT(*) AS shares, COALESCE(SUM(total_bytes), 0) AS bytes FROM shares WHERE owner_id = ? AND (expires_at IS NULL OR expires_at > ?)", row.id, now()),
-    first(env.DB, "SELECT COUNT(*) AS n, MAX(last_used_at) AS last_used FROM api_tokens WHERE user_id = ?", row.id)
+    all(env.DB, `SELECT owner_id, COUNT(*) AS shares, COALESCE(SUM(total_bytes), 0) AS bytes FROM shares
+                  WHERE owner_id IN (${marks}) AND (expires_at IS NULL OR expires_at > ?) GROUP BY owner_id`, ...ids, now()),
+    all(env.DB, `SELECT user_id, COUNT(*) AS n, MAX(last_used_at) AS last_used FROM api_tokens WHERE user_id IN (${marks}) GROUP BY user_id`, ...ids)
   ]);
+  return { usage: new Map(usage.map((r) => [r.owner_id, r])), tokens: new Map(tokens.map((r) => [r.user_id, r])) };
+}
+
+async function botView(env, row, stats = null) {
+  const { usage: usageMap, tokens: tokenMap } = stats ?? (await botStats(env, [row.id]));
+  const usage = usageMap.get(row.id);
+  const tokens = tokenMap.get(row.id);
   return {
     id: row.id,
     seat: row.agent_seat,
@@ -66,7 +80,8 @@ export function botRoutes(router) {
     await ensureFleetOwner(ctx.env);
     const rows = await all(ctx.env.DB, "SELECT * FROM users WHERE kind = 'agent' AND manager_id = ? AND status != 'deleted' ORDER BY agent_seat", principal.user.id);
     const owner = await fleetOwner(ctx.env);
-    return json({ bots: await Promise.all(rows.map((row) => botView(ctx.env, row))), fleet_owner: owner?.id === principal.user.id, fleet_team_id: FLEET_TEAM_ID });
+    const stats = await botStats(ctx.env, rows.map((row) => row.id));
+    return json({ bots: await Promise.all(rows.map((row) => botView(ctx.env, row, stats))), fleet_owner: owner?.id === principal.user.id, fleet_team_id: FLEET_TEAM_ID });
   });
 
   router.on("POST", "/api/bots", async (ctx) => {
