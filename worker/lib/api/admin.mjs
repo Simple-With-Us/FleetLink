@@ -5,6 +5,7 @@ import { all, first, now, run } from "../db.mjs";
 import { badRequest, json, notFound, parseWith, readBody } from "../http.mjs";
 import { createInvite, listInvites, revokeInvite } from "../invites.mjs";
 import { settingsView, updateSettings } from "../settings.mjs";
+import { claimFleet, fleetOwner } from "../fleet.mjs";
 import { sweep } from "../sweep.mjs";
 import { resetValve, valveView } from "../valve.mjs";
 import { listTokens } from "../tokens.mjs";
@@ -163,6 +164,19 @@ export function adminRoutes(router) {
     );
     await audit(ctx.env, principal.user.id, "admin.team.join", team.id);
     return json({ ok: true, team_id: team.id, role: "owner" });
+  });
+
+  // The fleet owner (fleet.mjs):  who it is, and a site admin claiming it.
+  router.on("GET", "/api/admin/fleet", async (ctx) => {
+    await ctx.admin();
+    const owner = await fleetOwner(ctx.env);
+    const bots = await first(ctx.env.DB, "SELECT COUNT(*) AS n, SUM(CASE WHEN manager_id IS NULL THEN 1 ELSE 0 END) AS unmanaged FROM users WHERE kind = 'agent' AND status != 'deleted'");
+    return json({ owner: owner ? publicUser(owner) : null, bots: Number(bots?.n ?? 0), unmanaged: Number(bots?.unmanaged ?? 0) });
+  });
+  router.on("POST", "/api/admin/fleet/claim", async (ctx) => {
+    const principal = await ctx.admin();
+    if (principal.kind !== "session") throw badRequest("Sign in as yourself to take over the fleet's bots.");
+    return json(await claimFleet(ctx.env, principal.user, "admin"));
   });
 
   router.on("GET", "/api/admin/invites", async (ctx) => {

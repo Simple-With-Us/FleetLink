@@ -8,6 +8,7 @@
 import { appleAppSiteAssociation } from "./lib/aasa.mjs";
 import { accountRoutes } from "./lib/api/account.mjs";
 import { adminRoutes } from "./lib/api/admin.mjs";
+import { botRoutes } from "./lib/api/bots.mjs";
 import { rawWrite, shareRoutes } from "./lib/api/shares.mjs";
 import { ensureSchema } from "./lib/db.mjs";
 import { errorResponse, HttpError, json, redirect, text, wantsJson } from "./lib/http.mjs";
@@ -30,6 +31,7 @@ const router = new Router();
 accountRoutes(router);
 shareRoutes(router);
 adminRoutes(router);
+botRoutes(router);
 pageRoutes(router);
 router.on("GET", "/api/auth/token", () => json({ error: "gone" }, 410));
 router.on("POST", "/api/auth", () => json({ error: "Operator secret sign-in was removed.  Sign in with a passkey, or send the operator secret as X-Fleet-Admin." }, 410));

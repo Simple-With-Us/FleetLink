@@ -5,6 +5,7 @@ import { all, first, now, run } from "./db.mjs";
 import { badRequest, forbidden, HttpError, iso, notFound, parseWith } from "./http.mjs";
 import { REFUSALS, requireShareAccess, shareAccess, slugTaken } from "./policy.mjs";
 import { deleteKeys, objectKey, putObject } from "./storage.mjs";
+import { FLEET_TEAM_ID } from "./fleet-roster.mjs";
 import { membership, requireTeamRole, teamRoles } from "./teams.mjs";
 import { assertTokenTeam, requireLinksAllowed } from "./tokens.mjs";
 import { effectiveQuotas, userUsage } from "./users.mjs";
@@ -63,8 +64,14 @@ export function cleanPath(value) {
   return segments.join("/");
 }
 
+/** Site admins and bots work with the admin limits:  bigger files and shares, any lifetime, short names. */
+export function fullLimits(principal) {
+  if (principal?.limitsUser) return principal.limitsUser.role === "admin";
+  return Boolean(principal?.isAdmin || principal?.user?.kind === "agent");
+}
+
 function tier(principal) {
-  return principal.isAdmin ? LIMITS.admin : LIMITS.user;
+  return fullLimits(principal) ? LIMITS.admin : LIMITS.user;
 }
 
 /** Per-file cap after the principal's token narrows it. */
@@ -86,7 +93,7 @@ export function resolveExpiry(principal, kind, days, ts = now()) {
   const tokenCapDays = principal.token?.max_ttl_seconds ? principal.token.max_ttl_seconds / DAY : null;
   const omitted = days == null || String(days).trim() === "";
   if (!omitted && String(days).trim().toLowerCase() === "forever") {
-    if (!principal.isAdmin) throw forbidden("Only admins can make a share that never expires.");
+    if (!fullLimits(principal)) throw forbidden("Only admins can make a share that never expires.");
     if (tokenCapDays) throw forbidden(`This API token is limited to ${tokenCapDays} days.`);
     return null;
   }
@@ -153,8 +160,21 @@ export const CreateShareBody = z.object({
   description: z.string().max(2000).nullable().optional(),
   team_id: z.string().max(64).nullable().optional(),
   team_access: z.enum(["view", "edit"]).optional(),
+  personal: z.union([z.boolean(), z.enum(["true", "false", "1", "0"])]).optional(),
   source: z.enum(["web", "api", "ios", "mcp"]).optional()
 }).passthrough();
+
+/**
+ * A bot's new share lands in the Fleet team with edit access, so the other
+ * bots and the fleet owner can change it, unless it asks for a personal one
+ * or names another team.  People's shares stay personal by default.
+ */
+async function defaultTeam(env, principal, input) {
+  if (input.team_id !== undefined && input.team_id !== "") return input.team_id;
+  if (principal.user.kind !== "agent" || principal.token?.team_id) return null;
+  if ([true, "true", "1"].includes(input.personal)) return null;
+  return (await membership(env, FLEET_TEAM_ID, principal.user.id)) ? FLEET_TEAM_ID : null;
+}
 
 export const TEAM_ACCESS = ["view", "edit"];
 
@@ -177,11 +197,11 @@ export async function createShare(env, principal, input) {
   const kind = input.kind === "link" || input.url || input.target_url ? "link" : "files";
   if (kind === "link") requireLinksAllowed(principal);
   const ts = now();
-  const requested = cleanSlug(input.slug, { isAdmin: principal.isAdmin });
+  const requested = cleanSlug(input.slug, { isAdmin: fullLimits(principal) });
   const targetUrl = kind === "link" ? normalizeTargetUrl(input.url ?? input.target_url) : null;
   const expiresAt = resolveExpiry(principal, kind, input.days, ts);
   const password = cleanPassword(input.password);
-  const teamId = await resolveTeam(env, principal, input.team_id);
+  const teamId = await resolveTeam(env, principal, await defaultTeam(env, principal, input));
   const row = {
     id: newId("shr", 10),
     slug: requested || randomSlug(),
@@ -273,7 +293,10 @@ export async function assertCanStore(env, principal, share, { path, size, settin
     throw new HttpError(413, `A share that never expires holds at most ${FOREVER_MAX_BYTES / MB} MB.  Give it an expiry.`);
   }
   const owner = share.owner_id === principal.user.id ? principal.user : await first(env.DB, "SELECT * FROM users WHERE id = ?", share.owner_id);
-  const quota = effectiveQuotas(owner, settings).storage_bytes;
+  // A token that follows its manager's limits works under the manager's
+  // current storage quota for what it stores in its own bot's shares.
+  const quotaUser = principal.limitsUser && owner.id === principal.user.id ? principal.limitsUser : owner;
+  const quota = effectiveQuotas(quotaUser, settings).storage_bytes;
   if (quota != null) {
     const usage = await userUsage(env.DB, owner.id);
     if (usage.bytes - replacing + size > quota) {
@@ -356,7 +379,7 @@ export async function updateShare(env, principal, slug, body) {
   const args = [];
   const changes = {};
   if (input.slug !== undefined) {
-    const next = cleanSlug(input.slug, { isAdmin: principal.isAdmin });
+    const next = cleanSlug(input.slug, { isAdmin: fullLimits(principal) });
     if (!next) throw badRequest("A share needs a name.");
     if (next !== share.slug) {
       need("manage");
@@ -458,6 +481,7 @@ export async function shareFiles(env, shareId) {
  *   scope "mine": shares they own (the default)
  *   scope "team": shares in team_id, which they must belong to
  *   scope "teams": shares in every team they belong to
+ *   scope "bots": shares owned by bots they manage
  *   scope "all": every share (admins only)
  */
 export async function listShares(env, principal, { scope = "mine", team_id: teamId = null, q = "", limit = 50, before = null } = {}) {
@@ -477,8 +501,11 @@ export async function listShares(env, principal, { scope = "mine", team_id: team
   } else if (scope === "mine") {
     clauses.push("s.owner_id = ?");
     args.push(principal.user.id);
+  } else if (scope === "bots") {
+    clauses.push("u.manager_id = ?");
+    args.push(principal.user.id);
   } else {
-    throw badRequest("scope is mine, team, teams, or all.");
+    throw badRequest("scope is mine, bots, team, teams, or all.");
   }
   const term = String(q || "").trim().toLowerCase().slice(0, 100);
   if (term) {
@@ -494,7 +521,7 @@ export async function listShares(env, principal, { scope = "mine", team_id: team
   const pageSize = Math.min(Math.max(Number(limit) || 50, 1), 200);
   const rows = await all(
     env.DB,
-    `SELECT s.*, u.display_name AS owner_name, t.name AS team_name FROM shares s
+    `SELECT s.*, u.display_name AS owner_name, u.kind AS owner_kind, u.manager_id AS owner_manager_id, t.name AS team_name FROM shares s
        JOIN users u ON u.id = s.owner_id LEFT JOIN teams t ON t.id = s.team_id
       WHERE ${clauses.join(" AND ")} ORDER BY s.created_at DESC, s.id DESC LIMIT ?`,
     ...args,
@@ -503,7 +530,7 @@ export async function listShares(env, principal, { scope = "mine", team_id: team
   const more = rows.length > pageSize;
   const page = rows.slice(0, pageSize);
   const roles = principal.isAdmin ? null : await teamRoles(env, principal.user.id);
-  const manageable = (row) => principal.isAdmin || row.owner_id === principal.user.id || ["owner", "admin"].includes(roles?.get(row.team_id));
+  const manageable = (row) => principal.isAdmin || row.owner_id === principal.user.id || row.owner_manager_id === principal.user.id || ["owner", "admin"].includes(roles?.get(row.team_id));
   const editable = (row) => manageable(row) || (row.team_access === "edit" && roles?.has(row.team_id));
   const last = page[page.length - 1];
   return {
@@ -532,7 +559,7 @@ export function publicShare(share, origin, { canManage = false, canEdit = canMan
     title: share.title ?? null,
     description: share.description ?? null,
     target_url: share.target_url ?? null,
-    owner: { id: share.owner_id, display_name: ownerName ?? share.owner_name ?? null },
+    owner: { id: share.owner_id, display_name: ownerName ?? share.owner_name ?? null, is_bot: share.owner_kind ? share.owner_kind === "agent" : undefined },
     team: share.team_id ? { id: share.team_id, name: teamName ?? share.team_name ?? null, access: share.team_access === "edit" ? "edit" : "view" } : null,
     visibility: share.team_id ? "team" : "personal",
     has_password: Boolean(share.password_hash),

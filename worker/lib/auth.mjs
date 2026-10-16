@@ -4,11 +4,12 @@ import { getUser } from "./users.mjs";
 import { cookie, forbidden, HttpError, unauthorized } from "./http.mjs";
 import { OPERATOR_USER_ID } from "./schema.mjs";
 import { lookupSession, SESSION_COOKIE, SESSION_TOKEN } from "./sessions.mjs";
-import { API_TOKEN, lookupToken } from "./tokens.mjs";
+import { API_TOKEN, lookupToken, tokenLimitsUser } from "./tokens.mjs";
 
 /**
  * A principal is who a request acts as:
- *   { kind: "session" | "token" | "operator" | "agent", user, isAdmin, sessionId?, token?, seat?, viaCookie }
+ *   { kind: "session" | "token" | "operator" | "agent", user, isAdmin, sessionId?, token?, seat?, limitsUser?, viaCookie }
+ * limitsUser, when set, is whose limits apply (a bot token that follows its manager).
  * Every credential resolves to a real user row, including the operator secret,
  * which acts as the built-in operator account.
  */
@@ -37,13 +38,14 @@ async function operatorPrincipal(env) {
 /** The Agent-Sync server acting for one seat (agents.mjs).  Agents are never admins. */
 async function agentPrincipal(env, request) {
   const user = await ensureAgentUser(env, request.headers.get("x-fleet-seat"));
-  return { ...principalFor("agent", user), isAdmin: false, seat: user.display_name.replace(/ \(agent\)$/, "") };
+  return { ...principalFor("agent", user), isAdmin: false, seat: user.agent_seat };
 }
 
 async function fromToken(env, secret) {
   const found = await lookupToken(env, secret);
   if (!found) throw unauthorized("That API token is not valid, has expired, or was revoked.");
-  return principalFor("token", found.user, { token: found.token });
+  const limitsUser = await tokenLimitsUser(env, found.user, found.token);
+  return principalFor("token", found.user, { token: found.token, ...(limitsUser ? { limitsUser } : {}) });
 }
 
 async function fromSession(env, token, viaCookie) {
