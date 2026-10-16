@@ -44,6 +44,7 @@ export const ADMIN_JS = String.raw`
     var badges = [h("span", { class: "pill" + (user.role === "admin" ? "" : " gray"), text: user.role })];
     if (user.status === "disabled") badges.push(h("span", { class: "pill red", text: "disabled" }));
     if (user.is_system) badges.push(h("span", { class: "pill amber", text: "system" }));
+    if (user.kind === "agent") badges.push(h("span", { class: "pill green", text: "agent" }));
     var actions = h("div", { class: "actions" });
     if (!user.is_system && user.id !== selfId) {
       actions.append(h("button", { type: "button", class: "small secondary", text: user.role === "admin" ? "Make User" : "Make Admin", onclick: function () {
@@ -179,6 +180,22 @@ export const ADMIN_JS = String.raw`
   }
 
   // Audit
+  async function loadTeams() {
+    var data = await FL.api("GET", "/api/admin/teams");
+    var body = document.getElementById("team-rows");
+    body.replaceChildren();
+    data.teams.forEach(function (t) {
+      body.append(h("tr", null,
+        h("td", null, h("strong", { text: t.name }), h("div", { class: "small muted mono", text: t.id })),
+        h("td", { text: String(t.members) }),
+        h("td", { text: String(t.shares) }),
+        h("td", null, t.my_role ? h("span", { class: "pill", text: "You: " + t.my_role }) : h("button", { type: "button", class: "small secondary", text: "Join As Owner", onclick: async function () {
+          try { await FL.api("POST", "/api/admin/teams/" + encodeURIComponent(t.id) + "/join", {}); FL.toast("Joined " + t.name + ".\u00a0 Its shares show on your dashboard."); loadTeams(); } catch (err) { FL.fail(err); }
+        } }))));
+    });
+    document.getElementById("team-empty").hidden = data.teams.length > 0;
+  }
+
   async function loadAudit() {
     var data = await FL.api("GET", "/api/admin/audit?limit=100");
     var body = document.getElementById("audit-rows");
@@ -204,7 +221,7 @@ export const ADMIN_JS = String.raw`
   FL.tabs(root, function (name) {
     if (loaded[name]) return;
     loaded[name] = true;
-    var loaders = { people: loadUsers, invites: loadInvites, shares: loadShares, settings: loadSettings, audit: loadAudit };
+    var loaders = { people: loadUsers, invites: loadInvites, teams: loadTeams, shares: loadShares, settings: loadSettings, audit: loadAudit };
     if (loaders[name]) loaders[name]().catch(FL.fail);
   });
   loadStats().catch(FL.fail);

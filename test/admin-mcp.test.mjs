@@ -14,7 +14,9 @@ const ADMIN_ROUTES = [
   ["GET", "/api/admin/settings"],
   ["PUT", "/api/admin/settings", { values: { signup_mode: "open" } }],
   ["GET", "/api/admin/audit"],
-  ["POST", "/api/admin/sweep", {}]
+  ["POST", "/api/admin/sweep", {}],
+  ["GET", "/api/admin/teams"],
+  ["POST", "/api/admin/teams/team_fleet/join", {}]
 ];
 
 test("every admin route is 401 anonymous and 403 for a person or their token", async () => {
@@ -138,8 +140,9 @@ test("MCP: auth, initialize, tools, ownership, and limits", async () => {
   assert.equal(init.data.result.protocolVersion, "2025-06-18");
   const listed = await rpc(env, { token: adaToken }, "tools/list", {});
   assert.deepEqual(listed.data.result.tools.map((t) => t.name).sort(), [
-    "fleetlink_create_link", "fleetlink_create_share", "fleetlink_delete_share", "fleetlink_get_share",
-    "fleetlink_list_shares", "fleetlink_renew_share", "fleetlink_whoami"
+    "fleetlink_add_file", "fleetlink_create_link", "fleetlink_create_share", "fleetlink_delete_file", "fleetlink_delete_share",
+    "fleetlink_get_share", "fleetlink_list_shares", "fleetlink_list_teams", "fleetlink_make_personal", "fleetlink_read_file",
+    "fleetlink_renew_share", "fleetlink_share_to_team", "fleetlink_update_share", "fleetlink_upload_url", "fleetlink_whoami"
   ]);
   const note = await callJson(env, "POST", "/mcp", { auth: { token: adaToken }, json: { jsonrpc: "2.0", method: "notifications/initialized" } });
   assert.equal(note.status, 202);

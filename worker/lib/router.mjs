@@ -88,6 +88,7 @@ export function requestContext(request, env, exec, deps = {}) {
     async person() {
       const principal = await ctx.auth();
       if (principal.kind === "token") throw forbidden("API tokens cannot manage the account.  Sign in with your passkey.");
+      if (principal.kind === "agent") throw forbidden("Agent accounts cannot manage the account.  A person signs in with a passkey to do that.");
       return principal;
     },
     async admin() {

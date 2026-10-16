@@ -1,11 +1,12 @@
 /** Share routes: the JSON API, raw PUT and DELETE on share paths, and the old endpoint names. */
 import { z } from "zod";
 import { badRequest, HttpError, iso, json, parseWith, readBody, text, wantsJson } from "../http.mjs";
-import { requireShareAccess } from "../policy.mjs";
+import { requireShareAccess, shareAccess } from "../policy.mjs";
 import {
   createShare, CreateShareBody, deleteShare, deleteShareFile, getShareBySlug, isExpired, listShares,
   loadShareFor, LIMITS, publicShare, purgeShare, putShareFile, renewShare, shareFiles, updateShare, UpdateShareBody
 } from "../shares.mjs";
+import { createUploadGrant, UploadGrantInput, useUploadGrant } from "../uploads.mjs";
 
 const RenewBody = z.object({ days: z.union([z.number(), z.string().max(20)]).nullable().optional() }).strict();
 const LegacyRenewBody = z.object({ slug: z.string().trim().min(1).max(200), days: z.union([z.number(), z.string().max(20)]).nullable().optional() }).strict();
@@ -20,7 +21,7 @@ async function detail(ctx, principal, share, access) {
   const files = share.kind === "files" ? await shareFiles(ctx.env, share.id) : null;
   const owner = await ctx.env.DB.prepare("SELECT display_name FROM users WHERE id = ?").bind(share.owner_id).first();
   const team = share.team_id ? await ctx.env.DB.prepare("SELECT name FROM teams WHERE id = ?").bind(share.team_id).first() : null;
-  return publicShare(share, origin, { canManage: access.manage, files, ownerName: owner?.display_name, teamName: team?.name });
+  return publicShare(share, origin, { canManage: access.manage, canEdit: access.edit, files, ownerName: owner?.display_name, teamName: team?.name });
 }
 
 function fileParts(form) {
@@ -90,7 +91,7 @@ async function postShares(ctx) {
   if (input.slug && [true, "true", "1"].includes(fields.reuse)) {
     const existing = await getShareBySlug(ctx.env, input.slug);
     if (existing && !isExpired(existing)) {
-      const access = await requireShareAccess(ctx.env, principal, existing, "manage").catch(() => null);
+      const access = await requireShareAccess(ctx.env, principal, existing, "edit").catch(() => null);
       if (access) return json({ share: await detail(ctx, principal, existing, access), reused: true });
     }
   }
@@ -139,7 +140,7 @@ export function shareRoutes(router) {
       before: p.get("before")
     });
     const origin = await ctx.shareOrigin();
-    return json({ shares: rows.map(({ row, canManage }) => publicShare(row, origin, { canManage })), next });
+    return json({ shares: rows.map(({ row, canManage, canEdit }) => publicShare(row, origin, { canManage, canEdit })), next });
   });
   router.on("POST", "/api/shares", postShares);
   router.on("POST", "/api/links", postLink);
@@ -151,27 +152,39 @@ export function shareRoutes(router) {
   router.on("PATCH", "/api/shares/:slug", async (ctx) => {
     const principal = await ctx.auth();
     const share = await updateShare(ctx.env, principal, ctx.params.slug, parseWith(UpdateShareBody, await readBody(ctx.request)));
-    return json({ share: await detail(ctx, principal, share, { manage: true }) });
+    return json({ share: await detail(ctx, principal, share, await shareAccess(ctx.env, principal, share)) });
   });
   router.on("DELETE", "/api/shares/:slug", async (ctx) => json({ ok: true, ...(await deleteShare(ctx.env, await ctx.auth(), ctx.params.slug)) }));
   router.on("POST", "/api/shares/:slug/renew", async (ctx) => {
     const principal = await ctx.auth();
     const { share, unchanged } = await renewShare(ctx.env, principal, ctx.params.slug, parseWith(RenewBody, await readBody(ctx.request)));
-    return json({ share: await detail(ctx, principal, share, { manage: true }), unchanged, max_renewals: (principal.isAdmin ? LIMITS.admin : LIMITS.user).renewals });
+    return json({ share: await detail(ctx, principal, share, await shareAccess(ctx.env, principal, share)), unchanged, max_renewals: (principal.isAdmin ? LIMITS.admin : LIMITS.user).renewals });
   });
   router.on("PUT", "/api/shares/:slug/files/*path", async (ctx) => {
     const principal = await ctx.auth();
-    const { share } = await loadShareFor(ctx.env, principal, ctx.params.slug, "manage");
+    const { share, access } = await loadShareFor(ctx.env, principal, ctx.params.slug, "edit");
     const { stored, share: fresh, origin } = await putFile(ctx, principal, share, ctx.params.path);
-    return json({ file: stored, share: await detail(ctx, principal, fresh, { manage: true }), url: `${origin}/${fresh.slug}/${stored.path.split("/").map(encodeURIComponent).join("/")}` }, 201);
+    return json({ file: stored, share: await detail(ctx, principal, fresh, access), url: `${origin}/${fresh.slug}/${stored.path.split("/").map(encodeURIComponent).join("/")}` }, 201);
   });
   router.on("DELETE", "/api/shares/:slug/files/*path", async (ctx) => {
     const principal = await ctx.auth();
-    const { share } = await loadShareFor(ctx.env, principal, ctx.params.slug, "manage");
+    const { share, access } = await loadShareFor(ctx.env, principal, ctx.params.slug, "edit");
     await deleteShareFile(ctx.env, share, ctx.params.path);
     const fresh = await getShareBySlug(ctx.env, share.slug);
-    return json({ share: await detail(ctx, principal, fresh, { manage: true }) });
+    return json({ share: await detail(ctx, principal, fresh, access) });
   });
+
+  router.on("POST", "/api/shares/:slug/upload-url", async (ctx) => {
+    const principal = await ctx.auth();
+    const { share } = await loadShareFor(ctx.env, principal, ctx.params.slug, "edit");
+    const input = parseWith(UploadGrantInput, await readBody(ctx.request));
+    return json({ upload: await createUploadGrant(ctx.env, principal, share, input, ctx.url.origin) }, 201);
+  });
+  // The upload URL is its own credential, so this route reads no other one.
+  router.on("PUT", "/api/uploads/:secret", async (ctx) => json(await useUploadGrant(ctx.env, ctx.params.secret, ctx.request, {
+    settings: await ctx.settings(),
+    shareOrigin: await ctx.shareOrigin()
+  }), 201));
 
   // Names the old worker used.  Same rules as the routes above.
   router.on("POST", "/api/upload", async (ctx) => {
@@ -237,7 +250,8 @@ function legacyShape(origin, share) {
  *   PUT /<slug>         a one-file share whose file is named after the slug
  *   DELETE /<slug>      delete the share; DELETE /<slug>/<path> deletes one file
  * Share settings for a new share come from headers: X-Expire-Days,
- * X-Fleet-Password, X-Fleet-Title, X-Fleet-Description, X-Fleet-Team, and
+ * X-Fleet-Password, X-Fleet-Title, X-Fleet-Description, X-Fleet-Team,
+ * X-Fleet-Team-Access (view or edit), and
  * X-Fleet-Redirect for a short link.
  */
 export async function rawWrite(ctx, slug, rest) {
@@ -252,7 +266,7 @@ export async function rawWrite(ctx, slug, rest) {
       const result = await deleteShare(env, principal, slug);
       return respond(200, `Successfully deleted ${result.slug}`, { ok: true, ...result });
     }
-    const { share } = await loadShareFor(env, principal, slug, "manage");
+    const { share } = await loadShareFor(env, principal, slug, "edit");
     await deleteShareFile(env, share, rest);
     return respond(200, `Successfully deleted ${share.slug}/${rest}`, { ok: true, slug: share.slug, path: rest });
   }
@@ -268,7 +282,8 @@ export async function rawWrite(ctx, slug, rest) {
     share = null;
   }
   if (share) {
-    await requireShareAccess(env, principal, share, "manage").catch(() => {
+    await requireShareAccess(env, principal, share, "edit").catch((err) => {
+      if (err?.status === 403) throw err;
       throw new HttpError(409, `The name "${slug}" is already taken.  Pick another, or leave it blank for a random one.`, { code: "slug_taken" });
     });
   } else {
@@ -281,6 +296,7 @@ export async function rawWrite(ctx, slug, rest) {
       title: header("x-fleet-title"),
       description: header("x-fleet-description"),
       team_id: header("x-fleet-team"),
+      team_access: header("x-fleet-team-access"),
       source: "api"
     });
     created = true;

@@ -1,3 +1,4 @@
+import { AGENT_SECRET, ensureAgentUser, isAgentSecret } from "./agents.mjs";
 import { safeEqual } from "./bytes.mjs";
 import { getUser } from "./users.mjs";
 import { cookie, forbidden, HttpError, unauthorized } from "./http.mjs";
@@ -7,7 +8,7 @@ import { API_TOKEN, lookupToken } from "./tokens.mjs";
 
 /**
  * A principal is who a request acts as:
- *   { kind: "session" | "token" | "operator", user, isAdmin, sessionId?, token?, viaCookie }
+ *   { kind: "session" | "token" | "operator" | "agent", user, isAdmin, sessionId?, token?, seat?, viaCookie }
  * Every credential resolves to a real user row, including the operator secret,
  * which acts as the built-in operator account.
  */
@@ -31,6 +32,12 @@ async function operatorPrincipal(env) {
   const user = await getUser(env.DB, OPERATOR_USER_ID);
   if (!user) throw new HttpError(503, "The operator account is missing.");
   return principalFor("operator", user);
+}
+
+/** The Agent-Sync server acting for one seat (agents.mjs).  Agents are never admins. */
+async function agentPrincipal(env, request) {
+  const user = await ensureAgentUser(env, request.headers.get("x-fleet-seat"));
+  return { ...principalFor("agent", user), isAdmin: false, seat: user.display_name.replace(/ \(agent\)$/, "") };
 }
 
 async function fromToken(env, secret) {
@@ -67,6 +74,10 @@ export async function resolvePrincipal(request, env) {
   const presented = bearer(request);
   if (presented) {
     if (API_TOKEN.test(presented)) return fromToken(env, presented);
+    if (AGENT_SECRET.test(presented)) {
+      if (await isAgentSecret(env, presented)) return agentPrincipal(env, request);
+      throw unauthorized("That agent server credential is not valid.");
+    }
     if (SESSION_TOKEN.test(presented)) return fromSession(env, presented, false);
     if (admin && await safeEqual(presented, admin)) return operatorPrincipal(env);
     throw unauthorized("That credential is not valid.");

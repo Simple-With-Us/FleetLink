@@ -70,7 +70,8 @@ function dashboard(ctx, principal) {
     <div class="row">
       <div><label for="${kind}-slug">Name (optional)</label><input id="${kind}-slug" name="slug" type="text" maxlength="64" placeholder="random if blank" autocomplete="off"></div>
       <div><label for="${kind}-days">Expires after</label><select id="${kind}-days" name="days"></select></div>
-      <div><label for="${kind}-team">Team</label><select id="${kind}-team" name="team_id" data-teams></select></div>
+      <div><label for="${kind}-team">Share with</label><select id="${kind}-team" name="team_id" data-teams></select></div>
+      <div><label for="${kind}-access">Team can</label><select id="${kind}-access" name="team_access"><option value="edit">View and edit</option><option value="view">View only</option></select></div>
     </div>
     <div class="row">
       <div><label for="${kind}-title">Title (optional)</label><input id="${kind}-title" name="title" type="text" maxlength="200"></div>
@@ -199,6 +200,7 @@ function admin(ctx, principal) {
       <div class="tabs" role="tablist" aria-label="Admin sections">
         <button type="button" role="tab" data-tab="people">People</button>
         <button type="button" role="tab" data-tab="invites">Invites</button>
+        <button type="button" role="tab" data-tab="teams">Teams</button>
         <button type="button" role="tab" data-tab="shares">All Shares</button>
         <button type="button" role="tab" data-tab="settings">Settings</button>
         <button type="button" role="tab" data-tab="audit">Audit Log</button>
@@ -221,6 +223,11 @@ function admin(ctx, principal) {
         </form>
         ${table("invite-rows", [["Code"], ["State"], ["Used"], ["Expires", "hide-sm"], [""]])}
         <p id="invite-empty" class="empty" hidden>No invites yet.</p>
+      </section>
+      <section id="panel-teams" role="tabpanel" hidden>
+        <p class="small muted">Every team.&nbsp; Fleet agents is where the AI seats share work with each other; join it to see and edit their team shares from your dashboard.</p>
+        ${table("team-rows", [["Team"], ["Members"], ["Live shares"], [""]])}
+        <p id="team-empty" class="empty" hidden>No teams yet.</p>
       </section>
       <section id="panel-shares" role="tabpanel" hidden>
         <form id="share-search" class="row"><div><label for="share-q">Find a share</label><input id="share-q" type="search" placeholder="Name or title"></div><div class="end"><button type="submit" class="secondary">Search</button></div></form>

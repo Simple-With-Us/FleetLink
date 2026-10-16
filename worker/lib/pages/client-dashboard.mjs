@@ -11,7 +11,7 @@ export const DASHBOARD_JS = String.raw`
   function teamOptions(select, includeNone, noneLabel) {
     var keep = select.value;
     select.replaceChildren();
-    if (includeNone) select.append(h("option", { value: "", text: noneLabel || "Just me" }));
+    if (includeNone) select.append(h("option", { value: "", text: noneLabel || "Just me (personal)" }));
     state.teams.forEach(function (t) { select.append(h("option", { value: t.id, text: t.name })); });
     if (keep) select.value = keep;
   }
@@ -55,20 +55,60 @@ export const DASHBOARD_JS = String.raw`
     var kind = share.kind === "link" ? h("span", { class: "pill", text: "Link" }) : h("span", { class: "pill gray", text: share.file_count + " file" + (share.file_count === 1 ? "" : "s") + " · " + FL.bytes(share.total_bytes) });
     var tags = [kind];
     if (share.has_password) tags.push(h("span", { class: "pill amber", text: "Password" }));
-    if (share.team) tags.push(h("span", { class: "pill", text: share.team.name || "Team" }));
+    if (share.team) tags.push(h("span", { class: "pill", title: share.team.access === "edit" ? "Team members can view and edit" : "Team members can view", text: (share.team.name || "Team") + (share.team.access === "edit" ? " · edit" : " · view") }));
+    else tags.push(h("span", { class: "pill gray", text: "Personal" }));
     var actions = h("div", { class: "actions" },
       h("button", { type: "button", class: "small secondary", text: "Copy", onclick: function () { FL.copy(share.url); } }),
       h("a", { class: "button small secondary", href: share.url, target: "_blank", rel: "noopener", text: "Open" }));
-    if (share.can_manage) {
-      if (share.expires_at) actions.append(h("button", { type: "button", class: "small secondary", text: "Renew", onclick: function () { renew(share); } }));
-      actions.append(h("button", { type: "button", class: "small danger", text: "Delete", onclick: function () { remove(share); } }));
-    }
+    var sharing = sharingControl(share);
+    if (sharing) actions.append(sharing);
+    if (share.can_edit && share.expires_at) actions.append(h("button", { type: "button", class: "small secondary", text: "Renew", onclick: function () { renew(share); } }));
+    if (share.can_manage) actions.append(h("button", { type: "button", class: "small danger", text: "Delete", onclick: function () { remove(share); } }));
     return h("tr", null,
       h("td", null, h("a", { href: share.url, target: "_blank", rel: "noopener", class: "mono", text: share.slug }), share.title ? h("div", { class: "small muted", text: share.title }) : null, share.kind === "link" ? h("div", { class: "small muted", text: "→ " + share.target_url }) : null),
       h("td", null, tags),
       h("td", { class: "hide-sm" }, share.owner && share.owner.display_name ? share.owner.display_name : ""),
       h("td", null, expires),
       h("td", null, actions));
+  }
+
+  // Who sees a share.  The owner moves it between the personal side and a
+  // team; a team owner or admin changes only the team's access level.  The
+  // owner never changes.
+  function sharingControl(share) {
+    var me = state.me && state.me.user;
+    var isOwner = me && (share.owner && share.owner.id === me.id || me.role === "admin");
+    var current = share.team ? share.team.id + "|" + share.team.access : "";
+    var options = [];
+    if (isOwner) {
+      options.push(h("option", { value: "", text: "Personal", selected: !share.team }));
+      var teams = state.teams.slice();
+      if (share.team && !teams.some(function (t) { return t.id === share.team.id; })) teams.push({ id: share.team.id, name: share.team.name || "Team" });
+      teams.forEach(function (t) {
+        ["edit", "view"].forEach(function (level) {
+          var value = t.id + "|" + level;
+          options.push(h("option", { value: value, text: t.name + (level === "edit" ? " · can edit" : " · view only"), selected: value === current }));
+        });
+      });
+      if (options.length === 1) return null;
+    } else if (share.can_manage && share.team) {
+      ["edit", "view"].forEach(function (level) {
+        var value = share.team.id + "|" + level;
+        options.push(h("option", { value: value, text: (share.team.name || "Team") + (level === "edit" ? " · can edit" : " · view only"), selected: value === current }));
+      });
+    } else {
+      return null;
+    }
+    return h("select", { class: "small sharing", "aria-label": "Who can see " + share.slug, onchange: async function (e) {
+      var parts = e.target.value.split("|");
+      var body = parts[0] ? { team_id: parts[0], team_access: parts[1] } : { team_id: null };
+      if (!isOwner) body = { team_access: parts[1] };
+      try {
+        await FL.api("PATCH", "/api/shares/" + encodeURIComponent(share.slug), body);
+        FL.toast(parts[0] ? "Shared with the team (" + (parts[1] === "edit" ? "can edit" : "view only") + ").\u00a0 You still own it." : "Personal again.\u00a0 Only you can see it.");
+        loadShares(false);
+      } catch (err) { FL.fail(err); loadShares(false); }
+    } }, options);
   }
 
   async function loadShares(append) {
@@ -120,7 +160,7 @@ export const DASHBOARD_JS = String.raw`
     if (f.slug && f.slug.trim()) body.slug = f.slug.trim();
     if (f.password) body.password = f.password;
     if (f.title && f.title.trim()) body.title = f.title.trim();
-    if (f.team_id) body.team_id = f.team_id;
+    if (f.team_id) { body.team_id = f.team_id; body.team_access = f.team_access || "edit"; }
     return body;
   }
 

@@ -165,3 +165,40 @@ test("tokens, teams, and admin commands", async () => {
     await f.done();
   }
 });
+
+test("share, unshare, and upload-url move a share between personal and team and hand out curl URLs", async () => {
+  const f = await fixture();
+  try {
+    const env = { ...f.base, FLEETLINK_TOKEN: f.adaToken };
+    const team = (await callJson(f.env, "POST", "/api/teams", { auth: f.ada, json: { name: "Crew" } })).data.team;
+    const up = await run(["notes.md", "--slug", "cli-wip"], { cwd: f.work, env });
+    assert.equal(up.status, 0, up.stderr);
+    assert.match((await run(["list"], { env })).stdout, /cli-wip .*\[personal\]/);
+
+    const shared = await run(["share", "cli-wip", "--view"], { env });
+    assert.equal(shared.status, 0, shared.stderr);
+    assert.match(shared.stdout, /cli-wip is shared with team Crew \(view only\)\.  You still own it\./);
+    const info = await run(["info", "cli-wip"], { env });
+    assert.match(info.stdout, /Shared with: team Crew \(view only\)/);
+    assert.match(info.stdout, /You can: manage/);
+    assert.match((await run(["share", "cli-wip", "--team", team.id], { env })).stdout, /\(can edit\)/);
+
+    const minted = await run(["upload-url", "cli-wip", "build/out.txt", "--max-mb", "1", "--json"], { env });
+    assert.equal(minted.status, 0, minted.stderr);
+    const upload = JSON.parse(minted.stdout);
+    assert.match(upload.upload_url, /\/api\/uploads\/flu_[0-9a-f]{64}$/);
+    const put = await fetch(upload.upload_url, { method: "PUT", body: "built\n" });
+    assert.equal(put.status, 201);
+    const detail = await callJson(f.env, "GET", "/api/shares/cli-wip", { auth: f.ada });
+    assert.deepEqual(detail.data.share.files.map((x) => x.path), ["build/out.txt", "notes.md"]);
+
+    const back = await run(["unshare", "cli-wip"], { env });
+    assert.match(back.stdout, /cli-wip is personal again\./);
+    // Bob is not in a team, so share needs a team and says how to make one.
+    const none = await run(["share", "cli-wip"], { env: { ...f.base, FLEETLINK_TOKEN: f.bobToken } });
+    assert.equal(none.status, 1);
+    assert.match(none.stderr, /not in a team/);
+  } finally {
+    await f.done();
+  }
+});

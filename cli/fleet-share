@@ -33,9 +33,9 @@ DEFAULT_DOMAIN = "https://fleetlink.online"
 # download that does not match is deleted and never run.  The git SHA names a
 # commit that already published those bytes; it is an ancestor of the commit
 # that records it, because a commit cannot contain its own id.
-FLEETLINK_PINNED_GIT_SHA_DEFAULT = 'aca06a821573f2ac10779765c179247aaffd91d2'
+FLEETLINK_PINNED_GIT_SHA_DEFAULT = '1294fee4c106e1b47b1b03f5a70e5c0a36b8314b'
 FLEETLINK_INSTALLER_SHA256_DEFAULT = 'e8bf443e751ad50c5dd795c2348cdda28752afda9d9d42d55dd60deb5094d6ce'
-FLEETLINK_SKILL_MD_SHA256_DEFAULT = '8e69f3315a5793031c7f5a4b0309b1b3ab3e188265e93a9d01afcf5fe92049bf'
+FLEETLINK_SKILL_MD_SHA256_DEFAULT = '7e5b8a68c1b0c2d770236acfa6e1fcafbdb375a32091e157b724abf8e4461d47'
 
 TEXT_TYPES = {
     ".md": "text/markdown; charset=utf-8",
@@ -246,6 +246,7 @@ def share_options(args):
         body["title"] = args.title
     if args.team:
         body["team_id"] = args.team
+        body["team_access"] = args.team_access or "edit"
     return body
 
 
@@ -297,8 +298,8 @@ def share_line(share):
     what = "link -> " + (share.get("target_url") or "") if share["kind"] == "link" else "{} files, {}".format(share["file_count"], human_bytes(share["total_bytes"]))
     expires = share["expires_at"] or "never"
     owner = (share.get("owner") or {}).get("display_name") or ""
-    team = (share.get("team") or {}).get("name")
-    extra = "  [team {}]".format(team) if team else ""
+    team = share.get("team")
+    extra = "  [team {} · {}]".format(team.get("name") or team["id"], team.get("access", "view")) if team else "  [personal]"
     return "{:<24} {:<30} expires {:<26} {}{}".format(share["slug"], what, expires, owner, extra)
 
 
@@ -321,12 +322,48 @@ def cmd_list(args):
 def cmd_info(args):
     share = Api(args).get("/api/shares/" + q(args.slug))["share"]
     lines = [share["url"], "Kind: " + share["kind"], "Owner: " + (share["owner"].get("display_name") or share["owner"]["id"]),
-             "Expires: " + (share["expires_at"] or "never"), "Password: " + ("yes" if share["has_password"] else "no")]
+             "Expires: " + (share["expires_at"] or "never"), "Password: " + ("yes" if share["has_password"] else "no"),
+             "Shared with: " + sharing_label(share), "You can: " + ("manage" if share.get("can_manage") else "edit" if share.get("can_edit") else "view")]
     if share.get("target_url"):
         lines.append("Opens: " + share["target_url"])
     for f in share.get("files") or []:
         lines.append("- {}  ({})".format(f["url"], human_bytes(f["size"])))
     emit(args, share, lines)
+
+
+def sharing_label(share):
+    team = share.get("team")
+    if not team:
+        return "only you (personal)"
+    return "team {} ({})".format(team.get("name") or team["id"], "can edit" if team.get("access") == "edit" else "view only")
+
+
+def cmd_share(args):
+    """Move a share to the team side.  The owner never changes."""
+    api = Api(args)
+    team = args.team
+    if not team:
+        teams = api.get("/api/teams")["teams"]
+        if len(teams) != 1:
+            raise CliError("Give --team TEAM_ID (fleet-share teams list)." if teams else "You are not in a team.  Create one with: fleet-share teams create NAME")
+        team = teams[0]["id"]
+    share = api.request("PATCH", "/api/shares/" + q(args.slug), {"team_id": team, "team_access": "view" if args.view else "edit"})["share"]
+    emit(args, share, ["{} is shared with {}.  You still own it.".format(share["slug"], sharing_label(share))])
+
+
+def cmd_unshare(args):
+    share = Api(args).request("PATCH", "/api/shares/" + q(args.slug), {"team_id": None})["share"]
+    emit(args, share, ["{} is personal again.".format(share["slug"])])
+
+
+def cmd_upload_url(args):
+    body = {"path": args.path}
+    if args.max_mb:
+        body["max_bytes"] = int(args.max_mb * 1024 * 1024)
+    if args.ttl:
+        body["ttl_seconds"] = args.ttl
+    upload = Api(args).post("/api/shares/{}/upload-url".format(q(args.slug)), body)["upload"]
+    emit(args, upload, [upload["upload_url"], "Works once until {}.  Upload with:".format(upload["expires_at"]), "  curl -fsS -T ./FILE '{}'".format(upload["upload_url"])])
 
 
 def cmd_renew(args):
@@ -569,7 +606,7 @@ def cmd_skill(args):
 
 # ---------------------------------------------------------------------- parser
 
-COMMANDS = {"upload", "link", "list", "ls", "info", "renew", "delete", "rm", "whoami", "login", "logout", "tokens", "teams", "admin", "skill", "help", "version"}
+COMMANDS = {"upload", "link", "list", "ls", "info", "share", "unshare", "personal", "upload-url", "renew", "delete", "rm", "whoami", "login", "logout", "tokens", "teams", "admin", "skill", "help", "version"}
 
 
 def build_parser():
@@ -585,7 +622,8 @@ def build_parser():
     shareopts.add_argument("--forever", action="store_true", help="never expire (admins)")
     shareopts.add_argument("--password", help="require a password to open")
     shareopts.add_argument("--title", help="title shown on the share page")
-    shareopts.add_argument("--team", help="team id to put the share in")
+    shareopts.add_argument("--team", help="team id to share it with (default: personal)")
+    shareopts.add_argument("--team-access", choices=["edit", "view"], help="what team members may do (default edit)")
 
     parser = argparse.ArgumentParser(prog="fleet-share", description="Share files and short links on FleetLink.", parents=[common])
     sub = parser.add_subparsers(dest="command")
@@ -611,6 +649,25 @@ def build_parser():
     p = sub.add_parser("info", parents=[common], help="details and files of one share")
     p.add_argument("slug")
     p.set_defaults(func=cmd_info)
+
+    p = sub.add_parser("share", parents=[common], help="share one of your shares with a team (you keep ownership)")
+    p.add_argument("slug")
+    p.add_argument("--team", help="team id (default: your only team)")
+    access = p.add_mutually_exclusive_group()
+    access.add_argument("--edit", action="store_true", help="members can add and change files (default)")
+    access.add_argument("--view", action="store_true", help="members can only view")
+    p.set_defaults(func=cmd_share)
+
+    p = sub.add_parser("unshare", aliases=["personal"], parents=[common], help="take a share out of its team")
+    p.add_argument("slug")
+    p.set_defaults(func=cmd_unshare)
+
+    p = sub.add_parser("upload-url", parents=[common], help="one-time URL to curl a file into a share")
+    p.add_argument("slug")
+    p.add_argument("path", help="path inside the share")
+    p.add_argument("--max-mb", type=float)
+    p.add_argument("--ttl", type=int, help="seconds, 30 to 1800 (default 900)")
+    p.set_defaults(func=cmd_upload_url)
 
     p = sub.add_parser("renew", parents=[common], help="extend a share")
     p.add_argument("slug")

@@ -170,7 +170,8 @@ export function home(ctx, principal) {
             <h2>Many people, many agents, no stepping on each other.</h2>
             <p class="muted">Every link has an owner.&nbsp; Nobody else can see your list, change your links, or claim your names, unless you share a team.</p>
             <ul class="checks">
-              <li><b>Team spaces.</b>&nbsp; Members see every team link; owners and admins can renew or remove any of them.</li>
+              <li><b>Personal until you share it.</b>&nbsp; Move any share to a team's side with view or edit access, and back again.&nbsp; You stay the owner.</li>
+              <li><b>Team spaces.</b>&nbsp; Members see every team link and, with edit access, add files to work in progress; owners and admins manage them.</li>
               <li><b>Passkey accounts.</b>&nbsp; Face ID, Touch ID, or a security key.&nbsp; No passwords to leak.</li>
               <li><b>Sessions you control.</b>&nbsp; See every signed-in device and sign out the ones you do not recognize.</li>
               <li><b>Admin console.</b>&nbsp; Invites, sign-up policy, per-person quotas, disabling accounts, and an audit log.</li>
@@ -264,6 +265,8 @@ fleet-share --days 7 --password "$PW" build.zip
 fleet-share link https://github.com/org/repo/pull/2214`)}
         ${code(`fleet-share list --teams        # shares in my teams
 fleet-share info pr-2214         # files and links
+fleet-share share pr-2214 --team mobile   # team can view and edit; you keep it
+fleet-share upload-url pr-2214 big.zip    # one-time curl -T URL
 fleet-share renew pr-2214 --days 3
 fleet-share delete pr-2214 -y
 fleet-share whoami               # account, usage, limits`)}
@@ -272,7 +275,7 @@ fleet-share whoami               # account, usage, limits`)}
 
     <section class="section" id="mcp">
       <h2>MCP</h2>
-      <p class="muted">Streamable HTTP at <code>${origin}/mcp</code> with the token as a bearer header.&nbsp; Tools: <code>fleetlink_create_share</code>, <code>fleetlink_create_link</code>, <code>fleetlink_list_shares</code>, <code>fleetlink_get_share</code>, <code>fleetlink_renew_share</code>, <code>fleetlink_delete_share</code>, and <code>fleetlink_whoami</code>.</p>
+      <p class="muted">Streamable HTTP at <code>${origin}/mcp</code> with the token as a bearer header.&nbsp; Tools create shares and links, list and read them, <code>fleetlink_share_to_team</code> and <code>fleetlink_make_personal</code> to move work between your personal side and a team's, <code>fleetlink_add_file</code> and <code>fleetlink_read_file</code> to collaborate on a teammate's work in progress, and <code>fleetlink_upload_url</code> for a one-time <code>curl -T</code> upload of anything too big for a tool call.&nbsp; Fleet cloud seats get the same tools on the Agent-Sync MCP server, with no token of their own.</p>
       <div class="two-col">
         <div class="card"><h3>Claude Code</h3>${code(`claude mcp add --transport http fleetlink \\
   ${ctx.url.origin}/mcp \\

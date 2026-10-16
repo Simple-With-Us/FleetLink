@@ -18,10 +18,18 @@ FleetLink is a multi-user service.  Every share has an owner, every API call act
 | Passkey session | A person on the web or iOS | `fl_session` cookie (web) or `Authorization: Bearer <64 hex>` (iOS) | That person |
 | API token | An agent, script, CLI, or Shortcut | `Authorization: Bearer fla_…` or `X-Fleet-Token: fla_…` | The token's owner, narrowed by the token's limits |
 | Operator secret | The owner, as break-glass | `X-Fleet-Admin: <ADMIN_SECRET>` or `Authorization: Bearer <ADMIN_SECRET>` | The built-in `operator` admin account |
+| Agent server credential | The Agent-Sync MCP server only | `Authorization: Bearer fls_…` plus `X-Fleet-Seat: <SEAT>` | That seat's own agent account |
+| Upload URL | Whoever holds the URL, once | `PUT /api/uploads/flu_…` | The person or agent who asked for it |
 
 The shared agent secret (`AGENT_SECRET`, `X-Fleet-Agent`) is retired.  A request that presents it gets `401` with a message that says to use an API token.
 
 The operator secret maps to a real user row (`usr_operator`, role `admin`, marked as a system account).  Shares it creates are owned by that account, so they show up in admin views and follow the same rules as everyone else's.  It cannot sign in with a passkey and cannot be deleted.
+
+### Agent Accounts
+
+The fleet's AI seats (JET, GROK-WEB, ECHO, and the rest) reach FleetLink through the Agent-Sync MCP server at `agent-sync.jays.services`, which already authenticates each seat with its own OAuth grant.  That server holds one credential, `AGENT_SYNC_SECRET` (`fls_` plus 64 hex, a worker secret on both sides), and names the seat in `X-Fleet-Seat`.  FleetLink gives every seat its own account, `usr_agent_<seat>` (kind `agent`), made on first use and added to the built-in **Fleet agents** team (`team_fleet`) as a member.  So each seat has a personal side, like a person, and puts work on the team side when it chooses.
+
+Agent accounts never sign in with a passkey, cannot create tokens or teams, and never act as admins even if an admin gives one the role.  An admin disables a seat like any account, from the admin console's People tab.  A site admin joins Fleet agents (or any team) from the admin console's Teams tab to see and edit the seats' team shares on their own dashboard.  Without `AGENT_SYNC_SECRET` set, an `fls_` credential is refused with `401`.
 
 ### Passkeys
 
@@ -48,9 +56,19 @@ Every request resolves to one principal or none.  The checks are in `worker/lib/
 | Action | Owner | Team owner or admin | Team member | Site admin | Anyone |
 | --- | --- | --- | --- | --- | --- |
 | Open a share link | yes | yes | yes | yes | yes (password if set) |
-| See it in a list, read its details | yes | yes | yes | yes | no |
-| Upload more files, edit, renew, delete | yes | yes | no | yes | no |
+| See it in a list, read its details and files (view) | yes | yes | yes | yes | no |
+| Add, replace, delete files; change title, description, link destination; renew (edit) | yes | yes | when the share's team access is `edit` | yes | no |
+| Rename, set the password, change the team access level, delete (manage) | yes | yes | no | yes | no |
+| Share it with a team, move it between teams, make it personal (owner) | yes | no | no | yes | no |
 | Create a share in a team | — | yes | yes | yes | no |
+
+### Personal and Team Sides
+
+A share starts **personal**: only its owner (and site admins) can see it.  The owner can put it on a **team's side** with an access level for the team's members: `edit` (the default for new team shares: members add and change files, retitle, and renew) or `view`.  Its owner never changes.  Uploads by teammates count against the owner's storage, and the owner can take the share back to personal at any time, which removes the team's access at once (outstanding upload URLs stop working too).  Team owners and admins manage a team share (rename, password, access level, delete) but cannot move it out of the team.  Shares that were in a team before team access existed are `view`.  Every sharing change is audited as `share.sharing`.
+
+### Upload URLs
+
+`POST /api/shares/<slug>/upload-url` `{path, content_type?, max_bytes?, ttl_seconds?}` (edit access) returns a one-time `PUT` URL, `https://fleetlink.online/api/uploads/flu_…`, so an agent in a sandbox can send a large or on-disk file with `curl -fsS -T ./file '<url>'` instead of base64 in a tool call.  The URL is the credential: one path in one share, one use, 15 minutes by default and 30 at most, and at most `max_bytes` (default and ceiling: the caller's per-file cap).  Only a peppered hash is stored.  At upload time it acts as whoever asked for it, and access, storage quota, and token limits are checked again; a revoked token or lost access stops it.  A failed store gives the URL back for another try.
 
 - Slugs are one global namespace because they are URLs.  A slug held by someone else answers `409`, and an upload to it never overwrites their files.
 - A disabled account is treated as signed out (`403` with a clear message).  Its shares stop serving (`410`) until it is enabled again.
@@ -81,7 +99,9 @@ The schema is `worker/lib/schema.mjs`.  The worker applies pending migrations it
 - `users`: role (`user`, `admin`), status (`active`, `disabled`, `deleted`), optional unique email, optional per-person quotas.
 - `passkeys`, `webauthn_challenges`, `sessions`, `api_tokens`, `invites`.
 - `teams`, `team_members` (roles `owner`, `admin`, `member`).  Deleting a team keeps its shares with their owners and removes the API tokens and invites bound to it.
-- `shares`: slug, owner, optional team, kind (`files` or `link`), optional password hash, expiry, renewals, file count, byte total.
+- `shares`: slug, owner, optional team with `team_access` (`view` or `edit`), kind (`files` or `link`), optional password hash, expiry, renewals, file count, byte total.
+- `users.kind`: `person` or `agent` (migration 2).
+- `upload_grants`: one-time upload URLs (secret hash, share, path, creator, optional token, byte cap, expiry, used time).  The sweep removes them a day after they expire.
 - `share_files`: one row per object with its R2 key, size, and type.  New uploads use `s/<share id>/<path>`, so a slug never collides with an old object or a system asset.
 - `settings`: admin-editable values.
 - `audit_events`: sign-ups, sign-ins that change state, token and invite changes, role and status changes, share deletes by someone other than the owner.  Kept 90 days.
@@ -112,7 +132,8 @@ All JSON.  Errors are `{ "error": "…" }` with the right status.
 - Me: `GET|PATCH|DELETE /api/me`, `GET /api/me/passkeys`, `POST /api/me/passkeys/options|verify`, `PATCH|DELETE /api/me/passkeys/:id`, `GET|DELETE /api/me/sessions`, `DELETE /api/me/sessions/:id`.
 - Tokens: `GET|POST /api/tokens`, `DELETE /api/tokens/:id`.
 - Teams: `GET|POST /api/teams`, `GET|PATCH|DELETE /api/teams/:id`, `POST /api/teams/:id/members`, `PATCH|DELETE /api/teams/:id/members/:userId`.
-- Shares: `GET|POST /api/shares`, `GET|PATCH|DELETE /api/shares/:slug`, `POST /api/shares/:slug/renew`, `PUT|DELETE /api/shares/:slug/files/<path>`, `POST /api/links`.
+- Shares: `GET|POST /api/shares`, `GET|PATCH|DELETE /api/shares/:slug` (`PATCH` takes `team_id` and `team_access`), `POST /api/shares/:slug/renew`, `PUT|DELETE /api/shares/:slug/files/<path>`, `POST /api/shares/:slug/upload-url`, `POST /api/links`.
+- Upload URLs: `PUT /api/uploads/:secret` (no other credential).
 - Raw upload: `PUT /<slug>/<path>` and `DELETE /<slug>` for curl and the CLI.
-- Admin: `GET /api/admin/stats`, `GET /api/admin/users`, `PATCH|DELETE /api/admin/users/:id`, `GET|POST /api/admin/invites`, `DELETE /api/admin/invites/:id`, `GET|PUT /api/admin/settings`, `GET /api/admin/audit`.
+- Admin: `GET /api/admin/stats`, `GET /api/admin/users`, `PATCH|DELETE /api/admin/users/:id`, `GET|POST /api/admin/invites`, `DELETE /api/admin/invites/:id`, `GET /api/admin/teams`, `POST /api/admin/teams/:id/join`, `GET|PUT /api/admin/settings`, `GET /api/admin/audit`.
 - MCP: `POST /mcp` with the same credentials.  See `docs/mcp.md`.

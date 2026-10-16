@@ -29,6 +29,7 @@ export async function sweep(env, ts = now()) {
   report.sessions = await run(env.DB, "DELETE FROM sessions WHERE expires_at <= ?", ts);
   report.challenges = await run(env.DB, "DELETE FROM webauthn_challenges WHERE expires_at <= ?", ts);
   report.tokens = await run(env.DB, "DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at <= ?", ts);
+  report.upload_grants = await run(env.DB, "DELETE FROM upload_grants WHERE expires_at <= ?", ts - 86400);
   report.invites = await run(env.DB, "DELETE FROM invites WHERE expires_at <= ? OR revoked_at <= ?", ts - 30 * 86400, ts - 30 * 86400);
   report.audit = await run(env.DB, "DELETE FROM audit_events WHERE created_at <= ?", ts - AUDIT_RETENTION_SECONDS);
   try {

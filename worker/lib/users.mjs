@@ -14,6 +14,7 @@ export function publicUser(row) {
     role: row.role,
     status: row.status,
     is_system: Boolean(row.is_system),
+    kind: row.kind === "agent" ? "agent" : "person",
     created_at: iso(row.created_at),
     last_seen_at: iso(row.last_seen_at)
   };
