@@ -265,7 +265,7 @@ test("signed-in pages render for people and admins", async () => {
 
 test("brand assets: the app-icon logo, favicon, touch icon, and logo animations from R2 with ranges", async () => {
   const env = await makeEnv();
-  for (const [path, type] of [["/favicon.ico", "image/x-icon"], ["/apple-touch-icon.png", "image/png"], ["/assets/logo-64.png", "image/png"], ["/assets/logo-128.png", "image/png"], ["/assets/favicon-light-512.png", "image/png"], ["/assets/favicon-dark-512.png", "image/png"]]) {
+for (const [path, type] of [["/favicon.ico", "image/x-icon"], ["/apple-touch-icon.png", "image/png"], ["/assets/logo-64.png", "image/png"], ["/assets/logo-128.png", "image/png"], ["/assets/fleetlink-wordmark.webp", "image/webp"], ["/assets/fleetlink-wordmark.png", "image/png"], ["/assets/favicon-light-512.png", "image/png"], ["/assets/favicon-dark-512.png", "image/png"]]) {
     const res = await call(env, "GET", path);
     assert.equal(res.status, 200, path);
     assert.equal(res.headers.get("content-type"), type, path);
@@ -282,7 +282,12 @@ test("brand assets: the app-icon logo, favicon, touch icon, and logo animations 
   assert.equal(await part.text(), "0123");
   assert.equal((await call(env, "GET", "/assets/media/..%2Fsettings%3Aoverrides")).status, 404);
   const home = await (await call(env, "GET", "/")).text();
-  assert.match(home, /<img src="\/assets\/logo-64\.png\?v=[a-z0-9]+" width="32" height="32" alt="">FleetLink<\/a>/);
+  assert.match(home, /<img src="\/assets\/logo-64\.png\?v=[a-z0-9]+" width="32" height="32" alt=""><span class="brand-text">FleetLink<\/span><picture class="brand-wordmark-picture"><source type="image\/webp"[^>]+><img class="brand-wordmark"[^>]+><\/picture><\/a>/);
+  assert.match(home, /class="brand-wordmark" src="\/assets\/fleetlink-wordmark\.png\?v=[a-z0-9]+" alt="FleetLink"/);
+  const wordmark = await call(env, "GET", "/assets/fleetlink-wordmark.png");
+  assert.equal(wordmark.status, 200);
+  assert.equal(wordmark.headers.get("content-type"), "image/png");
+  assert.ok(home.includes('<header class="top is-public">'), "signed-out header carries is-public for the collapsed-bar state");
+  assert.ok(home.includes('<a class="button secondary" href="/login">Sign In</a>'), "nav Sign In is a boxed secondary button");
   assert.match(home, /<video class="hero-intro" data-intro autoplay muted playsinline/);
-  assert.match(home, /href="\/login#signup">Create Account<\/a>/);
 });

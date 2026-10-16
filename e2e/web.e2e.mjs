@@ -86,8 +86,11 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
 
     // Signed out, the landing page leads to sign-in and sign-up.
     await page.goto("/");
-    assert.equal(await page.locator("header .brand img").getAttribute("src").then((s) => s.startsWith("/assets/logo-64.png")), true);
-    assert.equal(await page.locator('header a[href="/login#signup"]').count(), 1);
+    assert.equal(await page.locator("header .brand img:not(.brand-wordmark)").getAttribute("src").then((s) => s.startsWith("/assets/logo-64.png")), true);
+    // Top nav intentionally carries no Create Account (Jay: sign-in flow and the
+    // hero/footer buttons cover signup).  Nav = Features, For Agents, How It
+    // Works, boxed Sign In.
+    assert.equal(await page.locator('header a[href="/login#signup"]').count(), 0);
     assert.equal(await page.locator('header a[href="/login"]').count(), 1);
     await settle();
     await page.screenshot({ path: join(shots, "00-landing.png"), fullPage: true });

@@ -1,5 +1,6 @@
 import { escapeHtml } from "../http.mjs";
 import { ASSET_VERSION } from "./assets.mjs";
+import { BRAND_FILES } from "./brand-data.mjs";
 
 export function appClipMeta(env) {
   const bundle = String(env?.APPLE_CLIP_BUNDLE_ID || (env?.APPLE_BUNDLE_ID ? `${env.APPLE_BUNDLE_ID}.Clip` : "online.fleetlink.ios.Clip")).trim();
@@ -27,7 +28,7 @@ function initials(name) {
 function navLinks(principal, active) {
   const link = (href, label, key) => `<a href="${href}"${active === key ? ' aria-current="page"' : ""}>${label}</a>`;
   if (!principal) {
-    return `${link("/#features", "Features", "features")}${link("/agents", "For Agents", "agents")}${link("/instructions", "How It Works", "instructions")}${link("/login", "Sign In", "login")}<a class="button" href="/login#signup">Create Account</a>`;
+    return `${link("/#features", "Features", "features")}${link("/agents", "For Agents", "agents")}${link("/instructions", "How It Works", "instructions")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a>`;
   }
   const items = [link("/dashboard", "Dashboard", "dashboard")];
   if (principal.isAdmin) items.push(link("/admin", "Admin", "admin"));
@@ -62,9 +63,9 @@ ${head}
 </head>
 <body class="${escapeHtml(bodyClass)}">
 <a class="skip" href="#main">Skip to content</a>
-<header class="top"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
+<header class="top${principal ? "" : " is-public"}"><div class="bar"><a class="brand" href="/">${logoImg(64)}<span class="brand-text">FleetLink</span>${BRAND_FILES["fleetlink-wordmark.png"] ? `<picture class="brand-wordmark-picture"><source type="image/webp" srcset="/assets/fleetlink-wordmark.webp?v=${ASSET_VERSION}"><img class="brand-wordmark" src="/assets/fleetlink-wordmark.png?v=${ASSET_VERSION}" alt="FleetLink"></picture>` : ""}</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
 <main id="main"${fullBleed ? "" : ' class="wrap"'}>${body}</main>
-<footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : '<a href="/login">Sign In</a><a href="/login#signup">Create Account</a>'}<a href="/#features">Features</a><a href="/agents">For Agents</a><a href="/instructions">How It Works</a><a href="/privacy">Privacy</a><a href="mailto:support@fleetlink.online">Support</a></nav></div></footer>
+<footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : ""}<a href="/#features">Features</a><a href="/agents">For Agents</a><a href="/instructions">How It Works</a><a href="/privacy">Privacy</a><a href="mailto:support@fleetlink.online">Support</a></nav></div></footer>
 ${scriptTags}
 </body>
 </html>`;

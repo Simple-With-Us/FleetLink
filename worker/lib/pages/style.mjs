@@ -57,6 +57,16 @@ pre { background: var(--navy); color: #dbe7ff; padding: 0.9rem 1rem; border-radi
 .top nav a[aria-current="page"] { color: var(--brand); background: #eaf1ff; }
 .top nav a.button { color: #fff; margin-left: 0.25rem; background: var(--brand); }
 .top nav a.button:hover { color: #fff; background: var(--brand-dark); }
+.top nav a.button.secondary { background: #fff; color: var(--ink); border-color: #c7d2e3; }
+.top nav a.button.secondary:hover { background: var(--soft); color: var(--ink); border-color: #c7d2e3; }
+.top .brand-wordmark-picture, .top .brand-wordmark-picture source { display: none; }
+.top.is-public.is-scrolled .brand-wordmark-picture { display: contents; }
+.top .brand-wordmark { display: none; height: 28px; width: auto; border-radius: 0; box-shadow: none; }
+.top.is-public.is-scrolled nav a:not(.button) { display: none; }
+/* Owner-requested 1px optical adjustment; flex centering is otherwise unchanged. */
+.top.is-public.is-scrolled nav a.button.secondary { transform: translateY(-1px); }
+.top.is-public.is-scrolled .brand:has(.brand-wordmark) img:not(.brand-wordmark), .top.is-public.is-scrolled .brand:has(.brand-wordmark) .brand-text { display: none; }
+.top.is-public.is-scrolled .brand:has(.brand-wordmark) .brand-wordmark { display: inline-block; }
 .who { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--ink); font-weight: 600; font-size: 0.95rem; padding: 0 0.5rem; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--brand), var(--cyan)); color: #fff; font-weight: 800; font-size: 0.85rem; }
 form.inline { display: inline; margin: 0; }
