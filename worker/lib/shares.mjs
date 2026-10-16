@@ -5,6 +5,7 @@ import { all, first, now, run } from "./db.mjs";
 import { badRequest, forbidden, HttpError, iso, notFound, parseWith } from "./http.mjs";
 import { REFUSALS, requireShareAccess, shareAccess, slugTaken } from "./policy.mjs";
 import { deleteKeys, objectKey, putObject } from "./storage.mjs";
+import { fleetOwner } from "./fleet.mjs";
 import { FLEET_TEAM_ID } from "./fleet-roster.mjs";
 import { membership, requireTeamRole, teamRoles } from "./teams.mjs";
 import { assertTokenTeam, requireLinksAllowed } from "./tokens.mjs";
@@ -202,10 +203,12 @@ export async function createShare(env, principal, input) {
   const expiresAt = resolveExpiry(principal, kind, input.days, ts);
   const password = cleanPassword(input.password);
   const teamId = await resolveTeam(env, principal, await defaultTeam(env, principal, input));
+  // The operator credential is the fleet owner's break-glass identity, so what it makes is theirs.
+  const ownerId = principal.kind === "operator" ? ((await fleetOwner(env))?.id ?? principal.user.id) : principal.user.id;
   const row = {
     id: newId("shr", 10),
     slug: requested || randomSlug(),
-    owner_id: principal.user.id,
+    owner_id: ownerId,
     team_id: teamId,
     team_access: input.team_access === "view" ? "view" : "edit",
     kind,
@@ -284,7 +287,7 @@ export async function assertCanStore(env, principal, share, { path, size, settin
   if (size > maxFile) throw new HttpError(413, `Files are at most ${Math.floor(maxFile / MB)} MB.`);
   const existing = await first(env.DB, "SELECT size FROM share_files WHERE share_id = ? AND path = ?", share.id, path);
   const replacing = Number(existing?.size ?? 0);
-  const fresh = await first(env.DB, "SELECT file_count, total_bytes, expires_at FROM shares WHERE id = ?", share.id);
+  const fresh = await first(env.DB, "SELECT file_count, total_bytes, expires_at, source FROM shares WHERE id = ?", share.id);
   const files = Number(fresh?.file_count ?? 0) + (existing ? 0 : 1);
   const bytes = Number(fresh?.total_bytes ?? 0) - replacing + size;
   if (files > limits.shareFiles) throw new HttpError(413, `A share holds at most ${limits.shareFiles} files.`);
@@ -299,8 +302,14 @@ export async function assertCanStore(env, principal, share, { path, size, settin
   const quota = effectiveQuotas(quotaUser, settings).storage_bytes;
   if (quota != null) {
     const usage = await userUsage(env.DB, owner.id);
-    if (usage.bytes - replacing + size > quota) {
-      throw new HttpError(413, `That would pass the ${formatBytes(quota)} storage quota for this account.  Delete or let some shares expire first.`);
+    // An old link (source 'legacy') is exempt only until someone stores into
+    // it:  then it becomes an ordinary share (putShareFile), so the check
+    // counts the whole share, which quota_bytes left out.
+    const legacy = fresh?.source === "legacy" ? Number(fresh?.total_bytes ?? 0) : 0;
+    if (usage.quota_bytes + legacy - replacing + size > quota) {
+      throw new HttpError(413, legacy
+        ? `Adding to this old link makes it count toward your ${formatBytes(quota)} storage quota, which that would pass.  Delete or let some shares expire first.`
+        : `That would pass the ${formatBytes(quota)} storage quota for this account.  Delete or let some shares expire first.`);
     }
   }
 }
@@ -321,6 +330,11 @@ export async function putShareFile(env, principal, share, { path, body, size, co
     share.id, clean, key, actual, type, now()
   );
   await recount(env, share.id);
+  // A new upload makes an old link an ordinary share:  from now on all of it counts toward the quota.
+  if (share.source === "legacy") {
+    await run(env.DB, "UPDATE shares SET source = ? WHERE id = ? AND source = 'legacy'", principal.kind === "session" ? "web" : "api", share.id);
+    share.source = principal.kind === "session" ? "web" : "api";
+  }
   return { path: clean, size: actual, content_type: type };
 }
 

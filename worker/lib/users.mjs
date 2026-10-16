@@ -54,15 +54,23 @@ export async function assertEmailFree(db, email, exceptId = null) {
 }
 
 /** Live shares count against storage.  Expired ones are about to be swept. */
+/**
+ * What a person stores.  `quota_bytes` is what counts against their storage
+ * quota:  shares adopted from before accounts existed (source 'legacy') were
+ * never uploaded under a quota, so they are shown but not counted.
+ */
 export async function userUsage(db, userId) {
   const row = await first(
     db,
-    `SELECT COUNT(*) AS shares, COALESCE(SUM(total_bytes), 0) AS bytes FROM shares
+    `SELECT COUNT(*) AS shares, COALESCE(SUM(total_bytes), 0) AS bytes,
+            COALESCE(SUM(CASE WHEN source = 'legacy' THEN total_bytes ELSE 0 END), 0) AS legacy_bytes FROM shares
       WHERE owner_id = ? AND (expires_at IS NULL OR expires_at > ?)`,
     userId,
     now()
   );
-  return { shares: Number(row?.shares ?? 0), bytes: Number(row?.bytes ?? 0) };
+  const bytes = Number(row?.bytes ?? 0);
+  const legacy = Number(row?.legacy_bytes ?? 0);
+  return { shares: Number(row?.shares ?? 0), bytes, legacy_bytes: legacy, quota_bytes: bytes - legacy };
 }
 
 /** null storage means unlimited.  Admins are not capped by storage. */

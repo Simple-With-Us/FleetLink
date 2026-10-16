@@ -28,9 +28,11 @@ export const DASHBOARD_JS = String.raw`
     state.me = await FL.api("GET", "/api/me");
     var usage = state.me.usage, quota = state.me.quotas.storage_bytes;
     var box = document.getElementById("usage");
-    var pct = quota ? Math.min(100, Math.round((usage.bytes / quota) * 100)) : 0;
+    var counted = typeof usage.quota_bytes === "number" ? usage.quota_bytes : usage.bytes;
+    var pct = quota ? Math.min(100, Math.round((counted / quota) * 100)) : 0;
+    var legacy = usage.legacy_bytes ? "  Old links from before accounts:\u00a0" + FL.bytes(usage.legacy_bytes) + ", not counted." : "";
     box.replaceChildren(
-      h("p", { class: "small muted" }, usage.shares + " live share" + (usage.shares === 1 ? "" : "s") + ", " + FL.bytes(usage.bytes) + (quota ? " of " + FL.bytes(quota) + " used." : " used.  No storage limit.")),
+      h("p", { class: "small muted" }, usage.shares + " live share" + (usage.shares === 1 ? "" : "s") + ", " + FL.bytes(counted) + (quota ? " of " + FL.bytes(quota) + " used." : " used.  No storage limit.") + legacy),
       quota ? h("div", { class: "meter", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(pct) }, h("span", { style: "width:" + pct + "%" })) : null
     );
     document.getElementById("hello").textContent = "Hello, " + state.me.user.display_name;
