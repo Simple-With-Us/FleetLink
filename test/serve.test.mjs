@@ -332,4 +332,15 @@ test("old links belong to the fleet owner:  existing operator shares move once, 
   assert.ok(usage.legacy_bytes >= 5000);
   const upload = await call(env, "PUT", "/api/shares/op-after/files/small.txt", { auth: jay, body: "fits", headers: { "content-type": "text/plain" } });
   assert.equal(upload.status, 201, "legacy bytes must not use up the owner's quota");
+  // Adding to the old link itself makes it an ordinary share, so the whole share would count:  refused here.
+  const intoOld = await call(env, "PUT", "/api/shares/handbook/files/new.txt", { auth: jay, body: "x", headers: { "content-type": "text/plain", accept: "application/json" } });
+  assert.equal(intoOld.status, 413);
+  assert.match((await intoOld.json()).error, /old link/);
+  assert.equal((await env.DB.prepare("SELECT source FROM shares WHERE slug = 'handbook'").first()).source, "legacy");
+  // With room, the upload lands and the share stops being exempt.
+  await callJson(env, "PATCH", `/api/admin/users/${jay.user.id}`, { auth: { operator: true }, json: { storage_quota_bytes: 100000 } });
+  assert.equal((await call(env, "PUT", "/api/shares/handbook/files/new.txt", { auth: jay, body: "x", headers: { "content-type": "text/plain" } })).status, 201);
+  assert.equal((await env.DB.prepare("SELECT source FROM shares WHERE slug = 'handbook'").first()).source, "web");
+  const after = (await callJson(env, "GET", "/api/me", { auth: jay })).data.usage;
+  assert.equal(after.legacy_bytes, usage.legacy_bytes - 5000, "the converted share left the legacy total");
 });
