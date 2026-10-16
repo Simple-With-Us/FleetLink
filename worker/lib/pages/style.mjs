@@ -57,6 +57,8 @@ pre { background: var(--navy); color: #dbe7ff; padding: 0.9rem 1rem; border-radi
 .top nav a[aria-current="page"] { color: var(--brand); background: #eaf1ff; }
 .top nav a.button { color: #fff; margin-left: 0.25rem; background: var(--brand); }
 .top nav a.button:hover { color: #fff; background: var(--brand-dark); }
+.top nav a.button.secondary { background: #fff; color: var(--ink); border-color: #c7d2e3; }
+.top nav a.button.secondary:hover { background: var(--soft); color: var(--ink); border-color: #c7d2e3; }
 .who { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--ink); font-weight: 600; font-size: 0.95rem; padding: 0 0.5rem; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--brand), var(--cyan)); color: #fff; font-weight: 800; font-size: 0.85rem; }
 form.inline { display: inline; margin: 0; }
