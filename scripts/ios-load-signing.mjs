@@ -1,6 +1,6 @@
 // Load FleetLink TestFlight signing material from Infisical.
 // ASC API key: Fleet-OPS prod /asc (shared team key; do not mint another).
-// Distribution identity: FleetLink prod / (IOS_DIST_P12_BASE64, IOS_DIST_P12_PASSWORD).
+// Distribution identity: Fleet Secrets (Fleet-OPS) prod /mac-certs (IOS_DIST_P12_BASE64, IOS_DIST_P12_PASSWORD).
 // Values are masked and written to GITHUB_ENV.  They are never printed.
 import { randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
@@ -43,14 +43,15 @@ export async function loadSigning({ env = process.env, fetchImpl = fetch, log = 
 
   const token = await login(fetchImpl, clientId, clientSecret);
   const asc = await readSecrets(fetchImpl, token, ascProjectId, "/asc");
+  const macCerts = await readSecrets(fetchImpl, token, ascProjectId, "/mac-certs");
   const app = await readSecrets(fetchImpl, token, projectId, "/");
   const missingAsc = ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_P8"].filter((name) => !asc.get(name)?.trim());
   if (missingAsc.length) {
     throw new Error(`Fleet-OPS prod /asc is missing ${missingAsc.join(", ")}.  Do not mint a new App Store Connect key.`);
   }
-  const missingCert = ["IOS_DIST_P12_BASE64", "IOS_DIST_P12_PASSWORD"].filter((name) => !app.get(name)?.trim());
+  const missingCert = ["IOS_DIST_P12_BASE64", "IOS_DIST_P12_PASSWORD"].filter((name) => !macCerts.get(name)?.trim());
   if (missingCert.length) {
-    throw new Error(`FleetLink prod / is missing ${missingCert.join(", ")}.  The active profiles "FleetLink iOS App Store" and "FleetLink iOS Clip App Store" need the existing team Apple Distribution identity.  Do not mint a new certificate or API key.`);
+    throw new Error(`Fleet Secrets prod /mac-certs is missing ${missingCert.join(", ")}.  The active profiles "FleetLink iOS App Store" and "FleetLink iOS Clip App Store" need the existing team Apple Distribution identity.  Do not mint a new certificate or API key.`);
   }
   const rawPem = asc.get("ASC_KEY_P8");
   if (!rawPem.includes("-----BEGIN PRIVATE KEY-----") || !rawPem.includes("-----END PRIVATE KEY-----")) {
@@ -61,15 +62,15 @@ export async function loadSigning({ env = process.env, fetchImpl = fetch, log = 
     ASC_KEY_ID: asc.get("ASC_KEY_ID").trim(),
     ASC_ISSUER_ID: asc.get("ASC_ISSUER_ID").trim(),
     ASC_KEY_P8: pem,
-    IOS_DIST_P12_BASE64: app.get("IOS_DIST_P12_BASE64").trim(),
-    IOS_DIST_P12_PASSWORD: app.get("IOS_DIST_P12_PASSWORD")
+    IOS_DIST_P12_BASE64: macCerts.get("IOS_DIST_P12_BASE64").trim(),
+    IOS_DIST_P12_PASSWORD: macCerts.get("IOS_DIST_P12_PASSWORD").trim()
   };
   const sentry = app.get("SENTRY_DSN")?.trim();
   if (sentry) values.SENTRY_DSN = sentry;
 
   for (const value of Object.values(values)) mask(value, log);
   for (const [name, value] of Object.entries(values)) writeEnv(githubEnv, name, value);
-  log("Loaded the shared ASC key from Fleet-OPS prod /asc and the distribution identity from FleetLink prod /.");
+  log("Loaded the shared ASC key from Fleet-OPS prod /asc and the distribution identity from Fleet Secrets prod /mac-certs.");
 }
 
 function mask(value, log) {
