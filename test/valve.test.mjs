@@ -190,3 +190,22 @@ test("a stored valve state that does not parse or fit the shape fails closed", a
   await callJson(env, "POST", "/api/admin/valve/reset", { auth: admin });
   assert.equal((await valve(env, admin)).tripped, false);
 });
+
+test("a tripped state with no reason is unreadable, and an unreadable state pauses downloads too", async () => {
+  const { env, admin } = await setup();
+  await share(env, admin, "dl", "hi");
+  assert.equal((await call(env, "GET", "/dl/a.txt")).status, 200);
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => logged.push(args.join(" "));
+  try {
+    await env.DB.prepare("INSERT INTO meta (key, value) VALUES ('valve_state', '{\"tripped\":true}') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+    const v = (await callJson(env, "GET", "/api/admin/valve", { auth: admin })).data;
+    assert.equal(v.reasons[0].tripwire, "state_unreadable");
+    assert.equal(v.reasons[0].pauses, "traffic");
+    assert.equal((await call(env, "GET", "/dl/a.txt")).status, 503);
+  } finally {
+    console.error = original;
+  }
+  assert.ok(logged.some((l) => /unreadable/.test(l) && /reason/.test(l)), logged.join("|"));
+});

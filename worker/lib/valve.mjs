@@ -131,20 +131,33 @@ const Reason = z.object({
 });
 const State = z.object({
   tripped: z.boolean(), tripped_at: z.number().optional(), reset_at: z.number().optional(), reasons: z.array(Reason).optional()
-});
+}).refine((s) => !s.tripped || (s.reasons?.length ?? 0) > 0, { message: "a tripped state needs at least one reason" });
+
+const reported = new Set();
+
+function reportUnreadable(raw, detail) {
+  const key = String(raw).slice(0, 200);
+  if (reported.has(key) || reported.size > 20) return;
+  reported.add(key);
+  console.error(`FleetLink safety valve: stored valve_state is unreadable (${detail}); failing closed.  Value: ${key}`);
+}
 
 /** A stored state that does not parse or fit the shape fails closed: tripped, until an admin resets it. */
 export function parseState(raw) {
+  let detail;
   try {
     const parsed = State.safeParse(JSON.parse(raw));
     if (parsed.success) return parsed.data;
-  } catch {
-    // Falls through to the closed state.
+    detail = parsed.error.issues.map((i) => `${i.path.join(".") || "state"}: ${i.message}`).join("; ").slice(0, 200);
+  } catch (err) {
+    detail = `not JSON: ${String(err?.message || err).slice(0, 100)}`;
   }
+  reportUnreadable(raw, detail);
+  // The tripped kind is unknown, so pause traffic as well as intake.  Reset clears it.
   return {
     tripped: true,
     tripped_at: now(),
-    reasons: [{ tripwire: "state_unreadable", label: "Stored valve state is unreadable", value: 1, threshold: 0, pauses: "intake" }]
+    reasons: [{ tripwire: "state_unreadable", label: "Stored valve state is unreadable", value: 1, threshold: 0, pauses: "traffic" }]
   };
 }
 
