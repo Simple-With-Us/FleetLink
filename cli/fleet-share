@@ -14,6 +14,7 @@ Every call acts as one FleetLink account.  Authenticate with an API token
 Python 3.8+ standard library only.  Credentials are never printed.
 """
 import argparse
+import base64
 import getpass
 import hashlib
 import json
@@ -33,9 +34,9 @@ DEFAULT_DOMAIN = "https://fleetlink.online"
 # download that does not match is deleted and never run.  The git SHA names a
 # commit that already published those bytes; it is an ancestor of the commit
 # that records it, because a commit cannot contain its own id.
-FLEETLINK_PINNED_GIT_SHA_DEFAULT = '1294fee4c106e1b47b1b03f5a70e5c0a36b8314b'
+FLEETLINK_PINNED_GIT_SHA_DEFAULT = 'a6c10f6cfb94659d602368e5c9e0e528f94668e8'
 FLEETLINK_INSTALLER_SHA256_DEFAULT = 'e8bf443e751ad50c5dd795c2348cdda28752afda9d9d42d55dd60deb5094d6ce'
-FLEETLINK_SKILL_MD_SHA256_DEFAULT = '7e5b8a68c1b0c2d770236acfa6e1fcafbdb375a32091e157b724abf8e4461d47'
+FLEETLINK_SKILL_MD_SHA256_DEFAULT = 'caa708f877a06a8b549e65722182f4191a49da86bec5c3386544576bf4264546'
 
 TEXT_TYPES = {
     ".md": "text/markdown; charset=utf-8",
@@ -247,6 +248,8 @@ def share_options(args):
     if args.team:
         body["team_id"] = args.team
         body["team_access"] = args.team_access or "edit"
+    if getattr(args, "personal", False):
+        body["personal"] = True
     return body
 
 
@@ -312,6 +315,8 @@ def cmd_list(args):
         params.update({"scope": "team", "team_id": args.team})
     elif args.teams:
         params["scope"] = "teams"
+    elif args.bots:
+        params["scope"] = "bots"
     if args.search:
         params["q"] = args.search
     data = api.get("/api/shares?" + urllib.parse.urlencode(params))
@@ -354,6 +359,148 @@ def cmd_share(args):
 def cmd_unshare(args):
     share = Api(args).request("PATCH", "/api/shares/" + q(args.slug), {"team_id": None})["share"]
     emit(args, share, ["{} is personal again.".format(share["slug"])])
+
+
+# ------------------------------------------------- MCP parity and file commands
+
+def mcp_call(api, name, arguments):
+    """One FleetLink MCP tool call, so this CLI can do anything the MCP server can."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}}
+    reply = api.request("POST", "/mcp", body, headers={"MCP-Protocol-Version": "2025-06-18"})
+    result = (reply or {}).get("result") or {}
+    content = result.get("content") or [{}]
+    text = content[0].get("text", "")
+    if result.get("isError") or (reply or {}).get("error"):
+        raise CliError(text or (reply.get("error") or {}).get("message") or "The tool call failed.")
+    try:
+        return json.loads(text)
+    except ValueError:
+        return {"text": text}
+
+
+def parse_tool_args(args):
+    out = {}
+    if args.args_json:
+        raw = args.args_json
+        if raw.startswith("@"):
+            with open(raw[1:], encoding="utf-8") as handle:
+                raw = handle.read()
+        out.update(json.loads(raw))
+    for pair in args.arg or []:
+        if "=" not in pair:
+            raise CliError("Use --arg KEY=VALUE.")
+        key, value = pair.split("=", 1)
+        try:
+            out[key] = json.loads(value)
+        except ValueError:
+            out[key] = value
+    return out
+
+
+def cmd_tools(args):
+    api = Api(args)
+    reply = api.request("POST", "/mcp", {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}, headers={"MCP-Protocol-Version": "2025-06-18"})
+    tools = (reply.get("result") or {}).get("tools") or []
+    emit(args, {"tools": tools}, ["{:<28} {}".format(t["name"], t.get("title") or "") for t in tools])
+
+
+def cmd_tool(args):
+    data = mcp_call(Api(args), args.name, parse_tool_args(args))
+    print(json.dumps(data, indent=2))
+
+
+def cmd_cat(args):
+    """Print or save one file from a share you can see (yours, your team's, or your bots')."""
+    data = mcp_call(Api(args), "fleetlink_read_file", {"slug": args.slug, "path": args.path})
+    raw = base64.b64decode(data["content"]) if data.get("encoding") == "base64" else data.get("text", "").encode("utf-8")
+    if args.output:
+        with open(args.output, "wb") as handle:
+            handle.write(raw)
+        print("Saved {} ({})".format(args.output, human_bytes(len(raw))), file=sys.stderr)
+    else:
+        sys.stdout.buffer.write(raw)
+
+
+def cmd_add(args):
+    """Add or replace files in an existing share you can edit, without creating one."""
+    api = Api(args)
+    added = []
+    for full, rel in collect_files(args.paths):
+        target = args.path if args.path and len(args.paths) == 1 and os.path.isfile(args.paths[0]) else rel
+        with open(full, "rb") as handle:
+            result = api.request("PUT", "/api/shares/{}/files/{}".format(q(args.slug), qpath(target)), data=handle,
+                                 headers={"Content-Type": content_type(full)}, length=os.path.getsize(full))
+        added.append(result["url"])
+    emit(args, {"urls": added}, ["- " + url for url in added])
+
+
+def cmd_rm_file(args):
+    data = Api(args).delete("/api/shares/{}/files/{}".format(q(args.slug), qpath(args.path)))
+    emit(args, data, ["Deleted {}/{}".format(args.slug, args.path)])
+
+
+def cmd_update(args):
+    body = {}
+    if args.title is not None:
+        body["title"] = args.title or None
+    if args.description is not None:
+        body["description"] = args.description or None
+    if args.url:
+        body["url"] = args.url
+    if args.rename:
+        body["slug"] = args.rename
+    if args.password is not None:
+        body["password"] = args.password
+    if args.no_password:
+        body["password"] = None
+    if args.team_access:
+        body["team_access"] = args.team_access
+    if not body:
+        raise CliError("Nothing to change.  Use --title, --description, --url, --rename, --password, --no-password, or --team-access.")
+    share = Api(args).patch("/api/shares/" + q(args.slug), body)["share"]
+    emit(args, share, ["Updated {}".format(share["slug"])])
+
+
+def cmd_bots(args):
+    """Bots under your account:  list, add, rename, disable, enable, and their tokens."""
+    api = Api(args)
+    rest = args.rest
+    if args.action == "list":
+        data = api.get("/api/bots")
+        lines = ["{:<24} {:<14} {:<8} {} shares, {} tokens".format(b["id"], b["seat"], b["status"], b["usage"]["shares"], b["token_count"]) for b in data["bots"]]
+        if data.get("fleet_owner"):
+            lines.insert(0, "You are the fleet owner.")
+        emit(args, data, lines or ["No bots under your account."])
+        return
+    if not rest:
+        raise CliError("fleet-share bots {} BOT ...  (BOT is a seat such as CODEX, or a user id)".format(args.action))
+    bot = rest[0] if rest[0].startswith("usr_") else "usr_agent_" + rest[0].lower().replace("-", "_")
+    if args.action == "add":
+        data = api.post("/api/bots", {"seat": rest[0], **({"display_name": args.name} if args.name else {})})
+        emit(args, data, ["Added {} ({})".format(data["bot"]["display_name"], data["bot"]["id"])])
+    elif args.action in ("disable", "enable"):
+        data = api.patch("/api/bots/" + q(bot), {"status": "disabled" if args.action == "disable" else "active"})
+        emit(args, data, ["{} is {}".format(data["bot"]["display_name"], data["bot"]["status"])])
+    elif args.action == "rename":
+        if not args.name:
+            raise CliError("fleet-share bots rename BOT --name NAME")
+        data = api.patch("/api/bots/" + q(bot), {"display_name": args.name})
+        emit(args, data, ["Renamed to {}".format(data["bot"]["display_name"])])
+    elif args.action == "token":
+        body = {"name": args.name or "{} token".format(rest[0])}
+        if args.follow_my_limits:
+            body["limits_from"] = "manager"
+        data = api.post("/api/bots/{}/tokens".format(q(bot)), body)
+        follows = "  It follows your limits as they change." if args.follow_my_limits else ""
+        emit(args, data, ["Token for {} (shown once): {}{}".format(rest[0], data["token"], follows)])
+    elif args.action == "tokens":
+        data = api.get("/api/bots/{}/tokens".format(q(bot)))
+        emit(args, data, ["{}  {}  {}…  {}  last used {}".format(t["id"], t["name"], t["prefix"], "follows your limits" if t.get("limits_from") == "manager" else "bot's own limits", t["last_used_at"] or "never") for t in data["tokens"]] or ["No tokens."])
+    elif args.action == "revoke":
+        if len(rest) < 2:
+            raise CliError("fleet-share bots revoke BOT TOKEN_ID")
+        api.delete("/api/bots/{}/tokens/{}".format(q(bot), q(rest[1])))
+        print("Revoked " + rest[1])
 
 
 def cmd_upload_url(args):
@@ -543,6 +690,23 @@ def cmd_admin(args):
     elif args.action == "sweep":
         data = api.post("/api/admin/sweep")
         emit(args, data, [json.dumps(data["report"])])
+    elif args.action == "fleet":
+        if rest and rest[0] == "claim":
+            data = api.post("/api/admin/fleet/claim", {})
+            emit(args, data, ["You are the fleet owner.  {} bots moved under your account.".format(data["bots"])])
+        else:
+            data = api.get("/api/admin/fleet")
+            owner = data.get("owner")
+            emit(args, data, ["Fleet owner: {}.  {} bots, {} without a manager.".format(owner["display_name"] if owner else "none", data["bots"], data["unmanaged"])])
+    elif args.action == "teams":
+        if rest and rest[0] == "join":
+            if len(rest) < 2:
+                raise CliError("fleet-share admin teams join TEAM_ID")
+            data = api.post("/api/admin/teams/{}/join".format(q(rest[1])), {})
+            emit(args, data, ["Joined {} as owner".format(rest[1])])
+        else:
+            data = api.get("/api/admin/teams")
+            emit(args, data, ["{:<16} {:<24} {} members, {} shares{}".format(t["id"], t["name"], t["members"], t["shares"], "  (you: {})".format(t["my_role"]) if t["my_role"] else "") for t in data["teams"]])
 
 
 # --------------------------------------------------------------- skill install
@@ -606,7 +770,7 @@ def cmd_skill(args):
 
 # ---------------------------------------------------------------------- parser
 
-COMMANDS = {"upload", "link", "list", "ls", "info", "share", "unshare", "personal", "upload-url", "renew", "delete", "rm", "whoami", "login", "logout", "tokens", "teams", "admin", "skill", "help", "version"}
+COMMANDS = {"upload", "link", "list", "ls", "info", "cat", "add", "rm-file", "update", "bots", "tools", "tool", "share", "unshare", "personal", "upload-url", "renew", "delete", "rm", "whoami", "login", "logout", "tokens", "teams", "admin", "skill", "help", "version"}
 
 
 def build_parser():
@@ -624,6 +788,7 @@ def build_parser():
     shareopts.add_argument("--title", help="title shown on the share page")
     shareopts.add_argument("--team", help="team id to share it with (default: personal)")
     shareopts.add_argument("--team-access", choices=["edit", "view"], help="what team members may do (default edit)")
+    shareopts.add_argument("--personal", action="store_true", help="keep a bot's new share out of the Fleet team")
 
     parser = argparse.ArgumentParser(prog="fleet-share", description="Share files and short links on FleetLink.", parents=[common])
     sub = parser.add_subparsers(dest="command")
@@ -642,6 +807,7 @@ def build_parser():
     p.add_argument("--team", help="shares in this team")
     p.add_argument("--teams", action="store_true", help="shares in all your teams")
     p.add_argument("--all", action="store_true", help="every share (admins)")
+    p.add_argument("--bots", action="store_true", help="shares of bots you manage")
     p.add_argument("--search")
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(func=cmd_list)
@@ -649,6 +815,50 @@ def build_parser():
     p = sub.add_parser("info", parents=[common], help="details and files of one share")
     p.add_argument("slug")
     p.set_defaults(func=cmd_info)
+
+    p = sub.add_parser("cat", parents=[common], help="print or save one file from a share you can see")
+    p.add_argument("slug")
+    p.add_argument("path")
+    p.add_argument("-o", "--output", help="save to this file instead of printing")
+    p.set_defaults(func=cmd_cat)
+
+    p = sub.add_parser("add", parents=[common], help="add or replace files in a share you can edit")
+    p.add_argument("slug")
+    p.add_argument("paths", nargs="+")
+    p.add_argument("--path", help="path inside the share, for a single file")
+    p.set_defaults(func=cmd_add)
+
+    p = sub.add_parser("rm-file", parents=[common], help="delete one file from a share you can edit")
+    p.add_argument("slug")
+    p.add_argument("path")
+    p.set_defaults(func=cmd_rm_file)
+
+    p = sub.add_parser("update", parents=[common], help="change a share's title, description, link, name, password, or team access")
+    p.add_argument("slug")
+    p.add_argument("--title")
+    p.add_argument("--description")
+    p.add_argument("--url", help="new destination for a short link")
+    p.add_argument("--rename", help="new share name")
+    p.add_argument("--password")
+    p.add_argument("--no-password", action="store_true")
+    p.add_argument("--team-access", choices=["edit", "view"])
+    p.set_defaults(func=cmd_update)
+
+    p = sub.add_parser("bots", parents=[common], help="bots under your account and their tokens")
+    p.add_argument("action", choices=["list", "add", "rename", "disable", "enable", "token", "tokens", "revoke"])
+    p.add_argument("rest", nargs="*")
+    p.add_argument("--name", help="display name, or a token's name")
+    p.add_argument("--follow-my-limits", action="store_true", help="the new token always has your current limits, not the bot's own")
+    p.set_defaults(func=cmd_bots)
+
+    p = sub.add_parser("tools", parents=[common], help="list the FleetLink MCP tools this credential can call")
+    p.set_defaults(func=cmd_tools)
+
+    p = sub.add_parser("tool", parents=[common], help="call any FleetLink MCP tool by name (full MCP parity)")
+    p.add_argument("name")
+    p.add_argument("--arg", action="append", help="KEY=VALUE (VALUE parsed as JSON when it can be)")
+    p.add_argument("--args-json", help="JSON object, or @file")
+    p.set_defaults(func=cmd_tool)
 
     p = sub.add_parser("share", parents=[common], help="share one of your shares with a team (you keep ownership)")
     p.add_argument("slug")
@@ -703,7 +913,7 @@ def build_parser():
     p.set_defaults(func=cmd_teams)
 
     p = sub.add_parser("admin", parents=[common], help="admin tools")
-    p.add_argument("action", choices=["stats", "users", "user", "invite", "invites", "revoke-invite", "settings", "sweep"])
+    p.add_argument("action", choices=["stats", "users", "user", "invite", "invites", "revoke-invite", "settings", "sweep", "fleet", "teams"])
     p.add_argument("rest", nargs="*")
     p.add_argument("--search")
     p.add_argument("--role", choices=["user", "admin"])

@@ -53,7 +53,9 @@ export function page(env, { title, body, head = "", principal = null, active = n
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} · FleetLink</title>
 <link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="icon" type="image/png" href="/assets/logo-64.png?v=${ASSET_VERSION}">
+<link rel="icon" type="image/png" href="/assets/favicon-light-512.png?v=${ASSET_VERSION}">
+<link rel="icon" type="image/png" href="/assets/favicon-light-512.png?v=${ASSET_VERSION}" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/png" href="/assets/favicon-dark-512.png?v=${ASSET_VERSION}" media="(prefers-color-scheme: dark)">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#0b1f3a">
 <link rel="stylesheet" href="/assets/app.css?v=${ASSET_VERSION}">

@@ -42,6 +42,7 @@ export const DASHBOARD_JS = String.raw`
     var keep = scope.value;
     scope.replaceChildren(h("option", { value: "mine", text: "My shares" }));
     if (state.teams.length) scope.append(h("option", { value: "teams", text: "All my teams" }));
+    if (state.me && state.me.bots && state.me.bots.count) scope.append(h("option", { value: "bots", text: "My bots' shares" }));
     state.teams.forEach(function (t) { scope.append(h("option", { value: "team:" + t.id, text: "Team: " + t.name })); });
     if (isAdmin) scope.append(h("option", { value: "all", text: "Everyone (admin)" }));
     if (keep) scope.value = keep;
@@ -417,15 +418,77 @@ export const DASHBOARD_JS = String.raw`
   daysOptions(document.getElementById("new-files").days, "files");
   daysOptions(document.getElementById("new-link").days, "link");
 
+  // Bots under this account
+  async function loadBots() {
+    var data = await FL.api("GET", "/api/bots");
+    var body = document.getElementById("bot-rows");
+    body.replaceChildren();
+    document.getElementById("bot-summary").textContent = data.bots.length + " bot" + (data.bots.length === 1 ? "" : "s") +
+      (data.fleet_owner ? " under your account, including the whole fleet.  They are admins of your Fleet team." : " under your account.");
+    data.bots.forEach(function (b) { body.append(botRow(b)); });
+    document.getElementById("bot-empty").hidden = data.bots.length > 0;
+  }
+
+  function botRow(b) {
+    var active = b.status === "active";
+    var base = "/api/bots/" + encodeURIComponent(b.id);
+    var actions = h("div", { class: "actions" });
+    if (active) actions.append(h("button", { type: "button", class: "small secondary", text: "New Token", onclick: async function () {
+      var name = window.prompt("Name this token (where the bot runs)", b.seat + " token");
+      if (!name) return;
+      var follow = FL.confirm("Should this token follow your limits as they change?\n\nOK:  it always has your current file size, lifetime, and storage limits.\nCancel:  it keeps the bot's own, widest limits.");
+      try {
+        var made = await FL.api("POST", base + "/tokens", { name: name, limits_from: follow ? "manager" : "own" });
+        document.getElementById("bot-secret").replaceChildren(h("div", { class: "notice ok" },
+          h("p", { class: "small", text: "Shown once.  It acts as " + b.display_name + (follow ? ", with your limits as they change." : ", with the bot's own limits.") }), FL.secretBox(b.seat + " token", made.token)));
+        loadBots();
+      } catch (err) { FL.fail(err); }
+    } }));
+    if (b.token_count) actions.append(h("button", { type: "button", class: "small secondary", text: "Revoke Tokens", onclick: async function () {
+      if (!FL.confirm("Revoke every token " + b.display_name + " has?")) return;
+      try {
+        var list = await FL.api("GET", base + "/tokens");
+        for (var i = 0; i < list.tokens.length; i++) await FL.api("DELETE", base + "/tokens/" + encodeURIComponent(list.tokens[i].id));
+        FL.toast("Revoked.");
+        loadBots();
+      } catch (err) { FL.fail(err); }
+    } }));
+    actions.append(h("button", { type: "button", class: "small secondary", text: "Rename", onclick: async function () {
+      var name = window.prompt("Display name", b.display_name);
+      if (!name) return;
+      try { await FL.api("PATCH", base, { display_name: name }); loadBots(); } catch (err) { FL.fail(err); }
+    } }));
+    actions.append(h("button", { type: "button", class: "small " + (active ? "danger" : "secondary"), text: active ? "Disable" : "Enable", onclick: async function () {
+      if (active && !FL.confirm("Disable " + b.display_name + "?  It stops working everywhere until you enable it.")) return;
+      try { await FL.api("PATCH", base, { status: active ? "disabled" : "active" }); loadBots(); } catch (err) { FL.fail(err); }
+    } }));
+    return h("tr", null,
+      h("td", null, h("strong", { text: b.display_name }), h("div", { class: "small muted mono", text: b.seat })),
+      h("td", { class: "hide-sm" }, b.usage.shares + " · " + FL.bytes(b.usage.bytes)),
+      h("td", null, String(b.token_count), b.token_last_used_at ? h("div", { class: "small muted", text: "used " + FL.relative(b.token_last_used_at) }) : null),
+      h("td", null, h("span", { class: "pill" + (active ? " green" : " red"), text: b.status })),
+      h("td", null, actions));
+  }
+
+  async function addBot(e) {
+    e.preventDefault();
+    var form = e.currentTarget, f = FL.form(form);
+    var body = { seat: f.seat };
+    if (f.display_name && f.display_name.trim()) body.display_name = f.display_name.trim();
+    try { await FL.api("POST", "/api/bots", body); form.reset(); FL.toast("Bot added."); loadBots(); } catch (err) { FL.fail(err); }
+  }
+  document.getElementById("bot-form").addEventListener("submit", addBot);
+
   var loaded = {};
   var show = FL.tabs(root, function (name) {
     if (loaded[name]) return;
     loaded[name] = true;
     if (name === "tokens") loadTokens().catch(FL.fail);
     if (name === "teams") loadTeamsPanel().catch(FL.fail);
+    if (name === "bots") loadBots().catch(FL.fail);
     if (name === "account") loadAccount().catch(FL.fail);
   });
-  Promise.all([loadMe(), loadTeams()]).then(function () { return loadShares(false); }).catch(FL.fail);
+  loadMe().then(loadTeams).then(function () { return loadShares(false); }).catch(FL.fail);
   void show;
 })();
 `;

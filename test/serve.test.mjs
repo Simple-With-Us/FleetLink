@@ -265,7 +265,7 @@ test("signed-in pages render for people and admins", async () => {
 
 test("brand assets: the app-icon logo, favicon, touch icon, and logo animations from R2 with ranges", async () => {
   const env = await makeEnv();
-  for (const [path, type] of [["/favicon.ico", "image/x-icon"], ["/apple-touch-icon.png", "image/png"], ["/assets/logo-64.png", "image/png"], ["/assets/logo-128.png", "image/png"], ["/assets/fleetlink-wordmark.webp", "image/webp"], ["/assets/fleetlink-wordmark.png", "image/png"]]) {
+for (const [path, type] of [["/favicon.ico", "image/x-icon"], ["/apple-touch-icon.png", "image/png"], ["/assets/logo-64.png", "image/png"], ["/assets/logo-128.png", "image/png"], ["/assets/fleetlink-wordmark.webp", "image/webp"], ["/assets/fleetlink-wordmark.png", "image/png"], ["/assets/favicon-light-512.png", "image/png"], ["/assets/favicon-dark-512.png", "image/png"]]) {
     const res = await call(env, "GET", path);
     assert.equal(res.status, 200, path);
     assert.equal(res.headers.get("content-type"), type, path);

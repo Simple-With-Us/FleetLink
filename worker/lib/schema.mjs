@@ -7,7 +7,14 @@
  * a single transaction.
  */
 
+import { FLEET_BOTS } from "./fleet-roster.mjs";
+
 export const OPERATOR_USER_ID = "usr_operator";
+
+/** An agent seat's account id:  usr_agent_ plus the seat in lowercase, hyphens as underscores. */
+export function agentUserId(seat) {
+  return `usr_agent_${String(seat).toLowerCase().replace(/-/g, "_")}`;
+}
 
 // The first migration is a clean baseline.  It drops the tables the earlier
 // account code created (and any half-made copy of its own tables), with foreign
@@ -225,9 +232,34 @@ INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at)
 VALUES ('${AGENT_TEAM_ID}', '${OPERATOR_USER_ID}', 'owner', CAST(strftime('%s', 'now') AS INTEGER));
 `;
 
+// Fleet bots.  Every agent account gets its seat (agent_seat) and may have a
+// manager:  the person whose account the bot sits under, who sees and manages
+// everything it owns.  The fleet's bots are made up front (fleet-roster.mjs),
+// are admins of the Fleet team, and get their manager when the fleet owner is
+// known (fleet.mjs).
+const sqlText = (value) => `'${String(value).replace(/'/g, "''")}'`;
+const NOW = "CAST(strftime('%s', 'now') AS INTEGER)";
+const FLEET_BOTS_SQL = `
+ALTER TABLE users ADD COLUMN agent_seat TEXT;
+ALTER TABLE users ADD COLUMN manager_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX users_agent_seat ON users(agent_seat) WHERE agent_seat IS NOT NULL;
+CREATE INDEX users_manager ON users(manager_id);
+UPDATE users SET agent_seat = UPPER(REPLACE(SUBSTR(id, 11), '_', '-')) WHERE kind = 'agent' AND agent_seat IS NULL AND id LIKE 'usr\\_agent\\_%' ESCAPE '\\';
+UPDATE teams SET name = 'Fleet', updated_at = ${NOW} WHERE id = '${AGENT_TEAM_ID}';
+${FLEET_BOTS.map(({ seat, name }) => `INSERT OR IGNORE INTO users (id, display_name, role, status, is_system, kind, agent_seat, created_at, updated_at)
+VALUES (${sqlText(agentUserId(seat))}, ${sqlText(name)}, 'user', 'active', 0, 'agent', ${sqlText(seat)}, ${NOW}, ${NOW});`).join("\n")}
+INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at) SELECT '${AGENT_TEAM_ID}', id, 'admin', ${NOW} FROM users WHERE kind = 'agent' AND status = 'active';
+UPDATE team_members SET role = 'admin' WHERE team_id = '${AGENT_TEAM_ID}' AND role = 'member' AND user_id IN (SELECT id FROM users WHERE kind = 'agent');
+`;
+
 export const MIGRATIONS = [
   { version: 1, name: "multi_user", sql: INIT },
-  { version: 2, name: "team_sharing", sql: TEAM_SHARING }
+  { version: 2, name: "team_sharing", sql: TEAM_SHARING },
+  { version: 3, name: "fleet_bots", sql: FLEET_BOTS_SQL },
+  // A bot token can follow its manager's limits live (limits_from 'manager'):
+  // nothing is copied, so a change to the manager's limits reaches the token
+  // on its next request.  'own' keeps the bot's own limits.
+  { version: 4, name: "token_limits_from", sql: "ALTER TABLE api_tokens ADD COLUMN limits_from TEXT NOT NULL DEFAULT 'own' CHECK (limits_from IN ('own', 'manager'));" }
 ];
 
 /**

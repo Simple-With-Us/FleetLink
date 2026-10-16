@@ -14,6 +14,7 @@ import { first, now, run } from "./db.mjs";
 import { badRequest, HttpError, iso, notFound, parseWith } from "./http.mjs";
 import { requireShareAccess } from "./policy.mjs";
 import { cleanPath, fileByteLimit, guessContentType, isExpired, putShareFile } from "./shares.mjs";
+import { tokenLimitsUser } from "./tokens.mjs";
 import { getUser } from "./users.mjs";
 
 export const UPLOAD_SECRET = /^flu_[0-9a-f]{64}$/;
@@ -112,7 +113,8 @@ async function grantPrincipal(env, grant) {
   if (grant.api_token_id) {
     const row = await first(env.DB, "SELECT * FROM api_tokens WHERE id = ? AND user_id = ?", grant.api_token_id, user.id);
     if (!row || (row.expires_at != null && row.expires_at <= now())) throw new HttpError(403, "The API token behind this upload link was revoked.");
-    token = { id: row.id, name: row.name, team_id: row.team_id ?? null, max_file_bytes: row.max_file_bytes ?? null, max_ttl_seconds: row.max_ttl_seconds ?? null, allow_links: row.allow_links === 1 };
+    token = { id: row.id, name: row.name, team_id: row.team_id ?? null, max_file_bytes: row.max_file_bytes ?? null, max_ttl_seconds: row.max_ttl_seconds ?? null, allow_links: row.allow_links === 1, limits_from: row.limits_from === "manager" ? "manager" : "own" };
   }
-  return { kind: "upload", user, isAdmin: user.role === "admin" && user.kind !== "agent", viaCookie: false, token };
+  const limitsUser = await tokenLimitsUser(env, user, token);
+  return { kind: "upload", user, isAdmin: user.role === "admin" && user.kind !== "agent", viaCookie: false, token, ...(limitsUser ? { limitsUser } : {}) };
 }

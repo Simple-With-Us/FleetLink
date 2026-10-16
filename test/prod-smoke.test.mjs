@@ -22,7 +22,7 @@ test("the production smoke script passes against a fresh worker and cleans up af
     assert.equal(result.status, 0, result.out);
     assert.match(result.out, /All checks passed/);
     assert.doesNotMatch(result.out, /FAIL/);
-    const live = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE status = 'active' AND is_system = 0").first();
+    const live = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE status = 'active' AND is_system = 0 AND kind = 'person'").first();
     assert.equal(live.n, 0);
   } finally {
     await server.close();

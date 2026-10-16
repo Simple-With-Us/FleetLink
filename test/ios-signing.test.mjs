@@ -58,6 +58,7 @@ test("loadSigning masks Infisical values and fails closed without the distributi
     if (href.endsWith("/api/v1/auth/universal-auth/login")) return jsonResponse({ accessToken: "token" });
     const path = new URL(href).searchParams.get("secretPath");
     if (path === "/asc") return jsonResponse(asc);
+    if (path === "/mac-certs") return jsonResponse({ secrets: [] });
     if (path === "/") return jsonResponse({ secrets: [{ secretKey: "SENTRY_DSN", secretValue: "https://example.ingest" }] });
     return jsonResponse({}, 404);
   };
@@ -84,11 +85,18 @@ test("loadSigning masks Infisical values and fails closed without the distributi
       { secretKey: "SENTRY_DSN", secretValue: "https://example.ingest" }
     ]
   };
+  const macCerts = {
+    secrets: [
+      { secretKey: "IOS_DIST_P12_BASE64", secretValue: "Y2VydA==" },
+      { secretKey: "IOS_DIST_P12_PASSWORD", secretValue: "pw" }
+    ]
+  };
   const okFetch = async (url) => {
     const href = String(url);
     if (href.endsWith("/api/v1/auth/universal-auth/login")) return jsonResponse({ accessToken: "token" });
     const path = new URL(href).searchParams.get("secretPath");
     if (path === "/asc") return jsonResponse(asc);
+    if (path === "/mac-certs") return jsonResponse(macCerts);
     if (path === "/") return jsonResponse(app);
     return jsonResponse({}, 404);
   };
