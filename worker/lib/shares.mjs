@@ -8,6 +8,7 @@ import { deleteKeys, objectKey, putObject } from "./storage.mjs";
 import { membership, requireTeamRole, teamRoles } from "./teams.mjs";
 import { assertTokenTeam, requireLinksAllowed } from "./tokens.mjs";
 import { effectiveQuotas, userUsage } from "./users.mjs";
+import { assertValveOpen } from "./valve.mjs";
 
 const MB = 1024 * 1024;
 const DAY = 86400;
@@ -284,6 +285,7 @@ export async function assertCanStore(env, principal, share, { path, size, settin
 /** Write one file into a share and record it.  The caller has checked access. */
 export async function putShareFile(env, principal, share, { path, body, size, contentType, settings }) {
   const clean = cleanPath(path);
+  await assertValveOpen(env, "upload", settings);
   await assertCanStore(env, principal, share, { path: clean, size, settings });
   const key = objectKey(share.id, clean);
   const type = contentType && !/[\r\n]/.test(contentType) ? String(contentType).slice(0, 200) : guessContentType(clean);

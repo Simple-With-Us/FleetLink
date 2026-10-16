@@ -225,9 +225,21 @@ INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at)
 VALUES ('${AGENT_TEAM_ID}', '${OPERATOR_USER_ID}', 'owner', CAST(strftime('%s', 'now') AS INTEGER));
 `;
 
+// Safety valve: hourly traffic counters, and indexes for the daily counts.
+const SAFETY_VALVE = `
+CREATE TABLE valve_usage (
+  bucket INTEGER PRIMARY KEY,
+  bytes_served INTEGER NOT NULL DEFAULT 0,
+  requests INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX users_created_at ON users(created_at);
+CREATE INDEX share_files_created_at ON share_files(created_at);
+`;
+
 export const MIGRATIONS = [
   { version: 1, name: "multi_user", sql: INIT },
-  { version: 2, name: "team_sharing", sql: TEAM_SHARING }
+  { version: 2, name: "team_sharing", sql: TEAM_SHARING },
+  { version: 3, name: "safety_valve", sql: SAFETY_VALVE }
 ];
 
 /**

@@ -72,8 +72,47 @@ export const FIELDS = {
     describe: "How many API tokens a person may hold, unless an admin sets their own quota.",
     default: () => 10,
     parse: (value) => wholeNumber("default_token_quota", value, 0, 100)
-  }
+  },
+  ...valveFields(),
+  ...rateFields()
 };
+
+function valveFields() {
+  const defs = {
+    valve_new_users_per_day: ["Valve: new users per day", "Trips the valve when more people than this sign up in one Central Time day.  0 turns it off.", "VALVE_NEW_USERS_PER_DAY", 50],
+    valve_new_files_per_day: ["Valve: new files per day", "Trips the valve when more files than this are stored in one Central Time day.  0 turns it off.", "VALVE_NEW_FILES_PER_DAY", 2000],
+    valve_total_bytes: ["Valve: total storage", "Trips the valve when live shares hold more bytes than this.  0 turns it off.", "VALVE_TOTAL_BYTES", 100 * GB],
+    valve_total_users: ["Valve: total users", "Trips the valve when there are more people than this.  0 turns it off.", "VALVE_TOTAL_USERS", 1000],
+    valve_bandwidth_bytes_24h: ["Valve: bandwidth per 24 hours", "Trips the valve when more bytes than this are served in a rolling 24 hours.  0 turns it off.", "VALVE_BANDWIDTH_BYTES_24H", 200 * GB],
+    valve_requests_per_hour: ["Valve: requests per hour", "Trips the valve when the worker serves more requests than this in an hour.  0 turns it off.", "VALVE_REQUESTS_PER_HOUR", 100000]
+  };
+  return build(defs, 1024 * GB * 1024);
+}
+
+function rateFields() {
+  const defs = {
+    rate_download_per_ip_minute: ["Rate limit: downloads per client per minute", "Requests for shared files from one client address.  0 turns it off.", "RATE_DOWNLOAD_PER_IP_MINUTE", 120],
+    rate_auth_per_ip_minute: ["Rate limit: sign-in and sign-up per client per minute", "Requests to /api/auth from one client address.  0 turns it off.", "RATE_AUTH_PER_IP_MINUTE", 20],
+    rate_upload_per_ip_minute: ["Rate limit: uploads per client per minute", "Raw file writes from one client address.  0 turns it off.", "RATE_UPLOAD_PER_IP_MINUTE", 60]
+  };
+  return build(defs, 1_000_000);
+}
+
+function build(defs, max) {
+  const out = {};
+  for (const [key, [label, describe, envName, fallback]] of Object.entries(defs)) {
+    out[key] = {
+      label,
+      describe,
+      default: (env) => {
+        const n = Number(env?.[envName]);
+        return env?.[envName] != null && env[envName] !== "" && Number.isInteger(n) && n >= 0 && n <= max ? n : fallback;
+      },
+      parse: (value) => wholeNumber(key, value, 0, max)
+    };
+  }
+  return out;
+}
 
 function wholeNumber(key, value, min, max) {
   const n = typeof value === "number" ? value : Number(String(value ?? "").trim());

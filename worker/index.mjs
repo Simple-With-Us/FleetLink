@@ -24,6 +24,7 @@ import { loadSettings } from "./lib/settings.mjs";
 import { shortcutResponse } from "./lib/shortcut.mjs";
 import { getObject } from "./lib/storage.mjs";
 import { sweep } from "./lib/sweep.mjs";
+import { assertValveOpen, rateLimit, recordUsage } from "./lib/valve.mjs";
 
 const router = new Router();
 accountRoutes(router);
@@ -135,6 +136,29 @@ function rawError(request, err) {
   return text(`${request.method === "DELETE" ? "Delete" : "Upload"} rejected: ${message}\n`, status);
 }
 
+/** Per-client request limits on the metered endpoints.  Returns a 429 response, or null. */
+function floodCheck(request, path, subdomain, settings) {
+  const method = request.method;
+  let kind = null;
+  let limit = 0;
+  if (!subdomain && path.startsWith("/api/auth")) {
+    kind = "auth";
+    limit = settings.rate_auth_per_ip_minute;
+  } else if (!subdomain && path.startsWith("/api/")) {
+    return null;
+  } else if (method === "GET" || method === "HEAD") {
+    kind = "download";
+    limit = settings.rate_download_per_ip_minute;
+  } else if (method === "PUT") {
+    kind = "upload";
+    limit = settings.rate_upload_per_ip_minute;
+  }
+  if (!kind) return null;
+  const wait = rateLimit(request, kind, limit);
+  if (!wait) return null;
+  return json({ error: "Too many requests.  Slow down and try again shortly.", retry_after_seconds: wait }, 429, { "Retry-After": String(wait) });
+}
+
 export async function handleRequest(request, env, exec, deps = {}) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -160,7 +184,10 @@ export async function handleRequest(request, env, exec, deps = {}) {
     return handleMcp(request, env, shareOrigin);
   }
 
+  recordUsage(env, exec, { requests: 1 });
   const ctx = requestContext(request, env, exec, deps);
+  const limited = floodCheck(request, path, subdomain, settings);
+  if (limited) return limited;
   if (!subdomain) {
     const match = router.match(request.method, path);
     if (match?.handler) {
@@ -190,6 +217,12 @@ export async function handleRequest(request, env, exec, deps = {}) {
       if (asset) return asset;
     }
     recordWorkerSpan(request, "download", path);
+    try {
+      await assertValveOpen(env, "download", settings);
+    } catch (err) {
+      if (!(err instanceof HttpError)) throw err;
+      return text(`${err.message}\n`, err.status, { "Retry-After": "3600" });
+    }
     const served = await serveShare(request, env, exec, { slug, rest, url, origin: shareOrigin });
     return served || notFoundPage(env, request);
   }

@@ -16,6 +16,10 @@ export async function makeEnv(extra = {}) {
     WEBAUTHN_RP_ID: "fleetlink.online",
     WEBAUTHN_ORIGINS: ORIGIN,
     WEBAUTHN_RP_NAME: "FleetLink",
+    // Every test shares one client address; flood limits stay off unless a test turns them on.
+    RATE_DOWNLOAD_PER_IP_MINUTE: "0",
+    RATE_AUTH_PER_IP_MINUTE: "0",
+    RATE_UPLOAD_PER_IP_MINUTE: "0",
     ...extra
   };
 }

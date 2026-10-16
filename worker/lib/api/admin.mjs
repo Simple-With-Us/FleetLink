@@ -6,6 +6,7 @@ import { badRequest, json, notFound, parseWith, readBody } from "../http.mjs";
 import { createInvite, listInvites, revokeInvite } from "../invites.mjs";
 import { settingsView, updateSettings } from "../settings.mjs";
 import { sweep } from "../sweep.mjs";
+import { resetValve, valveView } from "../valve.mjs";
 import { listTokens } from "../tokens.mjs";
 import {
   assertEmailFree, cleanDisplayName, cleanEmail, closeAccount, effectiveQuotas, getUser, publicUser, signOutEverywhere
@@ -56,7 +57,8 @@ export function adminRoutes(router) {
       shares: { count: Number(shares?.n ?? 0), bytes: Number(shares?.bytes ?? 0), files: Number(shares?.files ?? 0), by_source: bySource },
       teams: Number(teams?.n ?? 0),
       active_invites: Number(invites?.n ?? 0),
-      settings: await ctx.settings()
+      settings: await ctx.settings(),
+      valve: await valveView(ctx.env, await ctx.settings())
     });
   });
 
@@ -179,7 +181,17 @@ export function adminRoutes(router) {
 
   router.on("GET", "/api/admin/settings", async (ctx) => {
     await ctx.admin();
-    return json(await settingsView(ctx.env));
+    const view = await settingsView(ctx.env);
+    return json({ ...view, valve: await valveView(ctx.env, view.values) });
+  });
+  router.on("GET", "/api/admin/valve", async (ctx) => {
+    await ctx.admin();
+    return json(await valveView(ctx.env, await ctx.settings()));
+  });
+  router.on("POST", "/api/admin/valve/reset", async (ctx) => {
+    const principal = await ctx.admin();
+    await resetValve(ctx.env, principal.user.id);
+    return json(await valveView(ctx.env, await ctx.settings()));
   });
   router.on("PUT", "/api/admin/settings", async (ctx) => {
     const principal = await ctx.admin();
