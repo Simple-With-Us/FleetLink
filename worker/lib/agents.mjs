@@ -4,18 +4,24 @@
  * The Agent-Sync MCP server (agent-sync.jays.services) already authenticates
  * each seat with its own OAuth grant.  It calls FleetLink with one shared
  * server credential, AGENT_SYNC_SECRET, and names the seat in X-Fleet-Seat.
- * Each seat gets its own FleetLink account, so its shares are personal until
- * it puts them in a team, exactly like a person's.  New agent accounts join
- * the built-in "Fleet agents" team as members.
+ * Each seat gets its own FleetLink account (the fleet's bots are made up front
+ * by migration 3;  any other seat on first use).  Every agent account is an
+ * admin of the Fleet team, sits under the fleet owner (fleet.mjs), and works
+ * with the widest limits (shares.mjs, fullLimits).  Its new shares land in the
+ * Fleet team with edit access unless it asks for a personal one, so bots and
+ * the owner edit and overwrite each other's work there.
  *
- * Agent accounts never sign in with a passkey and cannot manage tokens or
- * teams.  An admin disables one like any other account.
+ * Agent accounts never sign in with a passkey, never act as site admins, and
+ * cannot manage the account.  Their manager or an admin disables one.
  */
 import { audit } from "./audit.mjs";
 import { safeEqual } from "./bytes.mjs";
 import { first, now, run } from "./db.mjs";
 import { badRequest, HttpError } from "./http.mjs";
-import { AGENT_TEAM_ID } from "./schema.mjs";
+import { ensureFleetOwner, fleetOwner } from "./fleet.mjs";
+import { AGENT_TEAM_ID, agentUserId } from "./schema.mjs";
+
+export { agentUserId };
 
 export const AGENT_SECRET = /^fls_[0-9a-f]{64}$/;
 export const SEAT = /^[A-Z][A-Z0-9-]{0,22}[A-Z0-9]$/;
@@ -38,26 +44,26 @@ export async function isAgentSecret(env, presented) {
   return AGENT_SECRET.test(presented || "") && (await safeEqual(presented, expected));
 }
 
-export function agentUserId(seat) {
-  return `usr_agent_${seat.toLowerCase().replace(/-/g, "_")}`;
-}
-
 /** The seat's account, created on first use. */
 export async function ensureAgentUser(env, rawSeat) {
   const seat = String(rawSeat || "").trim().toUpperCase();
   if (!SEAT.test(seat)) throw badRequest("X-Fleet-Seat must name the agent seat, such as JET or GROK-WEB.");
+  const existing = await first(env.DB, "SELECT * FROM users WHERE agent_seat = ?", seat);
+  if (existing) {
+    await ensureFleetOwner(env);
+    return existing;
+  }
   const id = agentUserId(seat);
-  const existing = await first(env.DB, "SELECT * FROM users WHERE id = ?", id);
-  if (existing) return existing;
   const ts = now();
+  const owner = await fleetOwner(env);
   const created = await run(
     env.DB,
-    `INSERT OR IGNORE INTO users (id, display_name, role, status, is_system, kind, created_at, updated_at)
-     VALUES (?, ?, 'user', 'active', 0, 'agent', ?, ?)`,
-    id, `${seat} (agent)`, ts, ts
+    `INSERT OR IGNORE INTO users (id, display_name, role, status, is_system, kind, agent_seat, manager_id, created_at, updated_at)
+     VALUES (?, ?, 'user', 'active', 0, 'agent', ?, ?, ?, ?)`,
+    id, `${seat} (bot)`, seat, owner?.id ?? null, ts, ts
   );
   if (created) {
-    await run(env.DB, "INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)", AGENT_TEAM_ID, id, ts);
+    await run(env.DB, "INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, 'admin', ?)", AGENT_TEAM_ID, id, ts);
     await audit(env, id, "agent.create", id, { seat });
   }
   return first(env.DB, "SELECT * FROM users WHERE id = ?", id);
