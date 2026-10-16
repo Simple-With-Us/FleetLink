@@ -251,11 +251,12 @@ test("bots and admin fleet commands", async () => {
     assert.match(added.stdout, /Added QA \(usr_agent_qa_bot\)/);
     const listed = await run(["bots", "list"], { env: op });
     assert.match(listed.stdout, /usr_agent_qa_bot\s+QA-BOT\s+active/);
-    const token = await run(["bots", "token", "QA-BOT", "--name", "ci"], { env: op });
+    const token = await run(["bots", "token", "QA-BOT", "--name", "ci", "--follow-my-limits"], { env: op });
+    assert.match(token.stdout, /It follows your limits as they change\./);
     assert.match(token.stdout, /fla_[0-9a-f]{64}/);
     const asBot = await run(["whoami", "--json"], { env: { ...f.base, FLEETLINK_TOKEN: /fla_[0-9a-f]{64}/.exec(token.stdout)[0] } });
     assert.equal(JSON.parse(asBot.stdout).user.id, "usr_agent_qa_bot");
-    assert.match((await run(["bots", "tokens", "QA-BOT"], { env: op })).stdout, /ci/);
+    assert.match((await run(["bots", "tokens", "QA-BOT"], { env: op })).stdout, /ci .*follows your limits/);
     assert.match((await run(["bots", "disable", "QA-BOT"], { env: op })).stdout, /disabled/);
   } finally {
     await f.done();

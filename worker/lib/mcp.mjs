@@ -519,6 +519,7 @@ async function toolWhoami(_data, ctx) {
       max_file_days: tier.fileDays,
       max_link_days: tier.linkDays,
       max_ttl_seconds: ctx.principal.token?.max_ttl_seconds ?? null,
+      follows: ctx.principal.limitsUser ? "manager" : "own",
       links_allowed: !ctx.principal.token || ctx.principal.token.allow_links,
       forever_allowed: fullLimits(ctx.principal)
     }

@@ -65,6 +65,7 @@ export function cleanPath(value) {
 
 /** Site admins and bots work with the admin limits:  bigger files and shares, any lifetime, short names. */
 export function fullLimits(principal) {
+  if (principal?.limitsUser) return principal.limitsUser.role === "admin";
   return Boolean(principal?.isAdmin || principal?.user?.kind === "agent");
 }
 
@@ -291,7 +292,10 @@ export async function assertCanStore(env, principal, share, { path, size, settin
     throw new HttpError(413, `A share that never expires holds at most ${FOREVER_MAX_BYTES / MB} MB.  Give it an expiry.`);
   }
   const owner = share.owner_id === principal.user.id ? principal.user : await first(env.DB, "SELECT * FROM users WHERE id = ?", share.owner_id);
-  const quota = effectiveQuotas(owner, settings).storage_bytes;
+  // A token that follows its manager's limits works under the manager's
+  // current storage quota for what it stores in its own bot's shares.
+  const quotaUser = principal.limitsUser && owner.id === principal.user.id ? principal.limitsUser : owner;
+  const quota = effectiveQuotas(quotaUser, settings).storage_bytes;
   if (quota != null) {
     const usage = await userUsage(env.DB, owner.id);
     if (usage.bytes - replacing + size > quota) {

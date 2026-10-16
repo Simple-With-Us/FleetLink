@@ -156,3 +156,46 @@ test("a site admin can claim the fleet when no email matches", async () => {
   const audit = await callJson(env, "GET", "/api/admin/audit", { auth: ada });
   assert.ok(audit.data.events.some((e) => e.action === "fleet.owner"));
 });
+
+test("a bot token can follow its manager's limits live:  nothing is copied, so a change to the manager reaches it at once", async () => {
+  const { env, jay } = await fleet();
+  await callJson(env, "GET", "/api/me", { auth: jay });
+  const follow = await callJson(env, "POST", "/api/bots/usr_agent_codex/tokens", { auth: jay, json: { name: "follows", limits_from: "manager" } });
+  assert.equal(follow.status, 201);
+  assert.equal(follow.data.api_token.limits_from, "manager");
+  const own = (await callJson(env, "POST", "/api/bots/usr_agent_codex/tokens", { auth: jay, json: { name: "own" } })).data.token;
+  const who = async (token) => (await rpcTool(env, { auth: { token } }, "fleetlink_whoami")).data.limits;
+
+  // Jay is a regular person:  the following token has the standard limits;  the bot's own token has the widest.
+  assert.deepEqual([(await who(follow.data.token)).max_file_bytes, (await who(follow.data.token)).follows], [100 * 1024 * 1024, "manager"]);
+  assert.equal((await who(own)).max_file_bytes, 300 * 1024 * 1024);
+  assert.equal((await rpcTool(env, { auth: { token: follow.data.token } }, "fleetlink_create_share", { text: "x", days: "forever" })).error, "Only admins can make a share that never expires.");
+  // Jay's storage quota applies to what the following token stores.
+  await callJson(env, "PATCH", `/api/admin/users/${jay.user.id}`, { auth: { operator: true }, json: { storage_quota_bytes: 10 } });
+  const me = await callJson(env, "GET", "/api/me", { auth: { token: follow.data.token } });
+  assert.deepEqual([me.data.quotas.storage_bytes, me.data.auth.limits_from], [10, "manager"]);
+  assert.equal((await rpcTool(env, { auth: { token: follow.data.token } }, "fleetlink_create_share", { text: "more than ten bytes" })).error?.includes("storage quota"), true);
+  assert.equal((await rpcTool(env, { auth: { token: own } }, "fleetlink_create_share", { text: "more than ten bytes" })).error, null);
+
+  // Jay becomes a site admin:  the following token gets the admin limits on its next request, with no new token.
+  await callJson(env, "PATCH", `/api/admin/users/${jay.user.id}`, { auth: { operator: true }, json: { role: "admin", storage_quota_bytes: null } });
+  assert.equal((await who(follow.data.token)).max_file_bytes, 300 * 1024 * 1024);
+  assert.equal((await rpcTool(env, { auth: { token: follow.data.token } }, "fleetlink_create_share", { text: "x", days: "forever" })).error, null);
+  // A disabled manager means the standard limits, never wider.
+  await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(jay.user.id).run();
+  assert.equal((await who(follow.data.token)).max_file_bytes, 100 * 1024 * 1024);
+
+  // Only a bot with a manager can have one.
+  const person = await signUp(env, "Pat");
+  assert.equal((await callJson(env, "POST", "/api/tokens", { auth: person, json: { name: "x", limits_from: "manager" } })).status, 400);
+});
+
+test("the Agent-Sync credential can mint a seat token that follows the fleet owner's limits", async () => {
+  const { env, jay } = await fleet();
+  await callJson(env, "GET", "/api/me", { auth: jay });
+  const minted = await callJson(env, "POST", "/api/agent/token", { ...bot("JET"), json: { limits_from: "manager" } });
+  assert.equal(minted.status, 201);
+  assert.equal(minted.data.api_token.limits_from, "manager");
+  const me = await callJson(env, "GET", "/api/me", { auth: { token: minted.data.token } });
+  assert.deepEqual([me.data.user.id, me.data.auth.limits_from], ["usr_agent_jet", "manager"]);
+});

@@ -255,7 +255,11 @@ UPDATE team_members SET role = 'admin' WHERE team_id = '${AGENT_TEAM_ID}' AND ro
 export const MIGRATIONS = [
   { version: 1, name: "multi_user", sql: INIT },
   { version: 2, name: "team_sharing", sql: TEAM_SHARING },
-  { version: 3, name: "fleet_bots", sql: FLEET_BOTS_SQL }
+  { version: 3, name: "fleet_bots", sql: FLEET_BOTS_SQL },
+  // A bot token can follow its manager's limits live (limits_from 'manager'):
+  // nothing is copied, so a change to the manager's limits reaches the token
+  // on its next request.  'own' keeps the bot's own limits.
+  { version: 4, name: "token_limits_from", sql: "ALTER TABLE api_tokens ADD COLUMN limits_from TEXT NOT NULL DEFAULT 'own' CHECK (limits_from IN ('own', 'manager'));" }
 ];
 
 /**

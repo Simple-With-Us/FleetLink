@@ -436,10 +436,11 @@ export const DASHBOARD_JS = String.raw`
     if (active) actions.append(h("button", { type: "button", class: "small secondary", text: "New Token", onclick: async function () {
       var name = window.prompt("Name this token (where the bot runs)", b.seat + " token");
       if (!name) return;
+      var follow = FL.confirm("Should this token follow your limits as they change?\n\nOK:  it always has your current file size, lifetime, and storage limits.\nCancel:  it keeps the bot's own, widest limits.");
       try {
-        var made = await FL.api("POST", base + "/tokens", { name: name });
+        var made = await FL.api("POST", base + "/tokens", { name: name, limits_from: follow ? "manager" : "own" });
         document.getElementById("bot-secret").replaceChildren(h("div", { class: "notice ok" },
-          h("p", { class: "small", text: "Shown once.  It acts as " + b.display_name + "." }), FL.secretBox(b.seat + " token", made.token)));
+          h("p", { class: "small", text: "Shown once.  It acts as " + b.display_name + (follow ? ", with your limits as they change." : ", with the bot's own limits.") }), FL.secretBox(b.seat + " token", made.token)));
         loadBots();
       } catch (err) { FL.fail(err); }
     } }));

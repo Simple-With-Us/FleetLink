@@ -31,7 +31,8 @@ const UpdateBotBody = z.object({
 }).strict();
 const AgentTokenBody = z.object({
   name: z.string().trim().min(1).max(64).optional(),
-  expires_in_days: z.number().int().positive().max(3650).nullable().optional()
+  expires_in_days: z.number().int().positive().max(3650).nullable().optional(),
+  limits_from: z.enum(["own", "manager"]).optional()
 }).strict();
 
 async function botView(env, row) {
@@ -135,7 +136,8 @@ export function botRoutes(router) {
     const input = parseWith(AgentTokenBody, await readBody(ctx.request));
     const made = await createToken(ctx.env, principal.user, await ctx.settings(), {
       name: input.name || `${principal.seat} via Agent-Sync`,
-      expires_in_days: input.expires_in_days ?? null
+      expires_in_days: input.expires_in_days ?? null,
+      limits_from: input.limits_from ?? "own"
     });
     await audit(ctx.env, principal.user.id, "bot.token.create", principal.user.id, { token_id: made.api_token.id, via: "agent-sync" });
     return json({ ...made, seat: principal.seat, user_id: principal.user.id }, 201);

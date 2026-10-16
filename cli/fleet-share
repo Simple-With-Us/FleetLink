@@ -487,11 +487,15 @@ def cmd_bots(args):
         data = api.patch("/api/bots/" + q(bot), {"display_name": args.name})
         emit(args, data, ["Renamed to {}".format(data["bot"]["display_name"])])
     elif args.action == "token":
-        data = api.post("/api/bots/{}/tokens".format(q(bot)), {"name": args.name or "{} token".format(rest[0])})
-        emit(args, data, ["Token for {} (shown once): {}".format(rest[0], data["token"])])
+        body = {"name": args.name or "{} token".format(rest[0])}
+        if args.follow_my_limits:
+            body["limits_from"] = "manager"
+        data = api.post("/api/bots/{}/tokens".format(q(bot)), body)
+        follows = "  It follows your limits as they change." if args.follow_my_limits else ""
+        emit(args, data, ["Token for {} (shown once): {}{}".format(rest[0], data["token"], follows)])
     elif args.action == "tokens":
         data = api.get("/api/bots/{}/tokens".format(q(bot)))
-        emit(args, data, ["{}  {}  {}…  last used {}".format(t["id"], t["name"], t["prefix"], t["last_used_at"] or "never") for t in data["tokens"]] or ["No tokens."])
+        emit(args, data, ["{}  {}  {}…  {}  last used {}".format(t["id"], t["name"], t["prefix"], "follows your limits" if t.get("limits_from") == "manager" else "bot's own limits", t["last_used_at"] or "never") for t in data["tokens"]] or ["No tokens."])
     elif args.action == "revoke":
         if len(rest) < 2:
             raise CliError("fleet-share bots revoke BOT TOKEN_ID")
@@ -844,6 +848,7 @@ def build_parser():
     p.add_argument("action", choices=["list", "add", "rename", "disable", "enable", "token", "tokens", "revoke"])
     p.add_argument("rest", nargs="*")
     p.add_argument("--name", help="display name, or a token's name")
+    p.add_argument("--follow-my-limits", action="store_true", help="the new token always has your current limits, not the bot's own")
     p.set_defaults(func=cmd_bots)
 
     p = sub.add_parser("tools", parents=[common], help="list the FleetLink MCP tools this credential can call")

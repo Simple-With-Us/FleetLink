@@ -11,7 +11,7 @@ import {
 import { clearSessionCookieHeader, deleteSessionByToken, listSessions, revokeOtherSessions, revokeSession, SESSION_COOKIE } from "../sessions.mjs";
 import { addMember, createTeam, deleteTeam, getTeam, listTeams, removeMember, renameTeam, updateMember } from "../teams.mjs";
 import { createToken, listTokens, revokeToken } from "../tokens.mjs";
-import { accountSummary, assertEmailFree, cleanDisplayName, cleanEmail, closeAccount } from "../users.mjs";
+import { accountSummary, assertEmailFree, cleanDisplayName, cleanEmail, closeAccount, effectiveQuotas } from "../users.mjs";
 
 const UpdateMeBody = z.object({
   display_name: z.string().max(200).optional(),
@@ -28,6 +28,11 @@ async function principalSummary(ctx, principal) {
     summary.bots = { count: Number(bots?.n ?? 0), fleet_owner: ownerId === principal.user.id };
   }
   summary.auth = { kind: principal.kind };
+  // A token that follows its manager reports the manager's current quotas.
+  if (principal.limitsUser) {
+    summary.quotas = effectiveQuotas(principal.limitsUser, await ctx.settings());
+    summary.auth.limits_from = "manager";
+  }
   if (principal.token) summary.auth.token = { id: principal.token.id, name: principal.token.name, team_id: principal.token.team_id };
   return summary;
 }
