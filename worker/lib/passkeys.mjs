@@ -10,6 +10,7 @@ import { badRequest, forbidden, HttpError, iso, json, notFound, parseWith, unaut
 import { consumeInviteStatement, findUsableInvite } from "./invites.mjs";
 import { createSession, deviceLabel, prepareSession, sessionCookieHeader } from "./sessions.mjs";
 import { loadSettings } from "./settings.mjs";
+import { assertValveOpen } from "./valve.mjs";
 import { assertEmailFree, cleanDisplayName, cleanEmail, publicUser } from "./users.mjs";
 import * as webauthnLib from "./webauthn.mjs";
 
@@ -113,6 +114,7 @@ export async function registerOptions(request, env, body, deps) {
   originsOrThrow(request, config);
   const input = parseWith(RegisterOptionsBody, body);
   const settings = await loadSettings(env);
+  await assertValveOpen(env, "signup", settings);
   const displayName = cleanDisplayName(input.displayName ?? input.display_name ?? input.name);
   const email = cleanEmail(input.email);
   await assertEmailFree(env.DB, email);
@@ -143,6 +145,7 @@ export async function registerVerify(request, env, body, deps) {
     expectedOrigin: origins
   });
   if (!verified?.verified || !verified.credentialId) throw unauthorized("The passkey could not be verified.");
+  await assertValveOpen(env, "signup");
   const { display_name: displayName, email, invite_id: inviteId } = row.payload;
   let invite = null;
   if (inviteId) {

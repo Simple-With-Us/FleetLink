@@ -252,6 +252,17 @@ INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at) SELECT '
 UPDATE team_members SET role = 'admin' WHERE team_id = '${AGENT_TEAM_ID}' AND role = 'member' AND user_id IN (SELECT id FROM users WHERE kind = 'agent');
 `;
 
+// Safety valve: five-minute traffic counters, and indexes for the daily counts.
+const SAFETY_VALVE = `
+CREATE TABLE valve_usage (
+  bucket INTEGER PRIMARY KEY,
+  bytes_served INTEGER NOT NULL DEFAULT 0,
+  requests INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX users_created_at ON users(created_at);
+CREATE INDEX share_files_created_at ON share_files(created_at);
+`;
+
 export const MIGRATIONS = [
   { version: 1, name: "multi_user", sql: INIT },
   { version: 2, name: "team_sharing", sql: TEAM_SHARING },
@@ -259,7 +270,11 @@ export const MIGRATIONS = [
   // A bot token can follow its manager's limits live (limits_from 'manager'):
   // nothing is copied, so a change to the manager's limits reaches the token
   // on its next request.  'own' keeps the bot's own limits.
-  { version: 4, name: "token_limits_from", sql: "ALTER TABLE api_tokens ADD COLUMN limits_from TEXT NOT NULL DEFAULT 'own' CHECK (limits_from IN ('own', 'manager'));" }
+  { version: 4, name: "token_limits_from", sql: "ALTER TABLE api_tokens ADD COLUMN limits_from TEXT NOT NULL DEFAULT 'own' CHECK (limits_from IN ('own', 'manager'));" },
+  // Appended after 4 so it follows the shipped fleet_bots and token_limits_from
+  // migrations.  Versions 3 and 4 already shipped in #99, so the valve takes the
+  // next free number rather than reusing 3.
+  { version: 5, name: "safety_valve", sql: SAFETY_VALVE }
 ];
 
 /**

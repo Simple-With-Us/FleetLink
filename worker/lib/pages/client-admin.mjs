@@ -26,7 +26,8 @@ export const ADMIN_JS = String.raw`
       stat("Stored", FL.bytes(s.shares.bytes)),
       stat("Teams", String(s.teams)),
       stat("Open invites", String(s.active_invites)),
-      stat("Sign-up", s.settings.signup_mode));
+      stat("Sign-up", s.settings.signup_mode),
+      stat("Safety valve", s.valve.tripped ? "TRIPPED" : "Armed"));
   }
 
   // People

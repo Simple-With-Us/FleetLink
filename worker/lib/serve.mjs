@@ -14,6 +14,7 @@ import { optionalPrincipal } from "./auth.mjs";
 import { shareAccess } from "./policy.mjs";
 import { formatBytes, isExpired, shareFiles, shareUrl } from "./shares.mjs";
 import { getObject } from "./storage.mjs";
+import { recordUsage } from "./valve.mjs";
 import { appClipMeta, ogTags, page } from "./pages/layout.mjs";
 
 const UNLOCK_TTL_SECONDS = 24 * 3600;
@@ -182,12 +183,13 @@ ${ogTags({ title, description: share.description || `A note shared on FleetLink.
   });
 }
 
-async function fileResponse(request, env, share, file, url, setCookie) {
+async function fileResponse(request, env, share, file, url, setCookie, exec) {
   const object = await getObject(env, file.r2_key, request);
   if (!object) return notFoundPage(env, request);
   const filename = file.path.split("/").pop() || "file";
   let type = file.content_type || object.httpMetadata?.contentType || "application/octet-stream";
   if (isMarkdown(file.path, type) && url.searchParams.get("raw") !== "1" && !url.searchParams.has("download") && object.body) {
+    if (request.method !== "HEAD") recordUsage(env, exec, { bytes: object.size, requests: 0 });
     const response = await markdownPage(env, share, file, object, url);
     if (setCookie) response.headers.append("Set-Cookie", setCookie);
     return response;
@@ -219,9 +221,11 @@ async function fileResponse(request, env, share, file, url, setCookie) {
     const length = range.length ?? object.size - offset;
     headers.set("Content-Range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
     headers.set("Content-Length", String(length));
+    if (request.method !== "HEAD") recordUsage(env, exec, { bytes: length, requests: 0 });
     return new Response(request.method === "HEAD" ? null : object.body, { status: 206, headers });
   }
   headers.set("Content-Length", String(object.size));
+  if (request.method !== "HEAD") recordUsage(env, exec, { bytes: object.size, requests: 0 });
   return new Response(request.method === "HEAD" ? null : object.body, { headers });
 }
 
@@ -329,12 +333,12 @@ export async function serveShare(request, env, ctx, { slug, rest, url, origin })
   }
   if (!decoded || decoded.endsWith("/")) {
     const dir = decoded.replace(/\/+$/, "");
-    if (!dir && files.length === 1 && !rest) return fileResponse(request, env, share, files[0], url, setCookie);
+    if (!dir && files.length === 1 && !rest) return fileResponse(request, env, share, files[0], url, setCookie, ctx);
     if (dir && !files.some((f) => f.path.startsWith(`${dir}/`))) return notFoundPage(env, request);
     return listingPage(env, share, files, dir, url, origin, setCookie);
   }
   const file = files.find((f) => f.path === decoded);
-  if (file) return fileResponse(request, env, share, file, url, setCookie);
+  if (file) return fileResponse(request, env, share, file, url, setCookie, ctx);
   if (files.some((f) => f.path.startsWith(`${decoded}/`))) {
     return redirect(`/${share.slug}/${rest}/${url.search}`, 301);
   }

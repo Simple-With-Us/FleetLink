@@ -8,6 +8,7 @@ import { all, ensureSchema, now, run } from "./db.mjs";
 import { ensureFleetOwner } from "./fleet.mjs";
 import { importLegacyBatch } from "./legacy.mjs";
 import { purgeShare } from "./shares.mjs";
+import { evaluateValve, flushUsage, pruneUsage } from "./valve.mjs";
 
 const SHARE_BATCH = 15;
 const EMPTY_SHARE_GRACE_SECONDS = 3600;
@@ -38,6 +39,14 @@ export async function sweep(env, ts = now()) {
     report.legacy = await importLegacyBatch(env, Number(env.LEGACY_IMPORT_BUDGET) || 30);
   } catch (err) {
     report.legacy = { error: String(err?.message || err).slice(0, 200) };
+  }
+  try {
+    await flushUsage(env, ts);
+    report.valve_usage_pruned = await pruneUsage(env, ts);
+    const state = await evaluateValve(env, { fresh: true });
+    report.valve = state.tripped ? "tripped" : "ok";
+  } catch (err) {
+    report.valve = { error: String(err?.message || err).slice(0, 200) };
   }
   return report;
 }
