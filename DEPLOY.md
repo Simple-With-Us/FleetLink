@@ -61,3 +61,19 @@ Or promote an existing account: `fleet-share admin user set USER_ID --role admin
 ## Rolling Back
 
 Re-run `scripts/deploy.sh` from the previous commit.  The schema only moves forward: an older worker against the new tables will not work, so roll forward with a fix instead when the schema changed.
+
+## Deploy on merge
+
+`worker-deploy.yml` is the production publisher after `WORKER_DEPLOY_ENABLED=true`
+is set. It requires the repository secret `CLOUDFLARE_DEPLOY_API_TOKEN` with the
+existing account's scoped deploy credential. Keep the activation variable unset
+until credentials and the first manual workflow run are reviewed. No Infisical
+bootstrap or session-secret rotation is needed for this code-only path.
+
+The job tests current main, serializes production uploads, checks the current
+main SHA immediately before upload, and refuses changed D1/R2 bindings, schedule
+or preview settings. It uses the same code-only deploy script and its exact
+`x-fleet-release` health receipt. A half-hour drain catches bot-token merges that
+do not create another push workflow. Already-live and superseded SHAs are no-ops.
+Disable the activation variable to stop automated publication; rollback remains
+a separate reviewed code-only deployment. No iOS workflow is changed.

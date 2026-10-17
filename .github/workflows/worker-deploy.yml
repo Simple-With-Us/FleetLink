@@ -1,0 +1,58 @@
+name: Deploy FleetLink Worker
+
+on:
+  push:
+    branches: [main]
+    paths: ['worker/**', 'assets/**', 'scripts/bundle-worker.mjs', 'scripts/deploy*', 'package.json', 'package-lock.json', '.github/workflows/worker-deploy.yml']
+  workflow_run:
+    workflows: [ci]
+    branches: [main]
+    types: [completed]
+  schedule:
+    - cron: '23,53 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: fleetlink-worker-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.WORKER_DEPLOY_ENABLED == 'true' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: worker-production
+      url: https://fleetlink.online
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - name: Check exact main and unchanged live settings
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOY_API_TOKEN }}
+        run: python3 scripts/deploy-preflight.py
+      - name: Deploy code and verify exact release
+        if: steps.gate.outputs.deploy == 'true'
+        env:
+          FLEETLINK_DEPLOY: '1'
+          FLEETLINK_SECRETS: keep
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DEPLOY_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: da8cfd355c5c457cbab8434baeea7f07
+          D1_DATABASE_ID: 85ef083e-9435-49c5-8314-404db547792d
+        run: bash scripts/deploy.sh
