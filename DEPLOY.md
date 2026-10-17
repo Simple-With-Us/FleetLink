@@ -65,7 +65,7 @@ Re-run `scripts/deploy.sh` from the previous commit.  The schema only moves forw
 ## Deploy on merge
 
 `worker-deploy.yml` is the production publisher after `WORKER_DEPLOY_ENABLED=true`
-is set. It requires the repository secret `CLOUDFLARE_DEPLOY_API_TOKEN` with the
+is set. It requires the repository secret `CLOUDFLARE_FLEET_API_TOKEN (Fleet-OPS/prod/root)` with the
 existing account's scoped deploy credential. Keep the activation variable unset
 until credentials and the first manual workflow run are reviewed. No Infisical
 bootstrap or session-secret rotation is needed for this code-only path.
@@ -77,3 +77,8 @@ or preview settings. It uses the same code-only deploy script and its exact
 do not create another push workflow. Already-live and superseded SHAs are no-ops.
 Disable the activation variable to stop automated publication; rollback remains
 a separate reviewed code-only deployment. No iOS workflow is changed.
+
+CI reads the scoped Cloudflare token from Fleet-OPS/prod/root through the existing
+automation identity. Repository bootstrap names: INFISICAL_AUTOMATION_CLIENT_ID
+and INFISICAL_AUTOMATION_CLIENT_SECRET. Provisioning those CI bootstrap secrets
+is a separate approved setup step; activation remains off until cutover.
