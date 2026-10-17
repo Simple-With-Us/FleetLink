@@ -3,6 +3,8 @@ name: Deploy FleetLink Worker
 on:
   push:
     branches: [main]
+    # workflow_run, schedule, and workflow_dispatch cannot filter by path, so
+    # scripts/deploy-preflight.py applies the same list (WORKER_PATHS) to them.  Keep both in step.
     paths: ['worker/**', 'assets/**', 'scripts/bundle-worker.mjs', 'scripts/deploy*', 'package.json', 'package-lock.json', '.github/workflows/worker-deploy.yml']
   workflow_run:
     workflows: [ci]
@@ -33,7 +35,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 1
+          # Full history, so the preflight can diff the live release commit against main.
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
