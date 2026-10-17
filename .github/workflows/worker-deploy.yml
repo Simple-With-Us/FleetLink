@@ -1,0 +1,71 @@
+name: Deploy FleetLink Worker
+
+on:
+  push:
+    branches: [main]
+    # workflow_run, schedule, and workflow_dispatch cannot filter by path, so
+    # scripts/deploy-preflight.py applies the same list (WORKER_PATHS) to them.  Keep both in step.
+    paths: ['worker/**', 'assets/**', 'scripts/bundle-worker.mjs', 'scripts/deploy*', 'package.json', 'package-lock.json', '.github/workflows/worker-deploy.yml']
+  workflow_run:
+    workflows: [ci]
+    branches: [main]
+    types: [completed]
+  schedule:
+    - cron: '23,53 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: fleetlink-worker-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.WORKER_DEPLOY_ENABLED == 'true' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: worker-production
+      url: https://fleetlink.online
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          # Full history, so the preflight can diff the live release commit against main.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - name: Load scoped deploy credential from Fleet-OPS
+        env:
+          INFISICAL_PROJECT_ID: 8dae6d03-8f12-48b2-adf3-e5c1b881c8c5
+          INFISICAL_ENVIRONMENT: prod
+          INFISICAL_SECRET_PATH: /
+          INFISICAL_NAMES: CLOUDFLARE_FLEET_API_TOKEN
+          INFISICAL_REQUIRED: CLOUDFLARE_FLEET_API_TOKEN
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_AUTOMATION_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_AUTOMATION_CLIENT_SECRET }}
+        run: node scripts/infisical-fetch.mjs
+      - name: Check exact main and unchanged live settings
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_FLEET_API_TOKEN }}
+        run: python3 scripts/deploy-preflight.py
+      - name: Deploy code and verify exact release
+        if: steps.gate.outputs.deploy == 'true'
+        env:
+          FLEETLINK_DEPLOY: '1'
+          FLEETLINK_SECRETS: keep
+          CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_FLEET_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: da8cfd355c5c457cbab8434baeea7f07
+          D1_DATABASE_ID: 85ef083e-9435-49c5-8314-404db547792d
+        run: bash scripts/deploy.sh
