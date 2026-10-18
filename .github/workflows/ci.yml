@@ -27,6 +27,24 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=- \
             build
+  # The TestFlight ship itself only runs on main (ios-testflight.yml), so its
+  # decision logic is checked here on every PR instead of first running there.
+  ios-ship-logic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fleet ship tooling matches its sha256 pin
+        run: bash scripts/ios-fleet-pin.sh --check
+      - name: Ship scripts parse
+        run: |
+          for f in scripts/ios-ship-testflight.sh scripts/ios-install-appstore-profiles.sh \
+                   scripts/ios-prepare-signing.sh scripts/ios-scheduled-ship-gate.sh \
+                   scripts/ios-fleet-pin.sh scripts/ios-fleet/ship-testflight.sh; do
+            bash -n "$f"
+          done
+      - name: Scheduled ship gate decisions
+        run: bash scripts/test-ios-scheduled-ship-gate.sh
   test:
     runs-on: ubuntu-latest
     steps:

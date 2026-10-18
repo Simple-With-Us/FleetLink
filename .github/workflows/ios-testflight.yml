@@ -1,13 +1,46 @@
 name: iOS TestFlight
 
-# Archive and upload on a GitHub-hosted macOS runner.  Fork PRs never run.
-# The machine identity stays in repository secrets:
-#   INFISICAL_UNIVERSAL_AUTH_CLIENT_ID / INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET
-#   (fallback INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET).
-# scripts/ios-load-signing.mjs then reads, and never prints:
-#   Fleet-OPS prod /asc: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8
-#   FleetLink prod /: IOS_DIST_P12_BASE64, IOS_DIST_P12_PASSWORD
-# Do not mint a new App Store Connect key or distribution certificate.
+# Auto-ship: a merge to main that touches the iOS tree archives FleetLink and
+# uploads it to TestFlight with no human step.  Unsigned compile checks for
+# pull requests live in ci.yml (ios-build).  This workflow has NO pull_request
+# trigger on purpose: until 2026-10-17 it had one, and PR run 38828457447
+# uploaded build 2.0.0 (202610151415) from a branch, which put an unreviewed
+# build on every tester's phone.
+#
+# Ship path: scripts/ios-ship-testflight.sh -> scripts/ios-fleet/ship-testflight.sh
+# (the vendored fleet script, pinned by scripts/ios-fleet.sha256).  It reads the
+# highest 1.0.N already on App Store Connect and ships 1.0.(N+1) with a UTC
+# YYYYMMDDHHMM build number, declares export compliance (ensure-tf-ready), and
+# publishes the mandatory "What to Test" note from the commit range since the
+# last ship.  ios/project.yml carries placeholders only; nothing is hand-edited
+# per release.
+#
+# Rate gate and same-HEAD skip stay at the fleet defaults (one upload per hour,
+# nothing twice for one commit).  No IOS_TF_MIN_INTERVAL_SEC and no --force-ship
+# are set here as standing values.  A single run can be forced with the
+# force_ship dispatch input.
+#
+# RUNNER: macos-latest, same as Socratic-Trade, Congress.Trade and Usage-Monitor.
+# The owned Mac is a beta host, and binaries built there are rejected by App
+# Store review as INVALID_BINARY even when TestFlight accepts them.
+#
+# WHY THERE IS A `schedule:` TRIGGER
+# A squash merge made by github-actions[bot] lands on main under GitHub's
+# recursion guard and dispatches no push run.  The same is true of a merge that
+# the hourly rate gate skipped: nothing would retry it.  The cron notices both.
+# It is guarded by scripts/ios-scheduled-ship-gate.sh, which refuses to try
+# unless ios/ changed between the last successful ship and HEAD, and which never
+# ships on a tick that has no ship record, so a backend-only commit or an
+# evicted cache cannot put a build on TestFlight.
+#
+# Signing: ASC key from Fleet-OPS prod /asc, distribution identity from Fleet-OPS
+# prod /mac-certs, via the CI machine identity (scripts/ios-load-signing.mjs).
+# Values are masked and never printed.  Do not mint a new ASC key or certificate.
+#
+# Hosted runners have an empty home every job, so ~/.cache/ios-fleet (last
+# ship sha and time, build sequence cache) is restored from actions/cache.
+# Restore and save are separate steps because the save must run even when a
+# ship step failed.
 
 on:
   push:
@@ -15,19 +48,22 @@ on:
     paths:
       - "ios/**"
       - ".github/workflows/ios-testflight.yml"
-      - "scripts/ios-load-signing.mjs"
-      - "scripts/ios-prepare-signing.sh"
-      - "scripts/ios-install-profiles.mjs"
-      - "scripts/ios-ship-testflight.sh"
-  pull_request:
-    paths:
-      - "ios/**"
-      - ".github/workflows/ios-testflight.yml"
-      - "scripts/ios-load-signing.mjs"
-      - "scripts/ios-prepare-signing.sh"
-      - "scripts/ios-install-profiles.mjs"
-      - "scripts/ios-ship-testflight.sh"
+      - "scripts/ios-*"
+      - "scripts/ios-fleet/**"
   workflow_dispatch:
+    inputs:
+      export_only:
+        description: "Archive and export the IPA only; do not upload (signing check)"
+        type: boolean
+        default: false
+      force_ship:
+        description: "Bypass the one-per-hour rate gate and the same-commit skip for this run only"
+        type: boolean
+        default: false
+  schedule:
+    # Offset from Socratic-Trade (*/30), Congress.Trade (7,37), Usage-Monitor
+    # (13,43) and this repo's worker-deploy (23,53) so no two start in one minute.
+    - cron: "19,49 * * * *"
 
 permissions:
   contents: read
@@ -43,35 +79,138 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 90
     env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
       INFISICAL_PROJECT_ID: 7948d7ef-0f8d-4165-b2c6-8f8fc79049ac
       INFISICAL_ASC_PROJECT_ID: 8dae6d03-8f12-48b2-adf3-e5c1b881c8c5
       INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_ID || secrets.INFISICAL_CLIENT_ID }}
       INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET || secrets.INFISICAL_CLIENT_SECRET }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The scheduled gate diffs HEAD against the sha recorded by the last
+          # ship, and the What to Test note is rendered from the commits since
+          # it.  A depth-1 checkout makes both ranges uncomputable.
+          fetch-depth: 0
 
-      - name: Install Node dependencies
-        run: npm ci
+      - name: Restore iOS ship state
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ios-fleet
+          key: ios-fleet-fleetlink-${{ github.run_id }}
+          restore-keys: |
+            ios-fleet-fleetlink-
 
-      - name: Reject a beta Xcode
+      # Runs first so a tick with nothing to ship costs seconds and cannot go
+      # red on an unrelated environment problem.  Push and dispatch always vote
+      # ship (a push already passed the paths filter above).
+      - name: Scheduled ship gate (skip unless iOS code changed)
+        id: gate
         run: |
+          bash "$GITHUB_WORKSPACE/scripts/ios-scheduled-ship-gate.sh" \
+            --event "${{ github.event_name }}" \
+            --path-prefix 'ios/' \
+            --repo-root "$GITHUB_WORKSPACE" \
+            fleetlink
+
+      # Only main may upload.  A dispatch from any other ref is a signing
+      # check: it archives and exports the IPA and stops before the upload.
+      - name: Resolve ship flags
+        id: flags
+        if: steps.gate.outputs.should_ship == '1'
+        env:
+          REF: ${{ github.ref }}
+          EXPORT_ONLY: ${{ inputs.export_only }}
+          FORCE_SHIP: ${{ inputs.force_ship }}
+        run: |
+          set -euo pipefail
+          args=""
+          if [ "$REF" != "refs/heads/main" ]; then
+            args="--export-only"
+            echo "::notice::ref $REF is not main.  Export only, nothing is uploaded."
+          elif [ "$EXPORT_ONLY" = "true" ]; then
+            args="--export-only"
+            echo "::notice::export_only was requested.  Nothing is uploaded."
+          elif [ "$FORCE_SHIP" = "true" ]; then
+            args="--force-ship"
+            echo "::notice::force_ship was requested.  The rate gate is bypassed for this run only."
+          fi
+          echo "IOS_SHIP_ARGS=${args}" >> "$GITHUB_ENV"
+
+      - name: Verify in-repo ios-fleet pin
+        if: steps.gate.outputs.should_ship == '1'
+        run: bash scripts/ios-fleet-pin.sh --check
+
+      - name: Assert stable Xcode and a non-beta host OS
+        if: steps.gate.outputs.should_ship == '1'
+        run: |
+          echo "DEVELOPER_DIR=${DEVELOPER_DIR}"
           xcodebuild -version
+          case "$DEVELOPER_DIR" in
+            *[Bb]eta*)
+              echo "::error::DEVELOPER_DIR resolves to a beta Xcode: $DEVELOPER_DIR"
+              exit 1
+              ;;
+          esac
           if xcodebuild -version | grep -qi beta; then
             echo "::error::xcodebuild reports a beta Xcode toolchain"
             exit 1
           fi
+          os=$(sw_vers -productVersion)
+          build=$(sw_vers -buildVersion)
+          echo "macOS ${os} (${build})"
+          if echo "$build" | grep -Eq '[0-9][a-z]$'; then
+            echo "::error::macOS ${os} build ${build} is a beta host.  App Store review rejects these as INVALID_BINARY."
+            exit 1
+          fi
+
+      - name: Install Node dependencies
+        if: steps.gate.outputs.should_ship == '1'
+        run: npm ci
 
       - name: Load signing material from Infisical
+        if: steps.gate.outputs.should_ship == '1'
         run: node scripts/ios-load-signing.mjs
 
       - name: Import the distribution identity
+        if: steps.gate.outputs.should_ship == '1'
         run: bash scripts/ios-prepare-signing.sh
 
       - name: Install XcodeGen
+        if: steps.gate.outputs.should_ship == '1'
         run: brew install xcodegen
 
-      - name: Install App Store profiles
-        run: node scripts/ios-install-profiles.mjs install
-
+      # The fleet script installs the App Store profiles itself (manual signing
+      # mode, scripts/ios-install-appstore-profiles.sh), so there is no separate
+      # profile step.  IOS_TF_RELEASE_NOTES=1 publishes the mandatory What to
+      # Test note.  IOS_MANUAL_SIGN=1 makes a missing profile map fail loudly
+      # instead of falling back to Xcode automatic signing, which Apple rejects
+      # for the fleet key.
       - name: Archive and upload to TestFlight
-        run: bash scripts/ios-ship-testflight.sh
+        id: ship
+        if: steps.gate.outputs.should_ship == '1'
+        env:
+          IOS_TF_RELEASE_NOTES: "1"
+          IOS_MANUAL_SIGN: "1"
+        run: |
+          # IOS_SHIP_ARGS is empty or one fleet flag (--export-only, --force-ship).
+          # shellcheck disable=SC2086
+          bash scripts/ios-ship-testflight.sh ${IOS_SHIP_ARGS:-}
+
+      # Saved even when the ship step failed, but only on ticks that tried to
+      # ship (a no-op tick changes no state).  A run that only exported the IPA
+      # records nothing a later gate would read.
+      - name: Save iOS ship state
+        if: ${{ always() && steps.gate.outputs.should_ship == '1' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ios-fleet
+          key: ios-fleet-fleetlink-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Remove runner signing material
+        if: ${{ always() && steps.gate.outputs.should_ship == '1' }}
+        run: |
+          set +o xtrace
+          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" >/dev/null 2>&1 || true
+          rm -f "$RUNNER_TEMP/app-signing-kc-pass" "$HOME/.secrets/appstore-connect.env"
+          rm -rf "$RUNNER_TEMP/ios-signing"
+          rm -rf "$HOME/.private_keys" "$HOME/private_keys" "$HOME/.appstoreconnect/private_keys"

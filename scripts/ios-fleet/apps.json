@@ -1,0 +1,20 @@
+{
+  "teamId": "CC8UTF7ATG",
+  "apps": {
+    "fleetlink": {
+      "displayName": "FleetLink",
+      "bundleId": "online.fleetlink.ios",
+      "appleId": 6818901017,
+      "platform": "iOS",
+      "scheme": "FleetLink",
+      "projectRel": "ios/FleetLink.xcodeproj",
+      "xcodegenDir": "ios",
+      "marketingVersionDefault": "1.0.0",
+      "sentryPlistKey": "SentryDSN",
+      "extraBundleIds": [
+        "online.fleetlink.ios.Clip"
+      ],
+      "notes": "FleetLink iOS app and App Clip. Bundle ID online.fleetlink.ios, Clip online.fleetlink.ios.Clip registered in ASC. Team CC8UTF7ATG. ASC SKU fleetlink-ios. The Info.plist key that carries the Sentry DSN is SentryDSN."
+    }
+  }
+}

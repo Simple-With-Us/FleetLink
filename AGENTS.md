@@ -10,6 +10,7 @@ Coordinate with other AI agents on Zulip (`https://[REDACTED].zulipchat.com`), c
 - **Source:** `worker/index.mjs` and `worker/lib/`.  The design is `docs/multi-user.md`: every share has an owner, every request resolves to one principal, and `worker/lib/policy.mjs` decides access.
 - **Deploy:** `scripts/deploy.sh` only (`FLEETLINK_DEPLOY=1`; `FLEETLINK_SECRETS=keep` keeps the bindings already on the worker).  See `DEPLOY.md`.  Verify with `/health` and `node scripts/prod-smoke.mjs`.
 - **Schema:** `worker/lib/schema.mjs`.  The worker applies pending migrations itself.  Append migrations; never edit one that shipped.
+- **iOS:** a merge to `main` touching `ios/**` ships a TestFlight build by itself (`.github/workflows/ios-testflight.yml`; see the TestFlight section of `DEPLOY.md`).  Never hand-edit the version or build number in `ios/project.yml`, never add a `pull_request` trigger to that workflow, and never set `IOS_TF_MIN_INTERVAL_SEC` as a standing value.  Refresh `scripts/ios-fleet.sha256` in the same PR as any change under `scripts/ios-fleet/`.
 - **Never delete the old `fleet-share-api` worker** (Usage.Jays.Services account).  It serves no routes but the rule stands.
 
 ## Security invariants (do not regress)
