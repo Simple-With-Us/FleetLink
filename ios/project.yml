@@ -1,3 +1,8 @@
+# MARKETING_VERSION and CURRENT_PROJECT_VERSION below are placeholders for local
+# builds.  A TestFlight ship overrides both on the xcodebuild command line:
+# scripts/ios-fleet/ship-testflight.sh reads the highest 1.0.N on App Store
+# Connect, ships 1.0.(N+1) with a UTC YYYYMMDDHHMM build number, and applies the
+# same pair to the app and the App Clip.  Do not bump them by hand to ship.
 name: FleetLink
 options:
   bundleIdPrefix: online.fleetlink.ios
@@ -32,8 +37,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios.Clip
         DEVELOPMENT_TEAM: CC8UTF7ATG
-        MARKETING_VERSION: "2.0.0"
-        CURRENT_PROJECT_VERSION: "202610151415"
+        MARKETING_VERSION: "1.0.18"
+        CURRENT_PROJECT_VERSION: "202610141907"
         SWIFT_VERSION: '5.9'
         TARGETED_DEVICE_FAMILY: '1,2'
         CODE_SIGN_ENTITLEMENTS: Clip/FleetLinkClip.entitlements
@@ -92,8 +97,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios
         DEVELOPMENT_TEAM: CC8UTF7ATG
-        MARKETING_VERSION: "2.0.0"
-        CURRENT_PROJECT_VERSION: "202610151415"
+        MARKETING_VERSION: "1.0.18"
+        CURRENT_PROJECT_VERSION: "202610141907"
         SWIFT_VERSION: '5.9'
         TARGETED_DEVICE_FAMILY: '1,2'
         CODE_SIGN_ENTITLEMENTS: App/FleetLink.entitlements

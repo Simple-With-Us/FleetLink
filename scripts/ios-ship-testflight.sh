@@ -1,107 +1,106 @@
 #!/usr/bin/env bash
-# Archive FleetLink with the Release manual profiles and upload the IPA.
-# Versions come from ios/project.yml.  A build number already on App Store
-# Connect is left in place.  Secret values are never printed.
+# Thin wrapper: ship this app's native iOS binary to TestFlight (no Xcode UI).
+# Canonical implementation: scripts/ios-fleet/ship-testflight.sh (in this repo).
+# The host copy at /Users/jay/apps/ios-fleet/ is a runtime install of the same
+# file and is used ONLY as a fallback when the in-repo copy is missing.
+#
+# Do not run this on Linux cloud seats. Archive + upload is
+# .github/workflows/ios-testflight.yml on GitHub-hosted macos-latest.
+# Do not restart a self-hosted Mac runner or run local Xcode to ship.
+#
+# WHY A MERGE OFTEN DOES NOT PRODUCE A TESTFLIGHT BUILD
+# .github/workflows/ios-testflight.yml calls this on every push to main touching
+# ios/**, but the fleet script enforces a minimum interval between
+# successful ships per app: DEFAULT_MIN_INTERVAL_SEC=3600 (3600s = 1 hour),
+# defined near the top of scripts/ios-fleet/ship-testflight.sh. Runs inside that
+# window log "ship-gate: skip" and exit 0. It also skips when git HEAD already
+# shipped. Neither kind of skip consumes a build number (fixed 2026-08-12).
+# Override one run with IOS_TF_MIN_INTERVAL_SEC=<seconds> or --force-ship;
+# changing the standing limit means editing DEFAULT_MIN_INTERVAL_SEC.
+#
+# VERSION NUMBERS: ios/project.yml carries a placeholder only.  The fleet script
+# reads the highest 1.0.N already on App Store Connect and ships the next one,
+# so there is nothing to hand-edit and nothing to forget.  MARKETING_VERSION is 1.0.<seq> (+1 every rebuild) and
+# CURRENT_PROJECT_VERSION is a UTC YYYYMMDDHHMM stamp, so App Store Connect
+# shows "1.0.8 (202608121315)" -- the parenthetical says when the build was cut
+# instead of repeating the version.
+#
+# STABLE XCODE IS MANDATORY (owner, reaffirmed 2026-08-11).
+# Xcode-beta's SDK breaks TestFlight / App Store Connect compatibility: a binary
+# built against a beta SDK is accepted into TestFlight but rejected at
+# submission as INVALID_BINARY.
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-die() { echo "error: $*" >&2; exit 1; }
-log() { echo "[ios-ship] $*"; }
 
-command -v xcodebuild >/dev/null 2>&1 || die "xcodebuild is not on this host"
-command -v xcodegen >/dev/null 2>&1 || die "xcodegen is not on this host"
-xcodebuild -version
-if xcodebuild -version | grep -qi beta; then
-  die "xcodebuild reports a beta Xcode toolchain"
-fi
+STABLE_XCODE="${STABLE_XCODE:-/Applications/Xcode.app}"
+STABLE_DEV_DIR="${STABLE_XCODE}/Contents/Developer"
 
-read_setting() {
-  python3 - "$ROOT/ios/project.yml" "$1" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding="utf-8").read()
-name = sys.argv[2]
-found = re.findall(rf'{name}:\s*"?([^"\n]+)"?', text)
-values = sorted({item.strip() for item in found})
-if len(values) != 1:
-    raise SystemExit(f"error: {name} must be one value, found {values}")
-print(values[0])
-PY
+# What would we build with if we did nothing?
+resolved="${DEVELOPER_DIR:-$(xcode-select -p 2>/dev/null || true)}"
+
+is_beta() {
+  local dir="$1"
+  [[ "$dir" == *Xcode-beta* ]] && return 0
+  # Also catch a stable-looking path whose Xcode self-reports as a beta.
+  local plist="${dir%/Contents/Developer}/Contents/Info.plist"
+  if [[ -r "$plist" ]]; then
+    local ver
+    ver=$(defaults read "$plist" CFBundleShortVersionString 2>/dev/null || echo "")
+    [[ "$ver" == *[Bb]eta* ]] && return 0
+  fi
+  return 1
 }
 
-MARKETING="$(read_setting MARKETING_VERSION)"
-BUILD="$(read_setting CURRENT_PROJECT_VERSION)"
-TEAM="$(read_setting DEVELOPMENT_TEAM)"
-log "marketing=${MARKETING} build=${BUILD}"
-
-STATE="$(node "$ROOT/scripts/ios-install-profiles.mjs" build-state online.fleetlink.ios "$BUILD")"
-if [[ "$STATE" == "present" ]]; then
-  log "App Store Connect already has build ${BUILD}.  Nothing to upload."
-  exit 0
-fi
-[[ "$STATE" == "absent" ]] || die "unexpected build state: ${STATE}"
-
-(cd "$ROOT/ios" && xcodegen generate)
-
-WORK="${RUNNER_TEMP:-$(mktemp -d)}"
-ARCHIVE="${WORK}/FleetLink.xcarchive"
-EXPORT="${WORK}/export"
-mkdir -p "$EXPORT"
-EXPORT_PLIST="${WORK}/ExportOptions.plist"
-python3 - "$EXPORT_PLIST" "$TEAM" "$ROOT/ios/appstore-profiles.json" <<'PY'
-import json, plistlib, sys
-path, team, profile_map = sys.argv[1:]
-profiles = json.load(open(profile_map, encoding="utf-8"))
-plistlib.dump({
-    "method": "app-store-connect",
-    "signingStyle": "manual",
-    "teamID": team,
-    "uploadSymbols": True,
-    "provisioningProfiles": profiles,
-}, open(path, "wb"))
-PY
-
-SENTRY_FLAGS=()
-if [[ -n "${SENTRY_DSN:-}" ]]; then
-  SENTRY_FLAGS+=(SENTRY_DSN="$SENTRY_DSN")
-  log "SENTRY_DSN present for archive (length ${#SENTRY_DSN})"
+if [[ -z "$resolved" ]] || is_beta "$resolved"; then
+  if [[ ! -d "$STABLE_DEV_DIR" ]]; then
+    echo "ERROR: stable Xcode not found at ${STABLE_XCODE}." >&2
+    echo "       Refusing to build for App Store Connect with Xcode-beta --" >&2
+    echo "       beta-SDK binaries are rejected as INVALID_BINARY at submission." >&2
+    echo "       This wrapper is for GitHub-hosted macos-latest (ios-testflight.yml)." >&2
+    echo "       Do not run xcodebuild locally or restart a Mac runner." >&2
+    exit 1
+  fi
+  [[ -n "$resolved" ]] && echo "[ios-ship] refusing beta toolchain at ${resolved}"
+  export DEVELOPER_DIR="$STABLE_DEV_DIR"
 else
-  log "SENTRY_DSN unset.  This TestFlight build ships with Sentry Cocoa inert."
+  export DEVELOPER_DIR="$resolved"
 fi
 
-log "archiving"
-set +e
-xcodebuild archive \
-  -project "$ROOT/ios/FleetLink.xcodeproj" \
-  -scheme FleetLink \
-  -configuration Release \
-  -destination "generic/platform=iOS" \
-  -archivePath "$ARCHIVE" \
-  DEVELOPMENT_TEAM="$TEAM" \
-  MARKETING_VERSION="$MARKETING" \
-  CURRENT_PROJECT_VERSION="$BUILD" \
-  ${SENTRY_FLAGS[@]:+"${SENTRY_FLAGS[@]}"}
-ARCHIVE_RC=$?
-set -e
-[[ $ARCHIVE_RC -eq 0 ]] || die "archive failed (rc=${ARCHIVE_RC})"
+# Fail loudly rather than silently shipping a beta-built binary.
+if is_beta "$DEVELOPER_DIR"; then
+  echo "ERROR: DEVELOPER_DIR still resolves to a beta Xcode (${DEVELOPER_DIR})." >&2
+  exit 1
+fi
 
-log "exporting IPA"
-set +e
-xcodebuild -exportArchive \
-  -archivePath "$ARCHIVE" \
-  -exportPath "$EXPORT" \
-  -exportOptionsPlist "$EXPORT_PLIST"
-EXPORT_RC=$?
-set -e
-[[ $EXPORT_RC -eq 0 ]] || die "export failed (rc=${EXPORT_RC})"
+echo "[ios-ship] DEVELOPER_DIR=${DEVELOPER_DIR}"
+xcodebuild -version | sed 's/^/[ios-ship] /'
 
-IPA="$(python3 -c 'import pathlib,sys; print(next(pathlib.Path(sys.argv[1]).rglob("*.ipa"), ""))' "$EXPORT")"
-[[ -n "$IPA" ]] || die "export did not produce an IPA"
-log "uploading ${IPA##*/}"
-set +e
-xcrun altool --upload-package "$IPA" \
-  --apiKey "$ASC_KEY_ID" \
-  --apiIssuer "$ASC_ISSUER_ID"
-UPLOAD_RC=$?
-set -e
-[[ $UPLOAD_RC -eq 0 ]] || die "altool upload failed (rc=${UPLOAD_RC})"
-log "uploaded ${MARKETING} (${BUILD}) for online.fleetlink.ios"
+# Prefer the reviewed, version-controlled copy. Fall back to the host install
+# only if it is absent, and say so loudly -- a silent fallback would put an
+# unreviewed script back in charge of release numbering, which is the exact
+# failure this vendoring was meant to end.
+IN_REPO="${ROOT}/scripts/ios-fleet/ship-testflight.sh"
+HOST_COPY="/Users/jay/apps/ios-fleet/ship-testflight.sh"
+
+if [[ -f "$IN_REPO" ]]; then
+  SHIP_SCRIPT="$IN_REPO"
+  echo "[ios-ship] using in-repo fleet script: ${SHIP_SCRIPT}"
+elif [[ -f "$HOST_COPY" ]]; then
+  SHIP_SCRIPT="$HOST_COPY"
+  echo "[ios-ship] ===================================================================" >&2
+  echo "[ios-ship] WARNING: in-repo fleet script missing (${IN_REPO})." >&2
+  echo "[ios-ship] WARNING: falling back to the UNVERSIONED host copy at" >&2
+  echo "[ios-ship] WARNING:   ${HOST_COPY}" >&2
+  echo "[ios-ship] WARNING: that copy is outside git -- no history, no review. It may" >&2
+  echo "[ios-ship] WARNING: number this release differently than the repo would." >&2
+  echo "[ios-ship] WARNING: Restore scripts/ios-fleet/ before relying on this build." >&2
+  echo "[ios-ship] ===================================================================" >&2
+else
+  echo "ERROR: no fleet ship script found." >&2
+  echo "       looked for: ${IN_REPO}" >&2
+  echo "                   ${HOST_COPY}" >&2
+  echo "       Hosted macos-latest has no /Users/jay/apps/ios-fleet; vendor it." >&2
+  exit 1
+fi
+
+exec bash "$SHIP_SCRIPT" fleetlink --repo-root "$ROOT" "$@"

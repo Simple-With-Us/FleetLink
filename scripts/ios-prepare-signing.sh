@@ -43,6 +43,26 @@ install_private_key "${HOME}/.private_keys"
 install_private_key "${HOME}/.appstoreconnect/private_keys"
 install_private_key "${HOME}/private_keys"
 
+# scripts/ios-fleet/ship-testflight.sh and asc-api.mjs read the App Store
+# Connect key from ~/.secrets/appstore-connect.env.  Write it only on a hosted
+# runner, whose home is a throwaway VM.  On an owner Mac this file is the
+# owner's own handoff and must never be overwritten by a signing helper.
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  SECRETS_DIR="${HOME}/.secrets"
+  mkdir -p "$SECRETS_DIR"
+  chmod 700 "$SECRETS_DIR"
+  {
+    echo "ASC_KEY_ID=${ASC_KEY_ID}"
+    echo "ASC_ISSUER_ID=${ASC_ISSUER_ID}"
+    echo "ASC_KEY_PATH=${KEY_PATH}"
+  } > "${SECRETS_DIR}/appstore-connect.env"
+  chmod 600 "${SECRETS_DIR}/appstore-connect.env"
+  if [[ -n "${GITHUB_ENV:-}" ]]; then
+    echo "ASC_KEY_PATH=${KEY_PATH}" >> "$GITHUB_ENV"
+  fi
+  log "ASC env file written for the fleet ship script"
+fi
+
 P12_PATH="${STAGE_DIR}/ios-distribution.p12"
 python3 - "$P12_PATH" <<'PY'
 import base64, os, pathlib, sys
