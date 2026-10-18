@@ -67,7 +67,7 @@ const CreateLinkSchema = z.object({
 }).strict();
 
 const SlugSchema = z.object({ slug: z.string().trim().min(1).max(80) }).strict();
-const RenewSchema = z.object({ slug: z.string().trim().min(1).max(80), days: z.number().finite().positive().optional() }).strict();
+const RenewSchema = z.object({ slug: z.string().trim().min(1).max(80), days }).strict();
 const ListSchema = z.object({
   scope: z.enum(["mine", "bots", "team", "teams", "all"]).optional(),
   team_id: z.string().max(64).optional(),
@@ -127,7 +127,7 @@ const bodyProps = {
 };
 
 const daysSchema = {
-  description: "Lifetime in days, or \"forever\" for an admin.  Omit for the default: 3 days for files, 30 for links.",
+  description: "Lifetime in days, or \"forever\" for an admin or bot.  Omit for the default: 3 days for files, 30 for links.",
   anyOf: [{ type: "number", exclusiveMinimum: 0 }, { type: "string", const: "forever" }]
 };
 
@@ -207,13 +207,13 @@ const TOOLS = [
   {
     name: "fleetlink_renew_share",
     title: "Renew share",
-    description: "Extend a share you manage.  Non-admins can renew a share three times, within the normal lifetime limits.",
+    description: "Extend a share you manage.  Non-admins can renew a share three times, within the normal lifetime limits.  Admins and bots can renew forever.",
     schema: RenewSchema,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["slug"],
-      properties: { slug: { type: "string" }, days: { type: "number", exclusiveMinimum: 0 } }
+      properties: { slug: { type: "string" }, days: daysSchema }
     },
     run: toolRenewShare
   },

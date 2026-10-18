@@ -5,6 +5,7 @@ import { all, first, now, run } from "./db.mjs";
 import { badRequest, forbidden, iso, parseWith } from "./http.mjs";
 import { requireTeamRole } from "./teams.mjs";
 import { effectiveQuotas } from "./users.mjs";
+import { ensureFleetOwner } from "./fleet.mjs";
 
 export const API_TOKEN = /^fla_[0-9a-f]{64}$/;
 const TOUCH_SECONDS = 300;
@@ -133,6 +134,7 @@ const STANDARD_LIMITS_USER = Object.freeze({ id: null, role: "user", kind: "pers
  */
 export async function tokenLimitsUser(env, user, token) {
   if (token?.limits_from !== "manager") return null;
+  await ensureFleetOwner(env);
   const manager = user.manager_id ? await first(env.DB, "SELECT * FROM users WHERE id = ? AND status = 'active' AND kind = 'person'", user.manager_id) : null;
   return manager ?? STANDARD_LIMITS_USER;
 }
