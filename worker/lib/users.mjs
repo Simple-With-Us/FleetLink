@@ -78,9 +78,11 @@ export async function userUsage(db, userId) {
 export const BOT_TOKEN_QUOTA = 100;
 
 export function effectiveQuotas(user, settings) {
-  const unlimited = user.role === "admin" || user.kind === "agent";
+  const storage = user.storage_quota_bytes !== null && user.storage_quota_bytes !== undefined
+    ? user.storage_quota_bytes
+    : (user.role === "admin" || user.kind === "agent" ? null : settings.default_storage_quota_bytes);
   return {
-    storage_bytes: unlimited ? null : (user.storage_quota_bytes ?? settings.default_storage_quota_bytes),
+    storage_bytes: storage,
     token_quota: user.token_quota ?? (user.kind === "agent" ? BOT_TOKEN_QUOTA : settings.default_token_quota)
   };
 }

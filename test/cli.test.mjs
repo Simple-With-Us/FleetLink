@@ -230,6 +230,12 @@ test("cat, add, rm-file, update, tools and tool give the CLI everything the MCP 
     const refused = await run(["tool", "fleetlink_get_share", "--args-json", "{\"slug\":\"nope-nope\"}"], { env });
     assert.equal(refused.status, 1);
     assert.match(refused.stderr, /Share not found/);
+
+    // Renewing a share to forever via CLI.
+    await callJson(f.env, "PATCH", `/api/admin/users/${f.ada.user.id}`, { auth: { operator: true }, json: { role: "admin" } });
+    const renewed = await run(["renew", "cli-full-2", "--forever"], { env });
+    assert.equal(renewed.status, 0, renewed.stderr);
+    assert.match(renewed.stdout, /cli-full-2 now expires never/);
   } finally {
     await f.done();
   }

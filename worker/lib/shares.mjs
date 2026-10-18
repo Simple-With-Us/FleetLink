@@ -156,6 +156,7 @@ export const CreateShareBody = z.object({
   url: z.string().max(4096).optional(),
   target_url: z.string().max(4096).optional(),
   days: z.union([z.number(), z.string().max(20)]).nullable().optional(),
+  expire_days: z.union([z.number(), z.string().max(20)]).nullable().optional(),
   password: z.string().max(256).nullable().optional(),
   title: z.string().max(400).nullable().optional(),
   description: z.string().max(2000).nullable().optional(),
@@ -200,7 +201,7 @@ export async function createShare(env, principal, input) {
   const ts = now();
   const requested = cleanSlug(input.slug, { isAdmin: fullLimits(principal) });
   const targetUrl = kind === "link" ? normalizeTargetUrl(input.url ?? input.target_url) : null;
-  const expiresAt = resolveExpiry(principal, kind, input.days, ts);
+  const expiresAt = resolveExpiry(principal, kind, input.days ?? input.expire_days, ts);
   const password = cleanPassword(input.password);
   const teamId = await resolveTeam(env, principal, await defaultTeam(env, principal, input));
   // The operator credential is the fleet owner's break-glass identity, so what it makes is theirs.
@@ -475,6 +476,9 @@ export async function renewShare(env, principal, slug, body = {}) {
   const ts = now();
   const extended = resolveExpiry(principal, share.kind, body.days, ts);
   if (extended == null) {
+    if (share.total_bytes > FOREVER_MAX_BYTES) {
+      throw new HttpError(413, `A share that never expires holds at most ${FOREVER_MAX_BYTES / MB} MB.  Give it an expiry.`);
+    }
     await run(env.DB, "UPDATE shares SET expires_at = NULL, renewals = renewals + 1, updated_at = ? WHERE id = ?", ts, share.id);
   } else {
     await run(

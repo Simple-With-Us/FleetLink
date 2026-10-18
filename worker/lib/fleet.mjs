@@ -30,7 +30,13 @@ async function activePerson(env, id) {
 /** The fleet owner's user row, or null when none is known yet. */
 export async function fleetOwner(env) {
   const stored = await activePerson(env, await getMeta(env.DB, META_KEY));
-  if (stored) return stored;
+  if (stored) {
+    if (stored.role !== "admin") {
+      await run(env.DB, "UPDATE users SET role = 'admin', updated_at = ? WHERE id = ?", now(), stored.id);
+      stored.role = "admin";
+    }
+    return stored;
+  }
   const email = String(env?.FLEET_OWNER_EMAIL || "").trim().toLowerCase();
   if (!email) return null;
   const match = await first(
@@ -51,6 +57,10 @@ export async function fleetOwner(env) {
 export async function claimFleet(env, owner, how = "admin") {
   const previous = await getMeta(env.DB, META_KEY);
   await setMeta(env.DB, META_KEY, owner.id);
+  if (owner.role !== "admin") {
+    await run(env.DB, "UPDATE users SET role = 'admin', updated_at = ? WHERE id = ?", now(), owner.id);
+    owner.role = "admin";
+  }
   const bots = await run(env.DB, "UPDATE users SET manager_id = ?, updated_at = ? WHERE kind = 'agent' AND (manager_id IS NULL OR manager_id = ?)", owner.id, now(), previous || owner.id);
   const shares = await run(env.DB, "UPDATE shares SET owner_id = ?, updated_at = ? WHERE owner_id = ?", owner.id, now(), OPERATOR_USER_ID);
   await run(
@@ -69,6 +79,10 @@ export async function ensureFleetOwner(env) {
   if (applied.has(env.DB)) return applied.get(env.DB);
   const owner = await fleetOwner(env);
   if (!owner) return null;
+  if (owner.role !== "admin") {
+    await run(env.DB, "UPDATE users SET role = 'admin', updated_at = ? WHERE id = ?", now(), owner.id);
+    owner.role = "admin";
+  }
   const pending = await first(env.DB, "SELECT COUNT(*) AS n FROM users WHERE kind = 'agent' AND manager_id IS NULL");
   const operatorShares = await first(env.DB, "SELECT COUNT(*) AS n FROM shares WHERE owner_id = ?", OPERATOR_USER_ID);
   const member = await first(env.DB, "SELECT role FROM team_members WHERE team_id = ? AND user_id = ?", FLEET_TEAM_ID, owner.id);

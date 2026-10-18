@@ -158,35 +158,36 @@ test("a site admin can claim the fleet when no email matches", async () => {
 });
 
 test("a bot token can follow its manager's limits live:  nothing is copied, so a change to the manager reaches it at once", async () => {
-  const { env, jay } = await fleet();
-  await callJson(env, "GET", "/api/me", { auth: jay });
-  const follow = await callJson(env, "POST", "/api/bots/usr_agent_codex/tokens", { auth: jay, json: { name: "follows", limits_from: "manager" } });
+  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const pat = await signUp(env, "Pat");
+  const botUser = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-bot" } })).data.bot;
+  const follow = await callJson(env, "POST", `/api/bots/${botUser.id}/tokens`, { auth: pat, json: { name: "follows", limits_from: "manager" } });
   assert.equal(follow.status, 201);
   assert.equal(follow.data.api_token.limits_from, "manager");
-  const own = (await callJson(env, "POST", "/api/bots/usr_agent_codex/tokens", { auth: jay, json: { name: "own" } })).data.token;
+  const own = (await callJson(env, "POST", `/api/bots/${botUser.id}/tokens`, { auth: pat, json: { name: "own" } })).data.token;
   const who = async (token) => (await rpcTool(env, { auth: { token } }, "fleetlink_whoami")).data.limits;
 
-  // Jay is a regular person:  the following token has the standard limits;  the bot's own token has the widest.
+  // Pat is a regular person:  the following token has the standard limits;  the bot's own token has the widest.
   assert.deepEqual([(await who(follow.data.token)).max_file_bytes, (await who(follow.data.token)).follows], [100 * 1024 * 1024, "manager"]);
   assert.equal((await who(own)).max_file_bytes, 300 * 1024 * 1024);
   assert.equal((await rpcTool(env, { auth: { token: follow.data.token } }, "fleetlink_create_share", { text: "x", days: "forever" })).error, "Only admins can make a share that never expires.");
-  // Jay's storage quota applies to what the following token stores.
-  await callJson(env, "PATCH", `/api/admin/users/${jay.user.id}`, { auth: { operator: true }, json: { storage_quota_bytes: 10 } });
+  // Pat's storage quota applies to what the following token stores.
+  await callJson(env, "PATCH", `/api/admin/users/${pat.user.id}`, { auth: { operator: true }, json: { storage_quota_bytes: 10 } });
   const me = await callJson(env, "GET", "/api/me", { auth: { token: follow.data.token } });
   assert.deepEqual([me.data.quotas.storage_bytes, me.data.auth.limits_from], [10, "manager"]);
   assert.equal((await rpcTool(env, { auth: { token: follow.data.token } }, "fleetlink_create_share", { text: "more than ten bytes" })).error?.includes("storage quota"), true);
   assert.equal((await rpcTool(env, { auth: { token: own } }, "fleetlink_create_share", { text: "more than ten bytes" })).error, null);
 
-  // Jay becomes a site admin:  the following token gets the admin limits on its next request, with no new token.
-  await callJson(env, "PATCH", `/api/admin/users/${jay.user.id}`, { auth: { operator: true }, json: { role: "admin", storage_quota_bytes: null } });
+  // Pat becomes a site admin:  the following token gets the admin limits on its next request, with no new token.
+  await callJson(env, "PATCH", `/api/admin/users/${pat.user.id}`, { auth: { operator: true }, json: { role: "admin", storage_quota_bytes: null } });
   assert.equal((await who(follow.data.token)).max_file_bytes, 300 * 1024 * 1024);
   assert.equal((await rpcTool(env, { auth: { token: follow.data.token } }, "fleetlink_create_share", { text: "x", days: "forever" })).error, null);
   // A disabled manager means the standard limits, never wider.
-  await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(jay.user.id).run();
+  await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(pat.user.id).run();
   assert.equal((await who(follow.data.token)).max_file_bytes, 100 * 1024 * 1024);
 
   // Only a bot with a manager can have one.
-  const person = await signUp(env, "Pat");
+  const person = await signUp(env, "Robin");
   assert.equal((await callJson(env, "POST", "/api/tokens", { auth: person, json: { name: "x", limits_from: "manager" } })).status, 400);
 });
 
@@ -198,4 +199,49 @@ test("the Agent-Sync credential can mint a seat token that follows the fleet own
   assert.equal(minted.data.api_token.limits_from, "manager");
   const me = await callJson(env, "GET", "/api/me", { auth: { token: minted.data.token } });
   assert.deepEqual([me.data.user.id, me.data.auth.limits_from], ["usr_agent_jet", "manager"]);
+});
+
+test("fleet bot tokens under the fleet owner can post forever, renew forever, and create forever short links", async () => {
+  const { env, jay } = await fleet();
+  await callJson(env, "GET", "/api/me", { auth: jay });
+  const minted = await callJson(env, "POST", "/api/bots/usr_agent_codex/tokens", { auth: jay, json: { name: "codex-forever", limits_from: "manager" } });
+  assert.equal(minted.status, 201);
+  const token = minted.data.token;
+
+  // whoami shows forever_allowed is true and admin file caps
+  const who = await rpcTool(env, { auth: { token } }, "fleetlink_whoami");
+  assert.equal(who.data.limits.forever_allowed, true);
+  assert.equal(who.data.limits.max_file_bytes, 300 * 1024 * 1024);
+  assert.equal(who.data.limits.max_file_days, null);
+  assert.equal(who.data.limits.max_link_days, null);
+
+  // MCP create share with days: "forever"
+  const created = await rpcTool(env, { auth: { token } }, "fleetlink_create_share", { text: "forever bot note", slug: "codex-forever", days: "forever" });
+  assert.equal(created.error, null);
+  assert.equal(created.data.share.expires_at, null);
+
+  // MCP create link with days: "forever"
+  const link = await rpcTool(env, { auth: { token } }, "fleetlink_create_link", { url: "https://example.com/forever", slug: "forever-link", days: "forever" });
+  assert.equal(link.error, null);
+  assert.equal(link.data.share.expires_at, null);
+
+  // Raw PUT with X-Expire-Days: forever
+  const rawPut = await call(env, "PUT", "/put-forever/file.txt", { auth: { token }, body: "raw forever", headers: { "content-type": "text/plain", "x-expire-days": "forever" } });
+  assert.equal(rawPut.status, 200);
+  const detail = await callJson(env, "GET", "/api/shares/put-forever", { auth: { token } });
+  assert.equal(detail.data.share.expires_at, null);
+
+  // Renew an expiring share to forever via MCP fleetlink_renew_share
+  const expiring = await rpcTool(env, { auth: { token } }, "fleetlink_create_share", { text: "temporary note", slug: "to-renew", days: 3 });
+  assert.notEqual(expiring.data.share.expires_at, null);
+  const renewed = await rpcTool(env, { auth: { token } }, "fleetlink_renew_share", { slug: "to-renew", days: "forever" });
+  assert.equal(renewed.error, null);
+  assert.equal(renewed.data.share.expires_at, null);
+
+  // HTTP POST /api/shares/:slug/renew with days: "forever"
+  const expiringHttp = await callJson(env, "POST", "/api/shares", { auth: { token }, json: { slug: "http-renew", days: 3 } });
+  assert.notEqual(expiringHttp.data.share.expires_at, null);
+  const renewedHttp = await callJson(env, "POST", "/api/shares/http-renew/renew", { auth: { token }, json: { days: "forever" } });
+  assert.equal(renewedHttp.status, 200);
+  assert.equal(renewedHttp.data.share.expires_at, null);
 });

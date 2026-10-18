@@ -514,7 +514,12 @@ def cmd_upload_url(args):
 
 
 def cmd_renew(args):
-    body = {"days": args.days} if args.days else {}
+    if getattr(args, "forever", False):
+        body = {"days": "forever"}
+    elif args.days:
+        body = {"days": args.days}
+    else:
+        body = {}
     data = Api(args).post("/api/shares/{}/renew".format(q(args.slug)), body)
     share = data["share"]
     emit(args, data, ["{} now expires {}".format(share["slug"], share["expires_at"] or "never")])
@@ -783,7 +788,7 @@ def build_parser():
     shareopts = argparse.ArgumentParser(add_help=False)
     shareopts.add_argument("--slug", "--id", dest="slug", help="share name (default: random); reuses a share you manage")
     shareopts.add_argument("--days", help="lifetime in days")
-    shareopts.add_argument("--forever", action="store_true", help="never expire (admins)")
+    shareopts.add_argument("--forever", action="store_true", help="never expire (admins and bots)")
     shareopts.add_argument("--password", help="require a password to open")
     shareopts.add_argument("--title", help="title shown on the share page")
     shareopts.add_argument("--team", help="team id to share it with (default: personal)")
@@ -882,6 +887,7 @@ def build_parser():
     p = sub.add_parser("renew", parents=[common], help="extend a share")
     p.add_argument("slug")
     p.add_argument("--days")
+    p.add_argument("--forever", action="store_true", help="never expire (admins and bots)")
     p.set_defaults(func=cmd_renew)
 
     p = sub.add_parser("delete", aliases=["rm"], parents=[common], help="delete a share")
