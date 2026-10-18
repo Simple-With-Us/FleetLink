@@ -11,6 +11,7 @@ import { membership, requireTeamRole, teamRoles } from "./teams.mjs";
 import { assertTokenTeam, requireLinksAllowed } from "./tokens.mjs";
 import { effectiveQuotas, userUsage } from "./users.mjs";
 import { assertValveOpen } from "./valve.mjs";
+import { loadSettings } from "./settings.mjs";
 
 const MB = 1024 * 1024;
 const DAY = 86400;
@@ -71,13 +72,38 @@ export function fullLimits(principal) {
   return Boolean(principal?.isAdmin || principal?.user?.kind === "agent");
 }
 
-function tier(principal) {
-  return fullLimits(principal) ? LIMITS.admin : LIMITS.user;
+export function tier(principal, settings) {
+  const isAdmin = fullLimits(principal);
+  if (!settings) return isAdmin ? LIMITS.admin : LIMITS.user;
+  if (isAdmin) {
+    return {
+      fileBytes: (settings.admin_max_file_mb ?? 300) * MB,
+      shareBytes: (settings.admin_max_share_mb ?? 1024) * MB,
+      shareFiles: settings.admin_max_share_files ?? 2000,
+      fileDays: null,
+      fileDefaultDays: settings.admin_default_file_days ?? 3,
+      linkDays: null,
+      linkDefaultDays: settings.admin_default_link_days ?? 30,
+      renewals: null,
+      foreverMaxBytes: (settings.admin_forever_max_mb ?? 500) * MB
+    };
+  }
+  return {
+    fileBytes: (settings.user_max_file_mb ?? 100) * MB,
+    shareBytes: (settings.user_max_share_mb ?? 500) * MB,
+    shareFiles: settings.user_max_share_files ?? 500,
+    fileDays: settings.user_file_max_days ?? 7,
+    fileDefaultDays: settings.user_file_default_days ?? 3,
+    linkDays: settings.user_link_max_days ?? 180,
+    linkDefaultDays: settings.user_default_link_days ?? 30,
+    renewals: settings.user_max_renewals ?? 3,
+    foreverMaxBytes: 0
+  };
 }
 
 /** Per-file cap after the principal's token narrows it. */
-export function fileByteLimit(principal) {
-  const base = tier(principal).fileBytes;
+export function fileByteLimit(principal, settings) {
+  const base = tier(principal, settings).fileBytes;
   const cap = principal.token?.max_file_bytes;
   return cap ? Math.min(base, cap) : base;
 }
@@ -87,8 +113,8 @@ export function fileByteLimit(principal) {
  * "forever", or empty for the default.  Admins may ask for forever.  A token's
  * cap clamps a default and rejects an explicit request past it.
  */
-export function resolveExpiry(principal, kind, days, ts = now()) {
-  const limits = tier(principal);
+export function resolveExpiry(principal, kind, days, ts = now(), settings) {
+  const limits = tier(principal, settings);
   const max = kind === "link" ? limits.linkDays : limits.fileDays;
   const fallback = kind === "link" ? limits.linkDefaultDays : limits.fileDefaultDays;
   const tokenCapDays = principal.token?.max_ttl_seconds ? principal.token.max_ttl_seconds / DAY : null;
@@ -201,7 +227,8 @@ export async function createShare(env, principal, input) {
   const ts = now();
   const requested = cleanSlug(input.slug, { isAdmin: fullLimits(principal) });
   const targetUrl = kind === "link" ? normalizeTargetUrl(input.url ?? input.target_url) : null;
-  const expiresAt = resolveExpiry(principal, kind, input.days ?? input.expire_days, ts);
+  const settings = input.settings || (env ? await loadSettings(env).catch(() => null) : null);
+  const expiresAt = resolveExpiry(principal, kind, input.days ?? input.expire_days, ts, settings);
   const password = cleanPassword(input.password);
   const teamId = await resolveTeam(env, principal, await defaultTeam(env, principal, input));
   // The operator credential is the fleet owner's break-glass identity, so what it makes is theirs.
@@ -282,8 +309,8 @@ async function recount(env, shareId) {
  */
 export async function assertCanStore(env, principal, share, { path, size, settings }) {
   if (share.kind !== "files") throw badRequest("Short links do not hold files.");
-  const limits = tier(principal);
-  const maxFile = fileByteLimit(principal);
+  const limits = tier(principal, settings);
+  const maxFile = fileByteLimit(principal, settings);
   if (!Number.isFinite(size) || size < 0) throw new HttpError(411, "Send a Content-Length with the file.");
   if (size > maxFile) throw new HttpError(413, `Files are at most ${Math.floor(maxFile / MB)} MB.`);
   const existing = await first(env.DB, "SELECT size FROM share_files WHERE share_id = ? AND path = ?", share.id, path);
@@ -293,8 +320,9 @@ export async function assertCanStore(env, principal, share, { path, size, settin
   const bytes = Number(fresh?.total_bytes ?? 0) - replacing + size;
   if (files > limits.shareFiles) throw new HttpError(413, `A share holds at most ${limits.shareFiles} files.`);
   if (bytes > limits.shareBytes) throw new HttpError(413, `A share holds at most ${Math.floor(limits.shareBytes / MB)} MB.`);
-  if (fresh?.expires_at == null && bytes > FOREVER_MAX_BYTES) {
-    throw new HttpError(413, `A share that never expires holds at most ${FOREVER_MAX_BYTES / MB} MB.  Give it an expiry.`);
+  const foreverMax = (settings?.admin_forever_max_mb ? settings.admin_forever_max_mb * MB : FOREVER_MAX_BYTES);
+  if (fresh?.expires_at == null && bytes > foreverMax) {
+    throw new HttpError(413, `A share that never expires holds at most ${foreverMax / MB} MB.  Give it an expiry.`);
   }
   const owner = share.owner_id === principal.user.id ? principal.user : await first(env.DB, "SELECT * FROM users WHERE id = ?", share.owner_id);
   // A token that follows its manager's limits works under the manager's
@@ -468,16 +496,18 @@ export async function makePersonal(env, principal, slug) {
 
 export async function renewShare(env, principal, slug, body = {}) {
   const { share } = await loadShareFor(env, principal, slug, "edit");
-  const limits = tier(principal);
+  const settings = body.settings || (env ? await loadSettings(env).catch(() => null) : null);
+  const limits = tier(principal, settings);
   if (share.expires_at == null) return { share, unchanged: true };
   if (limits.renewals != null && share.renewals >= limits.renewals) {
     throw forbidden(`A share can be renewed ${limits.renewals} times.  Create a new one to keep it longer.`);
   }
   const ts = now();
-  const extended = resolveExpiry(principal, share.kind, body.days, ts);
+  const extended = resolveExpiry(principal, share.kind, body.days, ts, settings);
+  const foreverMax = (settings?.admin_forever_max_mb ? settings.admin_forever_max_mb * MB : FOREVER_MAX_BYTES);
   if (extended == null) {
-    if (share.total_bytes > FOREVER_MAX_BYTES) {
-      throw new HttpError(413, `A share that never expires holds at most ${FOREVER_MAX_BYTES / MB} MB.  Give it an expiry.`);
+    if (share.total_bytes > foreverMax) {
+      throw new HttpError(413, `A share that never expires holds at most ${foreverMax / MB} MB.  Give it an expiry.`);
     }
     await run(env.DB, "UPDATE shares SET expires_at = NULL, renewals = renewals + 1, updated_at = ? WHERE id = ?", ts, share.id);
   } else {

@@ -3,7 +3,7 @@ export const DASHBOARD_JS = String.raw`
 (function () {
   "use strict";
   var FL = window.FL, h = FL.h;
-  var state = { me: null, teams: [], next: null };
+  var state = { me: null, teams: [], next: null, allShares: [], sortKey: null, sortDir: "asc", filterChip: "all", liveSearch: "" };
   var root = document.getElementById("dashboard");
   if (!root) return;
   var isAdmin = root.dataset.admin === "1";
@@ -61,7 +61,7 @@ export const DASHBOARD_JS = String.raw`
     if (share.team) tags.push(h("span", { class: "pill", title: share.team.access === "edit" ? "Team members can view and edit" : "Team members can view", text: (share.team.name || "Team") + (share.team.access === "edit" ? " · edit" : " · view") }));
     else tags.push(h("span", { class: "pill gray", text: "Personal" }));
     var actions = h("div", { class: "actions" },
-      h("button", { type: "button", class: "small secondary", text: "Copy", onclick: function () { FL.copy(share.url); } }),
+      h("button", { type: "button", class: "small secondary", text: "Copy", onclick: function () { FL.copy(share.url); FL.toast("Copied " + share.slug + " link to clipboard."); } }),
       h("a", { class: "button small secondary", href: share.url, target: "_blank", rel: "noopener", text: "Open" }));
     var sharing = sharingControl(share);
     if (sharing) actions.append(sharing);
@@ -73,6 +73,68 @@ export const DASHBOARD_JS = String.raw`
       h("td", { class: "hide-sm" }, share.owner && share.owner.display_name ? share.owner.display_name : ""),
       h("td", null, expires),
       h("td", null, actions));
+  }
+
+  function renderShares() {
+    var list = state.allShares.slice();
+    if (state.filterChip === "files") list = list.filter(function (s) { return s.kind !== "link"; });
+    else if (state.filterChip === "link") list = list.filter(function (s) { return s.kind === "link"; });
+    else if (state.filterChip === "forever") list = list.filter(function (s) { return s.expires_at === null; });
+    else if (state.filterChip === "password") list = list.filter(function (s) { return Boolean(s.has_password); });
+
+    if (state.liveSearch) {
+      var term = state.liveSearch.toLowerCase();
+      list = list.filter(function (s) {
+        return (s.slug && s.slug.toLowerCase().indexOf(term) !== -1) ||
+               (s.title && s.title.toLowerCase().indexOf(term) !== -1) ||
+               (s.target_url && s.target_url.toLowerCase().indexOf(term) !== -1) ||
+               (s.owner && s.owner.display_name && s.owner.display_name.toLowerCase().indexOf(term) !== -1) ||
+               (s.team && s.team.name && s.team.name.toLowerCase().indexOf(term) !== -1);
+      });
+    }
+
+    if (state.sortKey) {
+      list.sort(function (a, b) {
+        var res = 0;
+        if (state.sortKey === "name") {
+          var nameA = (a.title || a.slug).toLowerCase();
+          var nameB = (b.title || b.slug).toLowerCase();
+          res = nameA.localeCompare(nameB);
+        } else if (state.sortKey === "contents") {
+          var sizeA = a.kind === "link" ? -1 : Number(a.total_bytes || 0);
+          var sizeB = b.kind === "link" ? -1 : Number(b.total_bytes || 0);
+          res = sizeA - sizeB;
+        } else if (state.sortKey === "owner") {
+          var ownA = ((a.owner && a.owner.display_name) || "").toLowerCase();
+          var ownB = ((b.owner && b.owner.display_name) || "").toLowerCase();
+          res = ownA.localeCompare(ownB);
+        } else if (state.sortKey === "expires") {
+          var expA = a.expires_at === null ? (state.sortDir === "asc" ? Infinity : -Infinity) : a.expires_at;
+          var expB = b.expires_at === null ? (state.sortDir === "asc" ? Infinity : -Infinity) : b.expires_at;
+          res = expA - expB;
+        }
+        return state.sortDir === "desc" ? -res : res;
+      });
+    }
+
+    document.querySelectorAll("#panel-shares th[data-sort]").forEach(function (th) {
+      var k = th.dataset.sort;
+      th.classList.remove("sort-asc", "sort-desc");
+      if (k === state.sortKey) {
+        th.classList.add(state.sortDir === "desc" ? "sort-desc" : "sort-asc");
+      }
+    });
+
+    var summaryEl = document.getElementById("share-summary");
+    if (summaryEl) {
+      var totalBytes = list.reduce(function (sum, s) { return sum + (Number(s.total_bytes) || 0); }, 0);
+      summaryEl.textContent = "Showing " + list.length + (state.allShares.length !== list.length ? " of " + state.allShares.length : "") + " shares (" + FL.bytes(totalBytes) + ")";
+    }
+
+    var body = document.getElementById("share-rows");
+    body.replaceChildren();
+    list.forEach(function (s) { body.append(shareRow(s)); });
+    document.getElementById("share-empty").hidden = list.length > 0;
   }
 
   // Who sees a share.  The owner moves it between the personal side and a
@@ -123,12 +185,11 @@ export const DASHBOARD_JS = String.raw`
     if (q) params.set("q", q);
     if (append && state.next) params.set("before", state.next);
     var data = await FL.api("GET", "/api/shares?" + params.toString());
-    var body = document.getElementById("share-rows");
-    if (!append) body.replaceChildren();
-    data.shares.forEach(function (s) { body.append(shareRow(s)); });
+    if (!append) state.allShares = data.shares.slice();
+    else state.allShares = state.allShares.concat(data.shares);
     state.next = data.next;
     document.getElementById("share-more").hidden = !data.next;
-    document.getElementById("share-empty").hidden = body.children.length > 0;
+    renderShares();
   }
 
   async function renew(share) {
@@ -480,6 +541,45 @@ export const DASHBOARD_JS = String.raw`
     try { await FL.api("POST", "/api/bots", body); form.reset(); FL.toast("Bot added."); loadBots(); } catch (err) { FL.fail(err); }
   }
   document.getElementById("bot-form").addEventListener("submit", addBot);
+
+  document.querySelectorAll("#panel-shares th[data-sort]").forEach(function (th) {
+    th.addEventListener("click", function () {
+      var k = th.dataset.sort;
+      if (state.sortKey === k) {
+        state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+      } else {
+        state.sortKey = k;
+        state.sortDir = "asc";
+      }
+      renderShares();
+    });
+  });
+
+  var chips = document.querySelectorAll("#share-chips .chip");
+  chips.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      chips.forEach(function (c) { c.classList.remove("active"); });
+      btn.classList.add("active");
+      state.filterChip = btn.dataset.filter;
+      renderShares();
+    });
+  });
+
+  var searchInput = document.getElementById("share-q");
+  if (searchInput) {
+    searchInput.addEventListener("input", function (e) {
+      state.liveSearch = e.target.value.trim().toLowerCase();
+      renderShares();
+    });
+  }
+
+  var refreshBtn = document.getElementById("share-refresh");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", function () {
+      loadShares(false);
+      loadMe();
+    });
+  }
 
   var loaded = {};
   var show = FL.tabs(root, function (name) {

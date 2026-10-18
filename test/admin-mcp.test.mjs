@@ -186,3 +186,61 @@ test("MCP: auth, initialize, tools, ownership, and limits", async () => {
   await makeAdmin(env, bob);
   assert.equal((await tool(env, { session: bob.session }, "fleetlink_list_shares", { scope: "all" })).data.shares.length, 2);
 });
+
+test("admin limits, user default limits, and guest limits are modifiable and dynamically enforced", async () => {
+  const env = await makeEnv();
+  const ada = await signUp(env, "Ada");
+  const bob = await signUp(env, "Bob");
+  await makeAdmin(env, ada);
+
+  // 1. Modifying limits via settings
+  const updateRes = await callJson(env, "PUT", "/api/admin/settings", {
+    auth: ada,
+    json: {
+      values: {
+        user_max_file_mb: 2,
+        user_file_max_days: 4,
+        user_max_renewals: 1,
+        admin_max_file_mb: 50,
+        guest_max_download_mb: 1
+      }
+    }
+  });
+  assert.equal(updateRes.status, 200);
+
+  // Verify settings view reflects saved values
+  const settingsRes = await callJson(env, "GET", "/api/admin/settings", { auth: ada });
+  assert.equal(settingsRes.data.values.user_max_file_mb, 2);
+  assert.equal(settingsRes.data.values.user_file_max_days, 4);
+  assert.equal(settingsRes.data.values.user_max_renewals, 1);
+  assert.equal(settingsRes.data.values.guest_max_download_mb, 1);
+
+  // 2. Regular user (Bob) is constrained by new 4-day max file days
+  assert.equal((await callJson(env, "POST", "/api/shares", { auth: bob, json: { slug: "bob-over-days", days: 5 } })).status, 403);
+  const okShare = await callJson(env, "POST", "/api/shares", { auth: bob, json: { slug: "bob-share", days: 4 } });
+  assert.equal(okShare.status, 201);
+
+  // 3. File upload cap: user file cap is now 2 MB
+  const overSize = new Uint8Array(2 * 1024 * 1024 + 10);
+  const uploadOver = await call(env, "PUT", "/api/shares/bob-share/files/big.bin", { auth: bob, body: overSize });
+  assert.equal(uploadOver.status, 413);
+
+  // 4. Guest download limit: 1.5 MB file uploaded by admin (Ada)
+  const mediumFile = new Uint8Array(Math.floor(1.5 * 1024 * 1024));
+  await callJson(env, "POST", "/api/shares", { auth: ada, json: { slug: "ada-files" } });
+  const putRes = await call(env, "PUT", "/api/shares/ada-files/files/medium.bin", { auth: ada, body: mediumFile });
+  assert.equal(putRes.status, 201);
+
+  // Unauthenticated guest download is blocked by guest_max_download_mb = 1
+  const guestDown = await call(env, "GET", "/ada-files/medium.bin");
+  assert.equal(guestDown.status, 403);
+  assert.match(await guestDown.text(), /guest download limit/);
+
+  // Signed-in user (Bob) can download it
+  const userDown = await call(env, "GET", "/ada-files/medium.bin", { auth: bob });
+  assert.equal(userDown.status, 200);
+
+  // 5. Renewal limit: Bob's share renewals are limited to 1
+  assert.equal((await callJson(env, "POST", "/api/shares/bob-share/renew", { auth: bob, json: {} })).status, 200);
+  assert.equal((await callJson(env, "POST", "/api/shares/bob-share/renew", { auth: bob, json: {} })).status, 403);
+});

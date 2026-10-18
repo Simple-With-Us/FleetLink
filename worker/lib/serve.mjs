@@ -183,7 +183,13 @@ ${ogTags({ title, description: share.description || `A note shared on FleetLink.
   });
 }
 
-async function fileResponse(request, env, share, file, url, setCookie, exec) {
+async function fileResponse(request, env, share, file, url, setCookie, exec, settings) {
+  if (settings?.guest_max_download_mb > 0) {
+    const principal = await optionalPrincipal(request, env).catch(() => null);
+    if (!principal && Number(file.size || 0) > settings.guest_max_download_mb * 1024 * 1024) {
+      return statusPage(env, 403, "File exceeds guest download limit", `This file (${formatBytes(file.size)}) exceeds the guest download limit of ${settings.guest_max_download_mb} MB.  Please sign in to download.`, request);
+    }
+  }
   const object = await getObject(env, file.r2_key, request);
   if (!object) return notFoundPage(env, request);
   const filename = file.path.split("/").pop() || "file";
@@ -302,7 +308,7 @@ function manifest(share, files, origin) {
  * Serve GET or HEAD for a share.  `rest` is the path after the slug, without
  * the leading slash; a trailing slash asks for a folder listing.
  */
-export async function serveShare(request, env, ctx, { slug, rest, url, origin }) {
+export async function serveShare(request, env, ctx, { slug, rest, url, origin, settings }) {
   let share = await loadForServe(env, slug);
   if (!share && !(await legacyImportDone(env))) {
     if (await adoptLegacySlug(env, slug)) share = await loadForServe(env, slug);
@@ -333,12 +339,12 @@ export async function serveShare(request, env, ctx, { slug, rest, url, origin })
   }
   if (!decoded || decoded.endsWith("/")) {
     const dir = decoded.replace(/\/+$/, "");
-    if (!dir && files.length === 1 && !rest) return fileResponse(request, env, share, files[0], url, setCookie, ctx);
+    if (!dir && files.length === 1 && !rest) return fileResponse(request, env, share, files[0], url, setCookie, ctx, settings);
     if (dir && !files.some((f) => f.path.startsWith(`${dir}/`))) return notFoundPage(env, request);
     return listingPage(env, share, files, dir, url, origin, setCookie);
   }
   const file = files.find((f) => f.path === decoded);
-  if (file) return fileResponse(request, env, share, file, url, setCookie, ctx);
+  if (file) return fileResponse(request, env, share, file, url, setCookie, ctx, settings);
   if (files.some((f) => f.path.startsWith(`${decoded}/`))) {
     return redirect(`/${share.slug}/${rest}/${url.search}`, 301);
   }

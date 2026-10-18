@@ -62,7 +62,7 @@ function login(ctx, principal, settings) {
 }
 
 function table(id, headers) {
-  return `<div class="table-wrap"><table><thead><tr>${headers.map(([label, cls]) => `<th${cls ? ` class="${cls}"` : ""}>${label}</th>`).join("")}</tr></thead><tbody id="${id}"></tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr>${headers.map(([label, cls, sortKey]) => `<th${cls ? ` class="${cls}"` : ""}${sortKey ? ` data-sort="${sortKey}"` : ""}>${label}</th>`).join("")}</tr></thead><tbody id="${id}"></tbody></table></div>`;
 }
 
 function dashboard(ctx, principal) {
@@ -99,10 +99,18 @@ function dashboard(ctx, principal) {
       <section id="panel-shares" role="tabpanel">
         <form id="share-search" class="row">
           <div><label for="share-scope">Show</label><select id="share-scope"><option value="mine">My shares</option></select></div>
-          <div><label for="share-q">Search</label><input id="share-q" type="search" placeholder="Name or title"></div>
-          <div class="end"><button type="submit" class="secondary">Search</button></div>
+          <div><label for="share-q">Search</label><input id="share-q" type="search" placeholder="Name, title, or destination"></div>
+          <div class="end"><button type="submit" class="secondary">Search</button> <button type="button" id="share-refresh" class="secondary" title="Refresh shares">↻ Refresh</button></div>
         </form>
-        ${table("share-rows", [["Name"], ["Contents"], ["Owner", "hide-sm"], ["Expires"], [""]])}
+        <div class="chip-row" id="share-chips">
+          <button type="button" class="chip active" data-filter="all">All</button>
+          <button type="button" class="chip" data-filter="files">Files</button>
+          <button type="button" class="chip" data-filter="link">Links</button>
+          <button type="button" class="chip" data-filter="forever">Forever</button>
+          <button type="button" class="chip" data-filter="password">Password</button>
+        </div>
+        <div id="share-summary" class="share-summary"></div>
+        ${table("share-rows", [["Name", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Expires", "sortable", "expires"], ["", ""]])}
         <p id="share-empty" class="empty" hidden>Nothing here yet.&nbsp; Use New Share to make a link.</p>
         <p><button type="button" id="share-more" class="secondary" hidden>Load More</button></p>
       </section>

@@ -10,7 +10,7 @@ import { loadSettings } from "./settings.mjs";
 import { shareAccess } from "./policy.mjs";
 import {
   cleanPath, createShare, deleteShare, deleteShareFile, fileByteLimit, fullLimits, getShareBySlug, LIMITS, listShares, loadShareFor,
-  makePersonal, publicShare, purgeShare, putShareFile, renewShare, shareFiles, shareToTeam, updateShare
+  makePersonal, publicShare, purgeShare, putShareFile, renewShare, shareFiles, shareToTeam, tier, updateShare
 } from "./shares.mjs";
 import { getObject } from "./storage.mjs";
 import { assertValveOpen, recordUsage } from "./valve.mjs";
@@ -389,7 +389,7 @@ function toolResult(payload, isError = false) {
 
 async function toolCreateShare(data, ctx) {
   const { bytes, contentType, filename } = bodyBytes(data, data.filename);
-  const share = await createShare(ctx.env, ctx.principal, { ...data, kind: "files", source: "mcp" });
+  const share = await createShare(ctx.env, ctx.principal, { ...data, kind: "files", source: "mcp", settings: ctx.settings });
   try {
     await putShareFile(ctx.env, ctx.principal, share, { path: filename, body: bytes, size: bytes.byteLength, contentType, settings: ctx.settings });
   } catch (err) {
@@ -400,7 +400,7 @@ async function toolCreateShare(data, ctx) {
 }
 
 async function toolCreateLink(data, ctx) {
-  const share = await createShare(ctx.env, ctx.principal, { ...data, kind: "link", source: "mcp" });
+  const share = await createShare(ctx.env, ctx.principal, { ...data, kind: "link", source: "mcp", settings: ctx.settings });
   return toolResult({ share: publicShare(share, ctx.origin, { canManage: true }) });
 }
 
@@ -415,7 +415,7 @@ async function toolGetShare(data, ctx) {
 }
 
 async function toolRenewShare(data, ctx) {
-  const { share, unchanged } = await renewShare(ctx.env, ctx.principal, data.slug, data);
+  const { share, unchanged } = await renewShare(ctx.env, ctx.principal, data.slug, { ...data, settings: ctx.settings });
   return toolResult({ share: await shareView(ctx, share, null), unchanged });
 }
 
@@ -491,7 +491,7 @@ async function toolUploadUrl(data, ctx) {
     ({ share } = await loadShareFor(ctx.env, ctx.principal, data.slug, "edit"));
   } else {
     share = await createShare(ctx.env, ctx.principal, {
-      kind: "files", slug: data.slug, days: data.days, title: data.title, team_id: data.team_id, team_access: data.team_access, personal: data.personal, source: "mcp"
+      kind: "files", slug: data.slug, days: data.days, title: data.title, team_id: data.team_id, team_access: data.team_access, personal: data.personal, source: "mcp", settings: ctx.settings
     });
     created = true;
   }
@@ -513,7 +513,7 @@ async function toolDeleteShare(data, ctx) {
 
 async function toolWhoami(_data, ctx) {
   const summary = await accountSummary(ctx.env, ctx.principal.user, ctx.settings);
-  const tier = fullLimits(ctx.principal) ? LIMITS.admin : LIMITS.user;
+  const currentTier = tier(ctx.principal, ctx.settings);
   return toolResult({
     ...summary,
     auth: {
@@ -521,11 +521,11 @@ async function toolWhoami(_data, ctx) {
       token: ctx.principal.token ? { id: ctx.principal.token.id, name: ctx.principal.token.name, team_id: ctx.principal.token.team_id } : undefined
     },
     limits: {
-      max_file_bytes: fileByteLimit(ctx.principal),
-      max_share_bytes: tier.shareBytes,
-      max_share_files: tier.shareFiles,
-      max_file_days: tier.fileDays,
-      max_link_days: tier.linkDays,
+      max_file_bytes: fileByteLimit(ctx.principal, ctx.settings),
+      max_share_bytes: currentTier.shareBytes,
+      max_share_files: currentTier.shareFiles,
+      max_file_days: currentTier.fileDays,
+      max_link_days: currentTier.linkDays,
       max_ttl_seconds: ctx.principal.token?.max_ttl_seconds ?? null,
       follows: ctx.principal.limitsUser ? "manager" : "own",
       links_allowed: !ctx.principal.token || ctx.principal.token.allow_links,
