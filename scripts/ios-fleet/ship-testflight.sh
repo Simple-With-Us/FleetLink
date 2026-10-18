@@ -94,7 +94,7 @@ FLEET_DIR="$(cd "$(dirname "$0")" && pwd)"
 APPS_JSON="${FLEET_DIR}/apps.json"
 TEAM_ID="CC8UTF7ATG"
 SECRETS_ENV="${HOME}/.secrets/appstore-connect.env"
-# 1 hour — owner 2026-08-14: ship unbuilt iOS updates as often as once per hour.
+# 1 hour - owner 2026-08-14: ship unbuilt iOS updates as often as once per hour.
 # Not Apple compute; local/process hygiene. Cron ticks twice an hour so a
 # trailing merge inside the window is picked up on the next eligible tick.
 DEFAULT_MIN_INTERVAL_SEC=3600
@@ -117,7 +117,7 @@ SYNC_PROJECT_VERSION=0
 
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "[ios-ship] $*"; }
-# Same prefix, but on stderr — for use inside $(...) helpers whose stdout is
+# Same prefix, but on stderr - for use inside $(...) helpers whose stdout is
 # the return value and must stay clean.
 logerr() { echo "[ios-ship] $*" >&2; }
 
@@ -285,7 +285,7 @@ link_private_key() {
 }
 
 # Owner directive: version naming is 1.0.# (timestamp).
-# EVERY rebuild — including a tiny tweak — adds exactly 1 to the last number.
+# EVERY rebuild - including a tiny tweak - adds exactly 1 to the last number.
 # MARKETING_VERSION (CFBundleShortVersionString) is 1.0.<seq>.
 # CURRENT_PROJECT_VERSION (CFBundleVersion) is a UTC timestamp YYYYMMDDHHMM.
 # ASC shows "1.0.8 (202608121315)".
@@ -307,7 +307,7 @@ link_private_key() {
 # different marketing versions anyway (Apple's uniqueness is per version+build).
 #
 # Sequence state: ${STATE_DIR}/build-seq-<app>.txt (atomic-mkdir-guarded).
-# NOTE: flock(1) does not exist on macOS — under `set -e` a flock call would
+# NOTE: flock(1) does not exist on macOS - under `set -e` a flock call would
 # kill the subshell and yield an EMPTY sequence ("1.0."), so the mutex is an
 # atomic mkdir instead (portable to Apple bash 3.2, per the header contract).
 #
@@ -317,7 +317,7 @@ link_private_key() {
 # a duplicate. So the next sequence is
 #     max(local cache, App Store Connect, project.pbxproj) + 1
 # which is monotonic against every record we have. Taking the max can skip a
-# number (harmless — numbers are free); reusing one is fatal.
+# number (harmless - numbers are free); reusing one is fatal.
 local_seq() {
   local n
   n=$(cat "${STATE_DIR}/build-seq-${APP_KEY}.txt" 2>/dev/null || echo 0)
@@ -557,7 +557,7 @@ evaluate_ship_gate() {
   fi
 
   if [[ -n "${last_sha:-}" && "$last_sha" != "unknown" && "$head_sha" == "$last_sha" ]]; then
-    log "ship-gate: skip — HEAD ${head_sha:0:10} already shipped for ${APP_KEY} (no new commits)"
+    log "ship-gate: skip - HEAD ${head_sha:0:10} already shipped for ${APP_KEY} (no new commits)"
     log "ship-gate: use --force-ship to upload the same HEAD again"
     SHIP_GATE_DECISION="skip"
     return 0
@@ -568,9 +568,9 @@ evaluate_ship_gate() {
     local remain=$((min_sec - elapsed))
     local remain_m=$(( (remain + 59) / 60 ))
     local min_m=$(( min_sec / 60 ))
-    log "ship-gate: skip — last ${APP_KEY} ship ${elapsed}s ago; min interval ${min_sec}s (~${remain_m}m left)"
+    log "ship-gate: skip - last ${APP_KEY} ship ${elapsed}s ago; min interval ${min_sec}s (~${remain_m}m left)"
     log "ship-gate: that ${min_sec}s (${min_m}m) limit comes from ${min_src}."
-    log "ship-gate: it is THE throttle on automatic shipping — .github/workflows/ios-ship.yml"
+    log "ship-gate: it is THE throttle on automatic shipping - .github/workflows/ios-ship.yml"
     log "ship-gate: runs on every push to main touching clients/ios/**, and most runs skip here."
     log "ship-gate: override this run with IOS_TF_MIN_INTERVAL_SEC=<seconds> or --force-ship;"
     log "ship-gate: change the standing limit by editing DEFAULT_MIN_INTERVAL_SEC (owner's call)."
@@ -578,7 +578,7 @@ evaluate_ship_gate() {
     return 0
   fi
 
-  log "ship-gate: ok — ${elapsed}s since last ship (min ${min_sec}s from ${min_src}); HEAD ${head_sha:0:10}"
+  log "ship-gate: ok - ${elapsed}s since last ship (min ${min_sec}s from ${min_src}); HEAD ${head_sha:0:10}"
 }
 
 record_successful_ship() {
@@ -591,7 +591,7 @@ record_successful_ship() {
   printf '%s %s\n' "$now" "$head_sha" >"$path"
   chmod 600 "$path" 2>/dev/null || true
   log "ship-gate: recorded success ts=${now} sha=${head_sha:0:10} -> ${path}"
-  # Public version manifest for the in-app update prompt.  Best-effort —
+  # Public version manifest for the in-app update prompt.  Best-effort -
   # a publish miss must never fail a ship that already uploaded.
   if [[ -n "${BUNDLE_ID:-}" && -n "${MARKETING:-}" ]]; then
     local apple_id display
@@ -602,7 +602,13 @@ record_successful_ship() {
     [[ -n "${BUILD_NUM:-}" ]] && pub_args+=(--build "$BUILD_NUM")
     [[ -n "${apple_id:-}" ]] && pub_args+=(--apple-id "$apple_id")
     [[ -n "${display:-}" ]] && pub_args+=(--display-name "$display")
-    if bash "${FLEET_DIR}/publish-ios-versions.sh" "${pub_args[@]}" >/dev/null 2>&1; then
+    # publish-ios-versions.sh is deliberately not vendored into this repo: it
+    # writes the owner Mac's manifest and pushes to the fleet coordinator repo
+    # with owner credentials, neither of which a hosted runner has.  Say so
+    # instead of reporting a publish failure on every ship.
+    if [[ ! -f "${FLEET_DIR}/publish-ios-versions.sh" ]]; then
+      log "version-manifest: skipped - publish-ios-versions.sh is not vendored in ${FLEET_DIR} (this app has no in-app update prompt reading the manifest)"
+    elif bash "${FLEET_DIR}/publish-ios-versions.sh" "${pub_args[@]}" >/dev/null 2>&1; then
       log "version-manifest: published ${BUNDLE_ID} ${MARKETING}"
     else
       log "warning: version-manifest publish failed (non-fatal)"
@@ -771,8 +777,8 @@ fi
 MARKETING_PREFIX="$(marketing_prefix)"
 
 if [[ -n "$UPLOAD_ONLY_IPA" ]]; then
-  # The IPA already carries the versions it was built with. Resolving — let
-  # alone consuming — a sequence here would burn a marketing version on a run
+  # The IPA already carries the versions it was built with. Resolving - let
+  # alone consuming - a sequence here would burn a marketing version on a run
   # that cannot possibly use it, which is the same defect as the gate-ordering
   # bug above. It would also drag in resolve_seq_floor's hard failure when ASC
   # is unreachable, blocking a legitimate retry of an already-built IPA.
@@ -782,18 +788,18 @@ if [[ -n "$UPLOAD_ONLY_IPA" ]]; then
 elif [[ -n "$FORCE_BUILD" || -n "$FORCE_VERSION" ]]; then
   # Explicit operator override: honour exactly what was asked. A bare --version
   # still gets an auto timestamp build number, which is always higher than
-  # anything already uploaded — that is the whole point of the scheme, so an
+  # anything already uploaded - that is the whole point of the scheme, so an
   # operator picking the marketing version does not have to reason about it.
   MARKETING="${FORCE_VERSION:-$DEFAULT_MARKETING}"
   BUILD_NUM="${FORCE_BUILD:-$(utc_build_stamp)}"
   log "version: operator override (--build/--version); sequence not consulted"
 else
   # resolve_seq_floor runs in a subshell, so its die() cannot exit this script
-  # on its own — check explicitly rather than leaning on set -e.
+  # on its own - check explicitly rather than leaning on set -e.
   SEQ_FLOOR="$(resolve_seq_floor "$MARKETING_PREFIX" "$PBXPROJ" "$PLATFORM")" || exit 1
   [[ "$SEQ_FLOOR" =~ ^[0-9]+$ ]] || die "could not resolve a build sequence floor (got '${SEQ_FLOOR}')"
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    # Dry-run must not consume a sequence number — peek only.
+    # Dry-run must not consume a sequence number - peek only.
     SEQ=$((SEQ_FLOOR + 1))
   else
     # The only remaining consumer. A gated run exited above; a dry-run peeks;
@@ -802,7 +808,7 @@ else
     SEQ="$(next_build_seq "$SEQ_FLOOR")"
   fi
   MARKETING="${MARKETING_PREFIX}.${SEQ}"
-  # NOT "$MARKETING" — see the CFBundleVersion note above utc_build_stamp.
+  # NOT "$MARKETING" - see the CFBundleVersion note above utc_build_stamp.
   BUILD_NUM="$(utc_build_stamp)"
 fi
 
@@ -832,8 +838,12 @@ if [[ "$SYNC_PROJECT_VERSION" -eq 1 ]]; then
   A dry-run does not consume a sequence number, so writing ${MARKETING} now would be
   superseded by the next real ship. Pass --sync-project-version on the real ship instead."
   [[ -z "$UPLOAD_ONLY_IPA" ]] || die "--sync-project-version cannot be combined with --upload-only.
-  An upload-only run resolves no version of its own — the IPA already carries one — so
+  An upload-only run resolves no version of its own - the IPA already carries one - so
   there is nothing to write back. Pass it on the run that builds the archive."
+  # sync-project-yml.mjs is not vendored here: ios/project.yml carries
+  # placeholders by design and a ship overrides both values on the xcodebuild
+  # command line.  Check before the sed below so a refusal leaves the tree clean.
+  [[ -f "${REPO_ROOT}/scripts/ios-fleet/sync-project-yml.mjs" ]] || die "--sync-project-version needs ${REPO_ROOT}/scripts/ios-fleet/sync-project-yml.mjs, which this repo does not vendor.  Run the ship without --sync-project-version (ios/project.yml holds placeholders on purpose), or vendor the script and add it to scripts/ios-fleet-pin.sh."
   [[ -n "$PBXPROJ" && -f "$PBXPROJ" ]] || die "--sync-project-version: project.pbxproj not found under $REPO_ROOT"
   /usr/bin/sed -i '' \
     -e "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = ${MARKETING};/g" \
@@ -1174,6 +1184,12 @@ upload_sentry_artifacts
 if [[ "$MANUAL_SIGN" -eq 0 ]]; then
   EXPORT_PLIST_UPLOAD="${FLEET_DIR}/ExportOptions-appstore.plist"
   EXPORT_PLIST_IPA="${FLEET_DIR}/ExportOptions-export-ipa.plist"
+  # The automatic-signing plists are not vendored into this repo (hosted runners
+  # cannot use Xcode's provisioning service with the fleet key).  Fail with the
+  # fix instead of letting xcodebuild report a missing plist.
+  if [[ ! -f "$EXPORT_PLIST_UPLOAD" || ! -f "$EXPORT_PLIST_IPA" ]]; then
+    die "automatic signing needs ${EXPORT_PLIST_UPLOAD} and ${EXPORT_PLIST_IPA}, which this repo does not vendor.  Use manual signing (IOS_MANUAL_SIGN=1 with ${PROFILE_MAP}), or vendor the plists and add them to scripts/ios-fleet-pin.sh."
+  fi
 fi
 
 if [[ "$EXPORT_ONLY" -eq 1 ]]; then
@@ -1273,7 +1289,7 @@ UPLOAD_RC=${PIPESTATUS[0]}
 set -e
 if [[ $UPLOAD_RC -ne 0 ]]; then
   log "altool failed (rc=$UPLOAD_RC). Common cause: no App Store Connect app for ${BUNDLE_ID}."
-  log "Create the app in ASC (My Apps → +) with this exact bundle id, then:"
+  log "Create the app in ASC (My Apps -> +) with this exact bundle id, then:"
   log "  bash $0 $APP_KEY --upload-only \"$PACKAGE\""
   die "altool upload failed (rc=$UPLOAD_RC); see ${LOG_DIR}/upload.log"
 fi
