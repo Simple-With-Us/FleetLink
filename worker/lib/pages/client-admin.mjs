@@ -148,12 +148,21 @@ export const ADMIN_JS = String.raw`
   }
 
   // Settings
+  var SETTING_SECTIONS = [
+    { title: "General & Storage", match: function (k) { return /^(signup_mode|share_hosts|default_share_host|default_storage_quota_bytes|default_token_quota)$/.test(k); } },
+    { title: "Admin Limits", match: function (k) { return /^admin_/.test(k); } },
+    { title: "User Default Limits", match: function (k) { return /^user_/.test(k); } },
+    { title: "Guest Limits & Rate Limits", match: function (k) { return /^(guest_|rate_)/.test(k); } },
+    { title: "Safety Valves", match: function (k) { return /^valve_/.test(k); } }
+  ];
+
   async function loadSettings() {
     var data = await FL.api("GET", "/api/admin/settings");
     var form = document.getElementById("settings-form");
     var host = document.getElementById("settings-fields");
     host.replaceChildren();
-    data.fields.forEach(function (field) {
+
+    function renderField(field) {
       var id = "setting-" + field.key;
       var input;
       if (field.key === "signup_mode") {
@@ -162,11 +171,25 @@ export const ADMIN_JS = String.raw`
         var value = Array.isArray(field.value) ? field.value.join(", ") : String(field.value);
         input = h("input", { id: id, name: field.key, type: "text", value: value });
       }
-      host.append(h("div", null,
+      return h("div", null,
         h("label", { for: id, text: field.label }),
         input,
-        h("p", { class: "small muted", text: field.description + "  Source: " + field.source + "." })));
+        h("p", { class: "small muted", text: field.description + "  Source: " + field.source + "." }));
+    }
+
+    SETTING_SECTIONS.forEach(function (sec) {
+      var secFields = data.fields.filter(function (f) { return sec.match(f.key); });
+      if (!secFields.length) return;
+      host.append(h("h3", { class: "mt", text: sec.title }));
+      secFields.forEach(function (f) { host.append(renderField(f)); });
     });
+    var otherFields = data.fields.filter(function (f) {
+      return !SETTING_SECTIONS.some(function (sec) { return sec.match(f.key); });
+    });
+    if (otherFields.length) {
+      host.append(h("h3", { class: "mt", text: "Other Settings" }));
+      otherFields.forEach(function (f) { host.append(renderField(f)); });
+    }
     form.dataset.loaded = "1";
   }
 
@@ -175,7 +198,7 @@ export const ADMIN_JS = String.raw`
     var f = FL.form(e.currentTarget), values = {};
     Object.keys(f).forEach(function (k) {
       var v = f[k].trim();
-      values[k] = /_bytes$|_quota$/.test(k) ? Number(v) : v;
+      values[k] = /_bytes$|_quota$|_mb$|_days$|_files$|_renewals$|_minute$|_hour$|_day$|_users$/.test(k) ? (v === "" ? null : Number(v)) : v;
     });
     try { await FL.api("PUT", "/api/admin/settings", { values: values }); FL.toast("Settings saved."); loadSettings(); loadStats(); } catch (err) { FL.fail(err); }
   }

@@ -73,9 +73,105 @@ export const FIELDS = {
     default: () => 10,
     parse: (value) => wholeNumber("default_token_quota", value, 0, 100)
   },
+  ...limitFields(),
   ...valveFields(),
   ...rateFields()
 };
+
+function limitFields() {
+  return {
+    admin_max_file_mb: {
+      label: "Admin: max file size (MB)",
+      describe: "Largest single file an admin or bot can upload.  Default 300 MB.",
+      default: () => 300,
+      parse: (v) => wholeNumber("admin_max_file_mb", v, 1, 5000)
+    },
+    admin_max_share_mb: {
+      label: "Admin: max share size (MB)",
+      describe: "Total bytes across all files in one share for an admin or bot.  Default 1024 MB.",
+      default: () => 1024,
+      parse: (v) => wholeNumber("admin_max_share_mb", v, 1, 100_000)
+    },
+    admin_max_share_files: {
+      label: "Admin: max files per share",
+      describe: "Maximum number of files inside one share for an admin or bot.  Default 2000.",
+      default: () => 2000,
+      parse: (v) => wholeNumber("admin_max_share_files", v, 1, 100_000)
+    },
+    admin_forever_max_mb: {
+      label: "Admin: max forever share size (MB)",
+      describe: "Maximum size in MB for shares that never expire.  Default 500 MB.",
+      default: () => 500,
+      parse: (v) => wholeNumber("admin_forever_max_mb", v, 1, 100_000)
+    },
+    admin_default_file_days: {
+      label: "Admin: default file share lifetime (days)",
+      describe: "Default expiry in days when an admin creates a file share without specifying days.  Default 3.",
+      default: () => 3,
+      parse: (v) => wholeNumber("admin_default_file_days", v, 1, 3650)
+    },
+    admin_default_link_days: {
+      label: "Admin: default short link lifetime (days)",
+      describe: "Default expiry in days when an admin creates a short link without specifying days.  Default 30.",
+      default: () => 30,
+      parse: (v) => wholeNumber("admin_default_link_days", v, 1, 3650)
+    },
+    user_max_file_mb: {
+      label: "User default: max file size (MB)",
+      describe: "Largest single file a regular user can upload.  Default 100 MB.",
+      default: () => 100,
+      parse: (v) => wholeNumber("user_max_file_mb", v, 1, 5000)
+    },
+    user_max_share_mb: {
+      label: "User default: max share size (MB)",
+      describe: "Total bytes across all files in one share for a regular user.  Default 500 MB.",
+      default: () => 500,
+      parse: (v) => wholeNumber("user_max_share_mb", v, 1, 100_000)
+    },
+    user_max_share_files: {
+      label: "User default: max files per share",
+      describe: "Maximum number of files inside one share for a regular user.  Default 500.",
+      default: () => 500,
+      parse: (v) => wholeNumber("user_max_share_files", v, 1, 100_000)
+    },
+    user_file_max_days: {
+      label: "User default: max file share lifetime (days)",
+      describe: "Longest allowed lifetime for a user file share.  Default 7 days.",
+      default: () => 7,
+      parse: (v) => wholeNumber("user_file_max_days", v, 1, 3650)
+    },
+    user_file_default_days: {
+      label: "User default: default file share lifetime (days)",
+      describe: "Default expiry in days when a user creates a file share without specifying days.  Default 3 days.",
+      default: () => 3,
+      parse: (v) => wholeNumber("user_file_default_days", v, 1, 3650)
+    },
+    user_link_max_days: {
+      label: "User default: max short link lifetime (days)",
+      describe: "Longest allowed lifetime for a user short link.  Default 180 days.",
+      default: () => 180,
+      parse: (v) => wholeNumber("user_link_max_days", v, 1, 3650)
+    },
+    user_default_link_days: {
+      label: "User default: default short link lifetime (days)",
+      describe: "Default expiry in days when a user creates a short link without specifying days.  Default 30 days.",
+      default: () => 30,
+      parse: (v) => wholeNumber("user_default_link_days", v, 1, 3650)
+    },
+    user_max_renewals: {
+      label: "User default: max renewals per share",
+      describe: "How many times a regular user may extend the life of an existing share.  Default 3.",
+      default: () => 3,
+      parse: (v) => wholeNumber("user_max_renewals", v, 0, 100)
+    },
+    guest_max_download_mb: {
+      label: "Guest limit: max download file size (MB)",
+      describe: "Maximum file size in MB that unauthenticated visitors can download.  0 means no limit (default 0).",
+      default: () => 0,
+      parse: (v) => wholeNumber("guest_max_download_mb", v, 0, 5000)
+    }
+  };
+}
 
 function valveFields() {
   const defs = {
@@ -91,10 +187,10 @@ function valveFields() {
 
 function rateFields() {
   const defs = {
-    rate_download_per_ip_minute: ["Rate limit: downloads per client per minute", "Requests for shared files from one client address.  0 turns it off.", "RATE_DOWNLOAD_PER_IP_MINUTE", 120],
-    rate_auth_per_ip_minute: ["Rate limit: sign-in and sign-up per client per minute", "Requests to /api/auth from one client address.  0 turns it off.", "RATE_AUTH_PER_IP_MINUTE", 20],
-    rate_mcp_per_ip_minute: ["Rate limit: MCP calls per client per minute", "Requests to /mcp from one client address.  0 turns it off.", "RATE_MCP_PER_IP_MINUTE", 120],
-    rate_upload_per_ip_minute: ["Rate limit: uploads per client per minute", "Raw file writes from one client address.  0 turns it off.", "RATE_UPLOAD_PER_IP_MINUTE", 60]
+    rate_download_per_ip_minute: ["Guest / IP rate limit: downloads per minute", "Requests for shared files from one client address.  0 turns it off.", "RATE_DOWNLOAD_PER_IP_MINUTE", 120],
+    rate_auth_per_ip_minute: ["Guest / IP rate limit: sign-in and sign-up per minute", "Requests to /api/auth from one client address.  0 turns it off.", "RATE_AUTH_PER_IP_MINUTE", 20],
+    rate_mcp_per_ip_minute: ["Guest / IP rate limit: MCP calls per minute", "Requests to /mcp from one client address.  0 turns it off.", "RATE_MCP_PER_IP_MINUTE", 120],
+    rate_upload_per_ip_minute: ["Guest / IP rate limit: uploads per minute", "Raw file writes from one client address.  0 turns it off.", "RATE_UPLOAD_PER_IP_MINUTE", 60]
   };
   return build(defs, 1_000_000);
 }

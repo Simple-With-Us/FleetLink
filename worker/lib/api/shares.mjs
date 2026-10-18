@@ -4,7 +4,7 @@ import { badRequest, HttpError, iso, json, parseWith, readBody, text, wantsJson 
 import { requireShareAccess, shareAccess } from "../policy.mjs";
 import {
   createShare, CreateShareBody, deleteShare, deleteShareFile, fullLimits, getShareBySlug, isExpired, listShares,
-  loadShareFor, LIMITS, publicShare, purgeShare, putShareFile, renewShare, shareFiles, updateShare, UpdateShareBody
+  loadShareFor, LIMITS, publicShare, purgeShare, putShareFile, renewShare, shareFiles, tier, updateShare, UpdateShareBody
 } from "../shares.mjs";
 import { createUploadGrant, UploadGrantInput, useUploadGrant } from "../uploads.mjs";
 
@@ -95,7 +95,7 @@ async function postShares(ctx) {
       if (access) return json({ share: await detail(ctx, principal, existing, access), reused: true });
     }
   }
-  const share = await createShare(ctx.env, principal, { ...input, source });
+  const share = await createShare(ctx.env, principal, { ...input, source, settings: await ctx.settings() });
   return json({ share: await detail(ctx, principal, share, { manage: true }) }, 201);
 }
 
@@ -103,7 +103,7 @@ async function postLink(ctx) {
   const principal = await ctx.auth();
   const input = parseWith(CreateShareBody, await readBody(ctx.request));
   if (!input.url && !input.target_url) throw badRequest("Give the destination url.");
-  const share = await createShare(ctx.env, principal, { ...input, kind: "link", source: input.source || (principal.kind === "session" ? "web" : "api") });
+  const share = await createShare(ctx.env, principal, { ...input, kind: "link", source: input.source || (principal.kind === "session" ? "web" : "api"), settings: await ctx.settings() });
   return json({ share: await detail(ctx, principal, share, { manage: true }) }, 201);
 }
 
@@ -157,8 +157,9 @@ export function shareRoutes(router) {
   router.on("DELETE", "/api/shares/:slug", async (ctx) => json({ ok: true, ...(await deleteShare(ctx.env, await ctx.auth(), ctx.params.slug)) }));
   router.on("POST", "/api/shares/:slug/renew", async (ctx) => {
     const principal = await ctx.auth();
-    const { share, unchanged } = await renewShare(ctx.env, principal, ctx.params.slug, parseWith(RenewBody, await readBody(ctx.request)));
-    return json({ share: await detail(ctx, principal, share, await shareAccess(ctx.env, principal, share)), unchanged, max_renewals: (fullLimits(principal) ? LIMITS.admin : LIMITS.user).renewals });
+    const settings = await ctx.settings();
+    const { share, unchanged } = await renewShare(ctx.env, principal, ctx.params.slug, { ...parseWith(RenewBody, await readBody(ctx.request)), settings });
+    return json({ share: await detail(ctx, principal, share, await shareAccess(ctx.env, principal, share)), unchanged, max_renewals: tier(principal, settings).renewals });
   });
   router.on("PUT", "/api/shares/:slug/files/*path", async (ctx) => {
     const principal = await ctx.auth();
@@ -192,7 +193,7 @@ export function shareRoutes(router) {
     const { fields, files } = await readCreateRequest(ctx);
     const input = parseWith(CreateShareBody, fields);
     if (fields.mode === "redirect" || input.url || input.target_url || fields.redirect_url) {
-      const share = await createShare(ctx.env, principal, { ...input, url: input.url || input.target_url || fields.redirect_url, kind: "link" });
+      const share = await createShare(ctx.env, principal, { ...input, url: input.url || input.target_url || fields.redirect_url, kind: "link", settings: await ctx.settings() });
       return json(legacyShape(await ctx.shareOrigin(), share));
     }
     if (!files.length) throw badRequest("No files uploaded.");
@@ -204,14 +205,15 @@ export function shareRoutes(router) {
   router.on("POST", "/api/redirect", async (ctx) => {
     const principal = await ctx.auth();
     const input = parseWith(LegacyRedirectBody, await readBody(ctx.request));
-    const share = await createShare(ctx.env, principal, { ...input, url: input.url || input.target_url || input.redirect_url, kind: "link" });
+    const share = await createShare(ctx.env, principal, { ...input, url: input.url || input.target_url || input.redirect_url, kind: "link", settings: await ctx.settings() });
     return json(legacyShape(await ctx.shareOrigin(), share));
   });
   const legacyRenew = async (ctx) => {
     const principal = await ctx.auth();
+    const settings = await ctx.settings();
     const body = parseWith(LegacyRenewBody, await readBody(ctx.request));
-    const { share, unchanged } = await renewShare(ctx.env, principal, body.slug.split("/")[0], { days: body.days });
-    const max = (fullLimits(principal) ? LIMITS.admin : LIMITS.user).renewals;
+    const { share, unchanged } = await renewShare(ctx.env, principal, body.slug.split("/")[0], { days: body.days, settings });
+    const max = tier(principal, settings).renewals;
     return json({ success: true, slug: share.slug, expires: share.expires_at ? iso(share.expires_at) : "never", expire_at: share.expires_at ? share.expires_at * 1000 : null, renewals_used: share.renewals, max_renewals: max, unchanged });
   };
   router.on("POST", "/api/shares/renew", legacyRenew);

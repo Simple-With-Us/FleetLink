@@ -227,7 +227,7 @@ export async function handleRequest(request, env, exec, deps = {}) {
       if (!(err instanceof HttpError)) throw err;
       return text(`${err.message}\n`, err.status, { "Retry-After": "3600" });
     }
-    const served = await serveShare(request, env, exec, { slug, rest, url, origin: shareOrigin });
+    const served = await serveShare(request, env, exec, { slug, rest, url, origin: shareOrigin, settings });
     return served || notFoundPage(env, request);
   }
   if (method === "POST" && !rest) return handleUnlock(request, env, slug, url);

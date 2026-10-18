@@ -126,6 +126,16 @@ button[disabled] { opacity: 0.55; cursor: not-allowed; }
 table { width: 100%; border-collapse: collapse; font-size: 0.94rem; }
 th, td { text-align: left; padding: 0.65rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
+th.sortable { cursor: pointer; user-select: none; transition: color 0.15s; }
+th.sortable:hover { color: var(--brand); }
+th.sortable::after { content: " ↕"; opacity: 0.35; font-size: 0.85em; }
+th.sortable.sort-asc::after { content: " ▲"; opacity: 1; color: var(--brand); }
+th.sortable.sort-desc::after { content: " ▼"; opacity: 1; color: var(--brand); }
+.chip-row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.5rem 0; }
+.chip { font-size: 0.8rem; font-weight: 600; padding: 0.25rem 0.65rem; border-radius: 999px; background: #eef2f7; color: var(--text); border: 1px solid transparent; cursor: pointer; transition: all 0.15s; }
+.chip:hover { background: #e0e7f1; }
+.chip.active { background: var(--brand); color: #fff; }
+.share-summary { font-size: 0.82rem; color: var(--muted); margin: 0.25rem 0 0.5rem; }
 td .actions { gap: 0.35rem; }
 .table-wrap { overflow-x: auto; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 0.25rem 0.75rem; box-shadow: var(--shadow); margin-bottom: 1rem; }
 .table-wrap tr:last-child td { border-bottom: none; }
