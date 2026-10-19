@@ -183,6 +183,8 @@ for MEDIA in "$ROOT"/assets/web/media/*; do
     *.mp4) TYPE="video/mp4" ;;
     *.jpg) TYPE="image/jpeg" ;;
     *.png) TYPE="image/png" ;;
+    *.webp) TYPE="image/webp" ;;
+    *.gif) TYPE="image/gif" ;;
     *) continue ;;
   esac
   RESULT="$(curl --config "$WORKDIR/curl.cfg" -sS -X PUT \

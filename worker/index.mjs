@@ -99,7 +99,7 @@ function aasaResponse(env) {
   return new Response(JSON.stringify(body, null, 2), { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
 }
 
-const MEDIA_TYPES = { mp4: "video/mp4", webm: "video/webm", jpg: "image/jpeg", png: "image/png" };
+const MEDIA_TYPES = { mp4: "video/mp4", webm: "video/webm", jpg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
 
 /**
  * Site media too large to bundle (the logo animations) lives in R2 under

@@ -7,16 +7,38 @@ export const APP_JS = String.raw`
   "use strict";
   var FL = window.FL = {};
 
-  // Logo animations play once.  With reduced motion they stay on their poster, the final frame.
+  // Logo animations play once.  With reduced motion they stay on their still, the final frame.
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    document.querySelectorAll("video[data-intro]").forEach(function (v) { v.removeAttribute("autoplay"); v.pause(); });
+    document.querySelectorAll("[data-intro]").forEach(function (p) {
+      var img = p.tagName === "PICTURE" && p.querySelector("img");
+      if (img && p.dataset.still) { var src = p.querySelector("source"); if (src) src.remove(); img.src = p.dataset.still; }
+      else if (p.tagName === "VIDEO") { p.removeAttribute("autoplay"); p.pause(); }
+    });
   }
 
-  // Scrolled past the hero, the public top bar slims to the wordmark plus Sign In.
-  var topBar = document.querySelector("header.top.is-public");
+  // The public top bar shows no brand until the hero intro's end frame slides fully
+  // under the bar; then the wordmark fades in.  Pages without a hero intro fall back
+  // to the old scroll threshold.
+  var heroIntro = document.querySelector(".hero-intro");
+  var topBar = document.querySelector(heroIntro ? "header.top.is-hero" : "header.top.is-public");
   if (topBar) {
-    var syncTopBar = function () { topBar.classList.toggle("is-scrolled", window.scrollY > 40); };
+    // The trip point is measured once against the unslimmed bar; measuring it
+    // live would oscillate, because .is-scrolled itself shrinks the bar.
+    var tripY = null;
+    var measure = function () {
+      if (!heroIntro) return;
+      var was = topBar.classList.contains("is-scrolled");
+      if (was) topBar.classList.remove("is-scrolled");
+      tripY = heroIntro.getBoundingClientRect().bottom + window.scrollY - topBar.offsetHeight;
+      if (was) topBar.classList.add("is-scrolled");
+    };
+    var syncTopBar = function () {
+      var scrolled = tripY != null ? window.scrollY >= tripY : window.scrollY > 40;
+      topBar.classList.toggle("is-scrolled", scrolled);
+    };
     window.addEventListener("scroll", syncTopBar, { passive: true });
+    window.addEventListener("resize", function () { measure(); syncTopBar(); });
+    measure();
     syncTopBar();
   }
 

@@ -28,12 +28,11 @@ function initials(name) {
 function navLinks(principal, active) {
   const link = (href, label, key) => `<a href="${href}"${active === key ? ' aria-current="page"' : ""}>${label}</a>`;
   if (!principal) {
-    return `${link("/#features", "Features", "features")}${link("/agents", "For Agents", "agents")}${link("/instructions", "How It Works", "instructions")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a>`;
+    return `${link("/#features", "Features", "features")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a>`;
   }
   const items = [link("/dashboard", "Dashboard", "dashboard")];
   if (principal.isAdmin) items.push(link("/admin", "Admin", "admin"));
-  items.push(link("/agents", "For Agents", "agents"));
-  items.push(link("/instructions", "Help", "instructions"));
+  items.push(link("/#features", "Features", "features"));
   const name = principal.user?.display_name || "Account";
   items.push(`<a class="who" href="/dashboard#account" title="Your account"><span class="avatar" aria-hidden="true">${escapeHtml(initials(name))}</span><span>${escapeHtml(name)}</span></a>`);
   items.push(`<form method="post" action="/logout" class="inline"><button type="submit" class="link">Sign Out</button></form>`);
@@ -44,7 +43,7 @@ function navLinks(principal, active) {
  * The page shell.  Styles and scripts load from /assets only, which is what
  * PAGE_CSP allows.  `scripts` are asset names such as "dashboard.js".
  */
-export function page(env, { title, body, head = "", principal = null, active = null, scripts = [], bodyClass = "", fullBleed = false }) {
+export function page(env, { title, body, head = "", principal = null, active = null, scripts = [], bodyClass = "", fullBleed = false, heroBrand = false }) {
   const scriptTags = scripts.map((name) => `<script src="/assets/${name}?v=${ASSET_VERSION}" defer></script>`).join("");
   return `<!doctype html>
 <html lang="en">
@@ -63,7 +62,7 @@ ${head}
 </head>
 <body class="${escapeHtml(bodyClass)}">
 <a class="skip" href="#main">Skip to content</a>
-<header class="top${principal ? "" : " is-public"}"><div class="bar"><a class="brand" href="/">${logoImg(64)}<span class="brand-text">FleetLink</span>${BRAND_FILES["fleetlink-wordmark.png"] ? `<picture class="brand-wordmark-picture"><source type="image/webp" srcset="/assets/fleetlink-wordmark.webp?v=${ASSET_VERSION}"><img class="brand-wordmark" src="/assets/fleetlink-wordmark.png?v=${ASSET_VERSION}" alt="FleetLink"></picture>` : ""}</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
+<header class="top${principal ? "" : " is-public"}${heroBrand ? " is-hero" : ""}"><div class="bar"><a class="brand" href="/">${heroBrand ? "" : `${logoImg(64)}<span class="brand-text">FleetLink</span>`}${BRAND_FILES["fleetlink-wordmark.png"] ? `<picture class="brand-wordmark-picture"><source type="image/webp" srcset="/assets/fleetlink-wordmark.webp?v=${ASSET_VERSION}"><img class="brand-wordmark" src="/assets/fleetlink-wordmark.png?v=${ASSET_VERSION}" alt="FleetLink"></picture>` : ""}</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
 <main id="main"${fullBleed ? "" : ' class="wrap"'}>${body}</main>
 <footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : ""}<a href="/#features">Features</a><a href="/agents">For Agents</a><a href="/instructions">How It Works</a><a href="/privacy">Privacy</a><a href="mailto:support@fleetlink.online">Support</a></nav></div></footer>
 ${scriptTags}
