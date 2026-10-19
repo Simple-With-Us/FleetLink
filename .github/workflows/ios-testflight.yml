@@ -9,8 +9,8 @@ name: iOS TestFlight
 #
 # Ship path: scripts/ios-ship-testflight.sh -> scripts/ios-fleet/ship-testflight.sh
 # (the vendored fleet script, pinned by scripts/ios-fleet.sha256).  It reads the
-# highest 1.0.N already on App Store Connect and ships 1.0.(N+1) with a UTC
-# YYYYMMDDHHMM build number, declares export compliance (ensure-tf-ready), and
+# commit count from git, shipping 1.0.<commit count> with CFBundleVersion set
+# to the same integer, raised past any build already on App Store Connect, declares export compliance (ensure-tf-ready), and
 # publishes the mandatory "What to Test" note from the commit range since the
 # last ship.  ios/project.yml carries placeholders only; nothing is hand-edited
 # per release.
