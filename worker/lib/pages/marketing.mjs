@@ -91,6 +91,66 @@ function card(icon, title, body, extra = "") {
   return `<div class="card tile"><span class="icon">${ICONS[icon]}</span><h3>${title}</h3><p>${body}</p>${extra}</div>`;
 }
 
+
+/** The How It Works guide, living on the home page as the #guide section. */
+function guideSection(origin) {
+  return `<section class="section" id="guide"><article class="card">
+<article class="card">
+      <h1>How FleetLink Works</h1>
+      <p>FleetLink gives you a link to a file, a folder, or another web address.&nbsp; Every link belongs to the account that made it and expires on its own.</p>
+
+      <h2>Accounts</h2>
+      <p>Create an account on the <a href="/login">sign-in page</a> with a passkey.&nbsp; There is no password.&nbsp; Add a second passkey from your dashboard so you can sign in from another device.&nbsp; Your dashboard lists your links, your API tokens, your teams, and the devices you are signed in on.</p>
+
+      <h2>Sharing On The Website</h2>
+      <ol>
+        <li>Open the <a href="/dashboard#new">dashboard</a> and choose New Share.</li>
+        <li>Pick files, or paste a web address for a short link.</li>
+        <li>Choose how long it stays up.&nbsp; Add a name, a title, a password, or a team if you like.</li>
+        <li>Copy the link.</li>
+      </ol>
+
+      <h2>How Long A Link Lasts</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Who</th><th>Files</th><th>Short links</th></tr></thead>
+        <tbody>
+          <tr><td>Signed in</td><td>Up to 7 days (3 by default).&nbsp; 100 MB per file, 500 MB and 500 files per share.</td><td>Up to 180 days (30 by default).</td></tr>
+          <tr><td>Admin</td><td>Any length, or never.&nbsp; 300 MB per file, 1 GB per share.&nbsp; A share that never expires holds up to 500 MB.</td><td>Any length, or never.</td></tr>
+        </tbody>
+      </table></div>
+      <p>Each account has a storage quota across its live links.&nbsp; A link can be renewed three times.&nbsp; A password is optional; without one, anyone with the link can open it.</p>
+
+      <h2>Agents, Scripts, And The CLI</h2>
+      <p>Create an API token on the <a href="/dashboard#tokens">dashboard</a>.&nbsp; The token acts as you, can be limited (largest file, longest share, no short links, one team), and can be revoked at any time.</p>
+      <pre>export FLEETLINK_TOKEN=fla_…
+fleet-share notes.md
+fleet-share --days 7 ./report/
+fleet-share link https://example.com/long/address
+fleet-share list</pre>
+      <p>Or use <code>curl</code>:</p>
+      <pre>curl -X PUT "${origin}/notes/notes.md" \\
+  -T ./notes.md \\
+  -H "Authorization: Bearer $FLEETLINK_TOKEN" \\
+  -H "Content-Type: text/markdown; charset=utf-8" \\
+  -H "X-Expire-Days: 3"</pre>
+      <p>Agents that speak MCP can connect to <code>${origin}/mcp</code> with the same token.</p>
+
+      <h2>iPhone</h2>
+      <p>The FleetLink app signs in with your passkey, lists your links, and makes new ones.&nbsp; To share from the Share sheet, create an API token, <a href="/api/shortcut/download">download the Shortcut</a>, and paste the token when Shortcuts asks.</p>
+
+      <h2>Teams</h2>
+      <p>A team shares a space for links.&nbsp; Everyone in the team sees its links.&nbsp; Team owners and admins can change or delete any of them; members change their own.&nbsp; A token can be tied to one team so an agent's uploads land there.</p>
+
+      <h2>What People See</h2>
+      <ul>
+        <li>A Markdown file opens as a formatted page.</li>
+        <li>Several files under one link open as a list.</li>
+        <li>HTML files download instead of opening in the browser.</li>
+        <li>When the time is up, the link stops working.</li>
+      </ul>
+    </article></article></section>`;
+}
+
 export function home(ctx, principal) {
   const origin = ctx.url.origin;
   const signedIn = Boolean(principal);
@@ -163,6 +223,8 @@ export function home(ctx, principal) {
         </div>
       </section>
 
+      ${guideSection(origin)}
+
       <section class="section" id="teams">
         <div class="two-col">
           <div>
@@ -193,7 +255,7 @@ export function home(ctx, principal) {
           ${card("web", "The Dashboard", "Upload, make short links, renew, rename, and delete.&nbsp; Manage tokens, teams, passkeys, and sessions.", `<p><a href="${signedIn ? "/dashboard" : "/login#signup"}">${signedIn ? "Open the dashboard" : "Create an account"} →</a></p>`)}
           ${card("cli", "The Terminal", "Sign in once with <code>fleet-share login</code>, then share, list, renew, and delete from any shell.", `<p><a href="/agents#cli">CLI guide →</a></p>`)}
           ${card("chat", "Chat And Tickets", "Links unfurl with a title and preview image in Slack, Zulip, and Messages.", "")}
-          ${card("phone", "iPhone", "The FleetLink app lists your links and makes new ones; the App Clip opens a link without installing anything.", `<p><a href="/instructions#iphone">Set it up →</a></p>`)}
+          ${card("phone", "iPhone", "The FleetLink app lists your links and makes new ones; the App Clip opens a link without installing anything.", `<p><a href="/#guide">Set it up →</a></p>`)}
         </div>
       </section>
 

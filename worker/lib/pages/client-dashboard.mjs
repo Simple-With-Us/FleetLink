@@ -31,10 +31,9 @@ export const DASHBOARD_JS = String.raw`
     var counted = typeof usage.quota_bytes === "number" ? usage.quota_bytes : usage.bytes;
     var pct = quota ? Math.min(100, Math.round((counted / quota) * 100)) : 0;
     var legacy = usage.legacy_bytes ? "  Old links from before accounts:\u00a0" + FL.bytes(usage.legacy_bytes) + ", not counted." : "";
-    box.replaceChildren(
-      h("p", { class: "small muted" }, usage.shares + " live share" + (usage.shares === 1 ? "" : "s") + ", " + FL.bytes(counted) + (quota ? " of " + FL.bytes(quota) + " used." : " used.  No storage limit.") + legacy),
-      quota ? h("div", { class: "meter", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(pct) }, h("span", { style: "width:" + pct + "%" })) : null
-    );
+    var usageKids = [h("p", { class: "small muted" }, usage.shares + " live share" + (usage.shares === 1 ? "" : "s") + ", " + FL.bytes(counted) + (quota ? " of " + FL.bytes(quota) + " used." : " used.  No storage limit.") + legacy)];
+    if (quota) usageKids.push(h("div", { class: "meter", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(pct) }, h("span", { style: "width:" + pct + "%" })));
+    box.replaceChildren.apply(box, usageKids);
     document.getElementById("hello").textContent = "Hello, " + state.me.user.display_name;
   }
 
@@ -53,6 +52,12 @@ export const DASHBOARD_JS = String.raw`
   }
 
   // Shares
+  function rowMenu(actions) {
+    return h("details", { class: "rowmenu" },
+      h("summary", { "aria-label": "Row actions", title: "Row actions", text: "\u2022\u2022\u2022" }),
+      actions);
+  }
+
   function shareRow(share) {
     var expires = share.expires_at ? h("span", { title: FL.when(share.expires_at) }, FL.relative(share.expires_at)) : h("span", { class: "pill green", text: "Never" });
     var kind = share.kind === "link" ? h("span", { class: "pill", text: "Link" }) : h("span", { class: "pill gray", text: share.file_count + " file" + (share.file_count === 1 ? "" : "s") + " · " + FL.bytes(share.total_bytes) });
@@ -72,7 +77,7 @@ export const DASHBOARD_JS = String.raw`
       h("td", null, tags),
       h("td", { class: "hide-sm" }, share.owner && share.owner.display_name ? share.owner.display_name : ""),
       h("td", null, expires),
-      h("td", null, actions));
+      h("td", { class: "row-actions" }, rowMenu(actions)));
   }
 
   function renderShares() {
@@ -410,7 +415,7 @@ export const DASHBOARD_JS = String.raw`
         h("td", null, h("strong", { text: k.name }), k.backed_up ? h("span", { class: "pill green", text: "Synced" }) : null),
         h("td", { class: "small", text: FL.when(k.created_at) }),
         h("td", { class: "small hide-sm", text: k.last_used_at ? FL.relative(k.last_used_at) : "Not yet" }),
-        h("td", null, h("div", { class: "actions" },
+        h("td", { class: "row-actions" }, rowMenu(h("div", { class: "actions" },
           h("button", { type: "button", class: "small secondary", text: "Rename", onclick: async function () {
             var name = window.prompt("Passkey name", k.name);
             if (!name) return;
@@ -419,7 +424,7 @@ export const DASHBOARD_JS = String.raw`
           keys.length > 1 ? h("button", { type: "button", class: "small danger", text: "Remove", onclick: async function () {
             if (!FL.confirm("Remove the passkey " + k.name + "?")) return;
             try { await FL.api("DELETE", "/api/me/passkeys/" + encodeURIComponent(k.id)); loadAccount(); } catch (err) { FL.fail(err); }
-          } }) : null))));
+          } }) : null)))));
     });
     var sessions = (await FL.api("GET", "/api/me/sessions")).sessions;
     var sb = document.getElementById("session-rows");
@@ -530,7 +535,7 @@ export const DASHBOARD_JS = String.raw`
       h("td", { class: "hide-sm" }, b.usage.shares + " · " + FL.bytes(b.usage.bytes)),
       h("td", null, String(b.token_count), b.token_last_used_at ? h("div", { class: "small muted", text: "used " + FL.relative(b.token_last_used_at) }) : null),
       h("td", null, h("span", { class: "pill" + (active ? " green" : " red"), text: b.status })),
-      h("td", null, actions));
+      h("td", { class: "row-actions" }, rowMenu(actions)));
   }
 
   async function addBot(e) {
@@ -589,6 +594,11 @@ export const DASHBOARD_JS = String.raw`
     if (name === "teams") loadTeamsPanel().catch(FL.fail);
     if (name === "bots") loadBots().catch(FL.fail);
     if (name === "account") loadAccount().catch(FL.fail);
+  });
+  document.addEventListener("click", function (e) {
+    var item = e.target && e.target.closest ? e.target.closest(".rowmenu .actions button, .rowmenu .actions a, .rowmenu .actions select") : null;
+    if (item) { var own = item.closest("details.rowmenu"); if (own) own.open = false; }
+    document.querySelectorAll("details.rowmenu[open]").forEach(function (d) { if (!d.contains(e.target)) d.open = false; });
   });
   loadMe().then(loadTeams).then(function () { return loadShares(false); }).catch(FL.fail);
   void show;
