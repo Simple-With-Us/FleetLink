@@ -196,6 +196,39 @@ jobs:
           # shellcheck disable=SC2086
           bash scripts/ios-ship-testflight.sh ${IOS_SHIP_ARGS:-}
 
+      # Sync the standing testers and attach/submit the new build to the public
+      # external group.  A failure here is a warning, never a red ship.
+      - name: Sync standing TestFlight testers
+        if: success() && steps.gate.outputs.should_ship == '1'
+        continue-on-error: true
+        env:
+          ASC_STANDING_TESTERS: ${{ secrets.ASC_STANDING_TESTERS }}
+        run: |
+          for e in $(printf '%s' "${ASC_STANDING_TESTERS:-}" | tr ',;' '  '); do
+            echo "::add-mask::${e}"
+          done
+          if [ -n "${ASC_KEY_P8:-}" ] && [ -z "${ASC_KEY_PATH:-}" ]; then
+            ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID:-fleet}.p8"
+            printf '%s\n' "$ASC_KEY_P8" > "$ASC_KEY_PATH"
+            chmod 600 "$ASC_KEY_PATH"
+            export ASC_KEY_PATH
+          fi
+          set +e
+          appleid="$(python3 -c 'import json;print(json.load(open("scripts/ios-fleet/apps.json"))["apps"]["fleetlink"]["appleId"])')"
+          appleid_rc=$?
+          set -e
+          if [ "$appleid_rc" -ne 0 ] || [ -z "$appleid" ]; then
+            echo "::warning title=TestFlight standing testers::could not read the fleetlink appleId from scripts/ios-fleet/apps.json (rc=${appleid_rc}); tester sync skipped.  The TestFlight upload itself succeeded."
+            exit 0
+          fi
+          set +e
+          node scripts/ios-fleet/asc-api.mjs ensure-standing-testers "$appleid"
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning title=TestFlight standing testers::tester sync exited ${rc}; see the standing-testers lines above.  The TestFlight upload itself succeeded."
+          fi
+
       # Saved even when the ship step failed, but only on ticks that tried to
       # ship (a no-op tick changes no state).  A run that only exported the IPA
       # records nothing a later gate would read.
