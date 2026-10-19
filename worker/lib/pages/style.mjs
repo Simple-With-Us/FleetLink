@@ -81,6 +81,7 @@ main { flex: 1 0 auto; }
 .foot a { color: var(--muted); text-decoration: none; }
 .foot nav a { color: var(--ink); font-weight: 600; }
 .foot nav a:hover { color: var(--brand); }
+.foot nav a.mail-icon { display: inline-flex; align-items: center; padding: 0.15rem 0; }
 .foot nav.legal { flex-basis: 100%; font-size: 0.8rem; opacity: 0.7; gap: 0.35rem 1.25rem; }
 .foot nav.legal a { color: var(--muted); font-weight: 500; }
 .foot nav.legal a:hover { color: var(--ink); }
