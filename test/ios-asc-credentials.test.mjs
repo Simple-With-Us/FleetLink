@@ -19,9 +19,11 @@ const STUB = `#!/bin/sh
 echo "$@" >> "$STUB_CALLS"
 [ "$1" = "get" ] && [ "$3" = "--path" ] || exit 4
 case "$2:$4" in
-  ASC_KEY_ID:/appstore-connect) printf '%s' TESTKEY123 ;;
-  ASC_ISSUER_ID:/appstore-connect) printf '%s' 00000000-test-issuer ;;
+  ASC_KEY_ID:/asc) printf '%s' TESTKEY123 ;;
+  ASC_ISSUER_ID:/asc) printf '%s' 00000000-test-issuer ;;
+  ASC_KEY_P8:/asc) printf '%s\\n%s\\n%s' '-----BEGIN PRIVATE KEY-----' SHAREDBODY '-----END PRIVATE KEY-----' ;;
   AUTHKEY_TESTKEY123:/authkey-testkey123-p8) printf '%s\\n%s\\n%s' '-----BEGIN PRIVATE KEY-----' DUMMYBODY '-----END PRIVATE KEY-----' ;;
+  AUTHKEY_OTHERKEY:/authkey-otherkey-p8) printf '%s\\n%s\\n%s' '-----BEGIN PRIVATE KEY-----' OTHERBODY '-----END PRIVATE KEY-----' ;;
   *) exit 3 ;;
 esac
 `;
@@ -75,9 +77,29 @@ test("with nothing in the environment the key comes from Infisical, mode 0600, r
     assert.equal(out.pem, "1");
     assert.equal(existsSync(out.path), false, "the EXIT trap removes the staged key");
     const calls = readFileSync(s.calls, "utf8");
-    assert.match(calls, /get ASC_KEY_ID --path \/appstore-connect/);
-    assert.match(calls, /get AUTHKEY_TESTKEY123 --path \/authkey-testkey123-p8/);
+    assert.match(calls, /get ASC_KEY_ID --path \/asc/);
+    assert.match(calls, /get ASC_KEY_P8 --path \/asc/);
+    assert.doesNotMatch(calls, /authkey-/, "the shared /asc key needs no per-key fallback");
     assert.equal(existsSync(join(s.dir, OLD_DIR)), false, "nothing creates the old secrets folder");
+  } finally {
+    rmSync(s.dir, { recursive: true, force: true });
+  }
+});
+
+test("a key id that differs from the /asc one falls back to its per-key copy", () => {
+  const s = scratch();
+  try {
+    const r = runBlock(
+      { HOME: s.dir, TMPDIR: s.dir, FLEET_SECRETS_BIN: s.stub, STUB_CALLS: s.calls, ASC_KEY_ID: "OTHERKEY", ASC_ISSUER_ID: "iss" },
+      REPORT,
+    );
+    assert.equal(r.status, 0, r.stderr);
+    const out = parse(r.stdout);
+    assert.equal(out.mode, "api_key");
+    assert.match(out.path, /\/AuthKey_OTHERKEY\.p8$/);
+    const calls = readFileSync(s.calls, "utf8");
+    assert.match(calls, /get AUTHKEY_OTHERKEY --path \/authkey-otherkey-p8/);
+    assert.doesNotMatch(calls, /get ASC_KEY_P8/);
   } finally {
     rmSync(s.dir, { recursive: true, force: true });
   }
@@ -107,7 +129,7 @@ test("no credential anywhere leaves AUTH_MODE=none and names the Infisical folde
     const r = runBlock({ HOME: s.dir, TMPDIR: s.dir, FLEET_SECRETS_BIN: join(s.dir, "absent"), STUB_CALLS: s.calls }, REPORT);
     assert.equal(r.status, 0, r.stderr);
     assert.equal(parse(r.stdout).mode, "none");
-    assert.match(r.stderr, /Infisical \/appstore-connect/);
+    assert.match(r.stderr, /Infisical \/asc/);
   } finally {
     rmSync(s.dir, { recursive: true, force: true });
   }

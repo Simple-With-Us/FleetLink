@@ -46,8 +46,9 @@ function fleetSecretsGet(name, folder) {
  * Resolve the App Store Connect API key, never touching a secrets file:
  *   1. ASC_KEY_ID + ASC_ISSUER_ID + ASC_KEY_PATH (an existing file) in the environment
  *      (ship-testflight.sh exports these; hosted CI sets them itself)
- *   2. ASC_KEY_ID / ASC_ISSUER_ID from the environment or Infisical /appstore-connect,
- *      and the PEM as AUTHKEY_<KEY_ID> in /authkey-<key id lower case>-p8
+ *   2. ASC_KEY_ID / ASC_ISSUER_ID from the environment or Infisical /asc, and the PEM
+ *      as ASC_KEY_P8 in /asc when the key id is the /asc one, else AUTHKEY_<KEY_ID> in
+ *      /authkey-<key id lower case>-p8
  * Returns { keyId, issuerId, privateKeyPem, keyPathSet }; privateKeyPem is "" when
  * no key could be found.
  */
@@ -62,11 +63,12 @@ export function resolveAscCredentials() {
   if (keyId && issuerId && keyPath && existsSync(keyPath)) {
     return { keyId, issuerId, privateKeyPem: readFileSync(keyPath, "utf8"), keyPathSet: true };
   }
-  if (!keyId) keyId = fleetSecretsGet("ASC_KEY_ID", "/appstore-connect").trim();
-  if (!issuerId) issuerId = fleetSecretsGet("ASC_ISSUER_ID", "/appstore-connect").trim();
+  if (!keyId) keyId = fleetSecretsGet("ASC_KEY_ID", "/asc").trim();
+  if (!issuerId) issuerId = fleetSecretsGet("ASC_ISSUER_ID", "/asc").trim();
   let privateKeyPem = "";
   if (/^[A-Za-z0-9]+$/.test(keyId)) {
-    privateKeyPem = fleetSecretsGet(`AUTHKEY_${keyId}`, `/authkey-${keyId.toLowerCase()}-p8`);
+    if (keyId === fleetSecretsGet("ASC_KEY_ID", "/asc").trim()) privateKeyPem = fleetSecretsGet("ASC_KEY_P8", "/asc");
+    if (!privateKeyPem) privateKeyPem = fleetSecretsGet(`AUTHKEY_${keyId}`, `/authkey-${keyId.toLowerCase()}-p8`);
     if (privateKeyPem && !privateKeyPem.endsWith("\n")) privateKeyPem += "\n";
   }
   return { keyId, issuerId, privateKeyPem, keyPathSet: Boolean(keyPath) };
@@ -418,7 +420,7 @@ async function main() {
     console.error(
       keyPathSet
         ? "ASC_KEY_PATH is set but the key file is missing, and Infisical has no key for it"
-        : "Missing App Store Connect key: set ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH, or store them in Infisical /appstore-connect (PEM as AUTHKEY_<id> in /authkey-<id>-p8)"
+        : "Missing App Store Connect key: set ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH, or store them in Infisical /asc (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8)"
     );
     process.exit(1);
   }
