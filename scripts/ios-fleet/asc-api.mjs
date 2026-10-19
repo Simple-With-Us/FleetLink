@@ -4,8 +4,8 @@
  * built-in crypto (ES256 JWT signing) and fetch (Node 18+).
  *
  * Auth: resolveAscCredentials() reads ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH
- * from process.env first, then an optional secrets file when the caller passes
- * envPath or sets ASC_SECRETS_ENV (never prints values).
+ * from process.env first, then Infisical through `fleet-secrets get` (never
+ * prints values, keeps the PEM in memory).
  *
  * Usage:
  *   node asc-api.mjs GET /v1/apps
@@ -18,55 +18,60 @@
  * carry credentials, only app metadata, so this is safe to print as-is).
  */
 import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { createSign } from "node:crypto";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 
-function loadEnvFile(path) {
-  const text = readFileSync(path, "utf8");
-  const env = {};
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+/**
+ * Infisical Fleet-OPS through `fleet-secrets get` (AFC-359).  Returns "" when the
+ * binary or the key is absent.  FLEET_SECRETS_BIN overrides the binary (tests).
+ * The value is only held in memory and is never logged.
+ */
+function fleetSecretsGet(name, folder) {
+  const bin = process.env.FLEET_SECRETS_BIN || join(homedir(), ".local", "bin", "fleet-secrets");
+  try {
+    return execFileSync(bin, ["get", name, "--path", folder], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 30000
+    }).replace(/\n$/, "");
+  } catch {
+    return "";
   }
-  return env;
 }
 
 /**
- * Prefer process.env over an optional secrets file. No implicit ~/.secrets default (Kody rule 33).
- * File fallback runs only when envPath is passed or ASC_SECRETS_ENV is set (ship-testflight.sh
- * exports ASC_SECRETS_ENV after sourcing SECRETS_ENV; hosted CI uses process.env ASC_* only).
+ * Resolve the App Store Connect API key, never touching a secrets file:
+ *   1. ASC_KEY_ID + ASC_ISSUER_ID + ASC_KEY_PATH (an existing file) in the environment
+ *      (ship-testflight.sh exports these; hosted CI sets them itself)
+ *   2. ASC_KEY_ID / ASC_ISSUER_ID from the environment or Infisical /asc, and the PEM
+ *      as ASC_KEY_P8 in /asc when the key id is the /asc one, else AUTHKEY_<KEY_ID> in
+ *      /authkey-<key id lower case>-p8
+ * Returns { keyId, issuerId, privateKeyPem, keyPathSet }; privateKeyPem is "" when
+ * no key could be found.
  */
-export function resolveAscCredentials(envPath) {
-  const secretsFile =
-    envPath != null && String(envPath).trim() !== ""
-      ? String(envPath).trim()
-      : process.env.ASC_SECRETS_ENV != null && String(process.env.ASC_SECRETS_ENV).trim() !== ""
-        ? String(process.env.ASC_SECRETS_ENV).trim()
-        : undefined;
-  let fileEnv = {};
-  if (secretsFile && existsSync(secretsFile)) {
-    try {
-      fileEnv = loadEnvFile(secretsFile);
-    } catch {
-      fileEnv = {};
-    }
-  }
+export function resolveAscCredentials() {
   const pick = (name) => {
     const fromEnv = process.env[name];
-    if (fromEnv != null && String(fromEnv).trim() !== "") return String(fromEnv).trim();
-    const fromFile = fileEnv[name];
-    if (fromFile != null && String(fromFile).trim() !== "") return String(fromFile).trim();
-    return "";
+    return fromEnv != null && String(fromEnv).trim() !== "" ? String(fromEnv).trim() : "";
   };
-  const keyId = pick("ASC_KEY_ID");
-  const issuerId = pick("ASC_ISSUER_ID");
+  let keyId = pick("ASC_KEY_ID");
+  let issuerId = pick("ASC_ISSUER_ID");
   const keyPath = pick("ASC_KEY_PATH");
-  return { keyId, issuerId, keyPath, envPath: secretsFile ?? "" };
+  if (keyId && issuerId && keyPath && existsSync(keyPath)) {
+    return { keyId, issuerId, privateKeyPem: readFileSync(keyPath, "utf8"), keyPathSet: true };
+  }
+  if (!keyId) keyId = fleetSecretsGet("ASC_KEY_ID", "/asc").trim();
+  if (!issuerId) issuerId = fleetSecretsGet("ASC_ISSUER_ID", "/asc").trim();
+  let privateKeyPem = "";
+  if (/^[A-Za-z0-9]+$/.test(keyId)) {
+    if (keyId === fleetSecretsGet("ASC_KEY_ID", "/asc").trim()) privateKeyPem = fleetSecretsGet("ASC_KEY_P8", "/asc");
+    if (!privateKeyPem) privateKeyPem = fleetSecretsGet(`AUTHKEY_${keyId}`, `/authkey-${keyId.toLowerCase()}-p8`);
+    if (privateKeyPem && !privateKeyPem.endsWith("\n")) privateKeyPem += "\n";
+  }
+  return { keyId, issuerId, privateKeyPem, keyPathSet: Boolean(keyPath) };
 }
 
 function base64url(input) {
@@ -410,18 +415,15 @@ async function resolveAppId(api, bundleId) {
 }
 
 async function main() {
-  const { keyId, issuerId, keyPath, envPath } = resolveAscCredentials();
-  if (!keyId || !issuerId || !keyPath) {
+  const { keyId, issuerId, privateKeyPem, keyPathSet } = resolveAscCredentials();
+  if (!keyId || !issuerId || !privateKeyPem) {
     console.error(
-      "Missing ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH (set in process env or ASC_SECRETS_ENV file)"
+      keyPathSet
+        ? "ASC_KEY_PATH is set but the key file is missing, and Infisical has no key for it"
+        : "Missing App Store Connect key: set ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_PATH, or store them in Infisical /asc (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8)"
     );
     process.exit(1);
   }
-  if (!existsSync(keyPath)) {
-    console.error(`ASC_KEY_PATH is set but the key file is missing (env file ${envPath})`);
-    process.exit(1);
-  }
-  const privateKeyPem = readFileSync(keyPath, "utf8");
   const token = signJwt({ keyId, issuerId, privateKeyPem });
 
   const [method, path, body, arg4] = process.argv.slice(2);
