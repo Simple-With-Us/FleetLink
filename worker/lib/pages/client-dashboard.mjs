@@ -73,7 +73,7 @@ export const DASHBOARD_JS = String.raw`
     if (share.can_edit && share.expires_at) actions.append(h("button", { type: "button", class: "small secondary", text: "Renew", onclick: function () { renew(share); } }));
     if (share.can_manage) actions.append(h("button", { type: "button", class: "small danger", text: "Delete", onclick: function () { remove(share); } }));
     return h("tr", null,
-      h("td", null, h("a", { href: share.url, target: "_blank", rel: "noopener", class: "mono", text: share.slug }), share.title ? h("div", { class: "small muted", text: share.title }) : null, share.kind === "link" ? h("div", { class: "small muted", text: "→ " + share.target_url }) : null),
+      h("td", null, h("a", { href: share.url, target: "_blank", rel: "noopener", class: "mono slug-a", text: share.slug }, FL.openIcon()), share.title ? h("div", { class: "small muted", text: share.title }) : null, share.kind === "link" ? h("div", { class: "small muted", text: "→ " + share.target_url }) : null),
       h("td", null, tags),
       h("td", { class: "hide-sm" }, share.owner && share.owner.display_name ? share.owner.display_name : ""),
       h("td", null, expires),

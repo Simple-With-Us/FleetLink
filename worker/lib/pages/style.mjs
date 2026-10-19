@@ -209,6 +209,9 @@ td .rowmenu { position: relative; }
 .preview-row { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.6rem 0; border-bottom: 1px solid var(--line); font-size: 0.88rem; }
 .preview-row:last-child { border-bottom: none; }
 .preview-row .mono { color: var(--brand); font-weight: 600; }
+.slug-a { display: inline-flex; align-items: center; gap: 0.25rem; }
+.slug-a svg { width: 0.78em; height: 0.78em; flex: none; opacity: 0.55; }
+.slug-a:hover svg { opacity: 1; }
 .preview-row small { display: block; color: var(--muted); }
 .landing { padding-top: 0; }
 .meter-sample { width: 2%; }

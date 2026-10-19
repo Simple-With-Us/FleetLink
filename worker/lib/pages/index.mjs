@@ -110,7 +110,7 @@ function dashboard(ctx, principal) {
           <button type="button" class="chip" data-filter="password">Password</button>
         </div>
         <div id="share-summary" class="share-summary"></div>
-        ${table("share-rows", [["Name", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Expires", "sortable", "expires"], ["", ""]])}
+        ${table("share-rows", [["Slug", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Expires", "sortable", "expires"], ["", ""]])}
         <p id="share-empty" class="empty" hidden>Nothing here yet.&nbsp; Use New Share to make a link.</p>
         <p><button type="button" id="share-more" class="secondary" hidden>Load More</button></p>
       </section>
@@ -257,7 +257,7 @@ function admin(ctx, principal) {
       </section>
       <section id="panel-shares" role="tabpanel" hidden>
         <form id="share-search" class="row"><div><label for="share-q">Find a share</label><input id="share-q" type="search" placeholder="Name or title"></div><div class="end"><button type="submit" class="secondary">Search</button></div></form>
-        ${table("share-rows", [["Share"], ["Owner"], ["Contents"], ["Expires"], [""]])}
+        ${table("share-rows", [["Slug"], ["Owner"], ["Contents"], ["Expires"], [""]])}
         <p id="share-empty" class="empty" hidden>No live shares.</p>
       </section>
       <section id="panel-settings" role="tabpanel" hidden>
