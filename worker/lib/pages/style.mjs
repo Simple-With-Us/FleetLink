@@ -77,8 +77,6 @@ main { flex: 1 0 auto; }
 /* Footer, shared by every page */
 .foot { border-top: 1px solid var(--line); background: #fff; color: var(--muted); font-size: 0.92rem; }
 .foot .bar { min-height: 72px; justify-content: center; gap: 0.75rem 2.5rem; padding-top: 1.1rem; padding-bottom: 1.1rem; }
-.foot .brand { font-size: 1rem; }
-.foot .brand img { width: 24px; height: 24px; border-radius: 6px; box-shadow: none; }
 .foot nav { display: flex; gap: 0.5rem 1.4rem; flex-wrap: wrap; justify-content: center; align-items: center; }
 .foot a { color: var(--muted); text-decoration: none; }
 .foot nav a { color: var(--ink); font-weight: 600; }
