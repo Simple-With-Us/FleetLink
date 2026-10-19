@@ -24,6 +24,9 @@
 #   CURRENT_PROJECT_VERSION = <commit_count>
 # App Store Connect renders "<marketing> (<build>)", so a ship shows
 # "1.0.148 (148)".  Unified across macOS and iOS; timestamps permanently retired.
+# One exception:  a re-ship of a commit count that App Store Connect already
+# holds raises BOTH numbers to <floor + 1>,  so the pair stays consistent but
+# the build number no longer names that commit.  See the guard below.
 #
 # ---------------------------------------------------------------------------
 # WHAT IS HOLDING BACK AUTOMATIC SHIPPING: THE MIN-INTERVAL RATE LIMIT
@@ -914,7 +917,7 @@ elif [[ -n "$FORCE_BUILD" || -n "$FORCE_VERSION" ]]; then
   if [[ -z "$FORCE_VERSION" ]]; then
     MARKETING="${MARKETING_PREFIX}.${BUILD_NUM}"
   fi
-  log "version: operator override (--build/--version); sequence not consulted"
+  log "version: operator override (--build/--version); the local build-seq counter is not consulted"
 else
   # resolve_seq_floor runs in a subshell, so its die() cannot exit this script
   # on its own - check explicitly rather than leaning on set -e.
