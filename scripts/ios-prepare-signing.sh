@@ -22,7 +22,8 @@ fi
 : "${IOS_DIST_P12_PASSWORD:?IOS_DIST_P12_PASSWORD required}"
 
 umask 077
-# Runner temp only.  ~/.secrets is a one-time handoff directory, not a signing store.
+# Runner temp only.  Nothing here touches the home directory except the three
+# private-key dirs altool looks in.
 STAGE_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ios-signing"
 mkdir -p "$STAGE_DIR"
 chmod 700 "$STAGE_DIR"
@@ -43,24 +44,13 @@ install_private_key "${HOME}/.private_keys"
 install_private_key "${HOME}/.appstoreconnect/private_keys"
 install_private_key "${HOME}/private_keys"
 
-# scripts/ios-fleet/ship-testflight.sh and asc-api.mjs read the App Store
-# Connect key from ~/.secrets/appstore-connect.env.  Write it only on a hosted
-# runner, whose home is a throwaway VM.  On an owner Mac this file is the
-# owner's own handoff and must never be overwritten by a signing helper.
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-  SECRETS_DIR="${HOME}/.secrets"
-  mkdir -p "$SECRETS_DIR"
-  chmod 700 "$SECRETS_DIR"
-  {
-    echo "ASC_KEY_ID=${ASC_KEY_ID}"
-    echo "ASC_ISSUER_ID=${ASC_ISSUER_ID}"
-    echo "ASC_KEY_PATH=${KEY_PATH}"
-  } > "${SECRETS_DIR}/appstore-connect.env"
-  chmod 600 "${SECRETS_DIR}/appstore-connect.env"
-  if [[ -n "${GITHUB_ENV:-}" ]]; then
-    echo "ASC_KEY_PATH=${KEY_PATH}" >> "$GITHUB_ENV"
-  fi
-  log "ASC env file written for the fleet ship script"
+# scripts/ios-fleet/ship-testflight.sh and asc-api.mjs read ASC_KEY_ID,
+# ASC_ISSUER_ID and ASC_KEY_PATH from the environment.  On a hosted runner the
+# first two are already in $GITHUB_ENV (ios-load-signing.mjs);  add the staged
+# key path.  An owner Mac never runs this script for its own signing.
+if [[ -n "${GITHUB_ACTIONS:-}" && -n "${GITHUB_ENV:-}" ]]; then
+  echo "ASC_KEY_PATH=${KEY_PATH}" >> "$GITHUB_ENV"
+  log "ASC_KEY_PATH exported for the fleet ship script"
 fi
 
 P12_PATH="${STAGE_DIR}/ios-distribution.p12"
