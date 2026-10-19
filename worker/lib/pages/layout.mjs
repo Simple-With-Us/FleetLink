@@ -28,15 +28,15 @@ function initials(name) {
 function navLinks(principal, active) {
   const link = (href, label, key) => `<a href="${href}"${active === key ? ' aria-current="page"' : ""}>${label}</a>`;
   if (!principal) {
-    return `${link("/#features", "Features", "features")}${link("/agents", "For Agents", "agents")}${link("/instructions", "How It Works", "instructions")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a>`;
+    return `${link("/#features", "Features", "features")}${link("/agents", "Agents", "agents")}${link("/instructions", "How It Works", "instructions")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a>`;
   }
   const items = [link("/dashboard", "Dashboard", "dashboard")];
-  if (principal.isAdmin) items.push(link("/admin", "Admin", "admin"));
-  items.push(link("/agents", "For Agents", "agents"));
+  items.push(link("/agents", "Agents", "agents"));
   items.push(link("/instructions", "Help", "instructions"));
   const name = principal.user?.display_name || "Account";
   items.push(`<a class="who" href="/dashboard#account" title="Your account"><span class="avatar" aria-hidden="true">${escapeHtml(initials(name))}</span><span>${escapeHtml(name)}</span></a>`);
   items.push(`<form method="post" action="/logout" class="inline"><button type="submit" class="link">Sign Out</button></form>`);
+  if (principal.isAdmin) items.push(`<a class="nav-admin" href="/admin"${active === "admin" ? ' aria-current="page"' : ""}>Admin</a>`);
   return items.join("");
 }
 
@@ -65,7 +65,7 @@ ${head}
 <a class="skip" href="#main">Skip to content</a>
 <header class="top${principal ? "" : " is-public"}"><div class="bar"><a class="brand" href="/">${logoImg(64)}<span class="brand-text">FleetLink</span>${BRAND_FILES["fleetlink-wordmark.png"] ? `<picture class="brand-wordmark-picture"><source type="image/webp" srcset="/assets/fleetlink-wordmark.webp?v=${ASSET_VERSION}"><img class="brand-wordmark" src="/assets/fleetlink-wordmark.png?v=${ASSET_VERSION}" alt="FleetLink"></picture>` : ""}</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
 <main id="main"${fullBleed ? "" : ' class="wrap"'}>${body}</main>
-<footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : ""}<a href="/#features">Features</a><a href="/agents">For Agents</a><a href="/instructions">How It Works</a><a href="/privacy">Privacy</a><a href="mailto:support@fleetlink.online">Support</a></nav></div></footer>
+<footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : ""}<a href="/#features">Features</a><a href="/agents">Agents</a><a href="/instructions">How It Works</a><a href="/privacy">Privacy</a><a href="mailto:support@fleetlink.online">Support</a></nav></div></footer>
 ${scriptTags}
 </body>
 </html>`;
