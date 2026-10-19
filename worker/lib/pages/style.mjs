@@ -29,8 +29,8 @@ export const APP_CSS = String.raw`
   --shadow-lg: 0 2px 4px rgba(11, 31, 58, 0.06), 0 24px 48px rgba(11, 31, 58, 0.12);
 }
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink); background: var(--soft); }
+html { -webkit-text-size-adjust: 100%; background: #fff; }
+body { margin: 0; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink); background: var(--soft);; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 a { color: var(--brand); }
 a:hover { color: var(--brand-dark); }
 :focus-visible { outline: 3px solid var(--cyan); outline-offset: 2px; }
@@ -74,6 +74,7 @@ pre { background: var(--navy); color: #dbe7ff; padding: 0.9rem 1rem; border-radi
 .avatar { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--brand), var(--cyan)); color: #fff; font-weight: 800; font-size: 0.85rem; }
 form.inline { display: inline; margin: 0; }
 
+main { flex: 1 0 auto; }
 .wrap { max-width: 1120px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
 
 /* Footer, shared by every page */
@@ -81,8 +82,13 @@ form.inline { display: inline; margin: 0; }
 .foot .bar { min-height: 72px; justify-content: center; gap: 0.75rem 2.5rem; padding-top: 1.1rem; padding-bottom: 1.1rem; }
 .foot .brand { font-size: 1rem; }
 .foot .brand img { width: 24px; height: 24px; border-radius: 6px; box-shadow: none; }
-.foot nav { display: flex; gap: 0.6rem 1.5rem; flex-wrap: wrap; justify-content: center; align-items: center; }
-.foot a { color: var(--muted); }
+.foot nav { display: flex; gap: 0.5rem 1.4rem; flex-wrap: wrap; justify-content: center; align-items: center; }
+.foot a { color: var(--muted); text-decoration: none; }
+.foot nav a { color: var(--ink); font-weight: 600; }
+.foot nav a:hover { color: var(--brand); }
+.foot nav.legal { flex-basis: 100%; font-size: 0.8rem; opacity: 0.7; gap: 0.35rem 1.25rem; }
+.foot nav.legal a { color: var(--muted); font-weight: 500; }
+.foot nav.legal a:hover { color: var(--ink); }
 
 /* Building blocks */
 .narrow { max-width: 30rem; margin: 2rem auto; }
