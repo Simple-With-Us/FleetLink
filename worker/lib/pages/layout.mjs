@@ -35,10 +35,10 @@ function navLinks(principal, active) {
   items.push(link("/agents", "Agents", "agents"));
   items.push(link("/#guide", "Help", "guide"));
   const name = principal.user?.display_name || "Account";
-  items.push(`<a class="who" href="/dashboard#account" title="Your account"><span class="avatar" aria-hidden="true">${escapeHtml(initials(name))}</span><span>${escapeHtml(name)}</span></a>`);
-  if (principal.isAdmin) items.push(link("/admin", "Admin", "admin"));
-  items.push(`<form method="post" action="/logout" class="inline"><button type="submit" class="link">Sign Out</button></form>`);
-  return items.join("");
+  const account = [`<a class="who" href="/dashboard#account" title="Your account"><span class="avatar" aria-hidden="true">${escapeHtml(initials(name))}</span><span>${escapeHtml(name)}</span></a>`];
+  if (principal.isAdmin) account.push(link("/admin", "Admin", "admin"));
+  account.push(`<form method="post" action="/logout" class="inline"><button type="submit" class="link">Sign Out</button></form>`);
+  return `<span class="nav-pages">${items.join("")}</span><span class="nav-account">${account.join("")}</span>`;
 }
 
 /**

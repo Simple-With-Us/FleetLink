@@ -52,6 +52,7 @@ pre { background: var(--navy); color: #dbe7ff; padding: 0.9rem 1rem; border-radi
 .brand:hover { color: var(--navy); }
 .brand img { width: 34px; height: 34px; border-radius: 9px; box-shadow: 0 2px 8px rgba(25, 167, 230, 0.35); }
 .top nav { display: flex; gap: 0.25rem; align-items: center; flex-wrap: wrap; }
+.top nav .nav-pages, .top nav .nav-account { display: inline-flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
 .top nav a, .top nav .link { color: var(--muted); text-decoration: none; padding: 0.5rem 0.75rem; border-radius: 8px; font-weight: 600; font-size: 0.95rem; min-height: 40px; display: inline-flex; align-items: center; }
 .top nav a:hover, .top nav .link:hover { background: var(--soft); color: var(--ink); }
 .top nav a[aria-current="page"] { color: var(--brand); background: #eaf1ff; }
@@ -308,7 +309,15 @@ td .rowmenu { position: relative; }
   .preview { transform: none; }
 }
 @media (max-width: 640px) {
+  .top nav { display: contents; }
+  .top .brand { order: 1; }
+  .top nav .nav-account { order: 2; margin-left: auto; }
+  .top nav .nav-pages { order: 3; flex-basis: 100%; margin-top: 0.15rem; }
+  .top nav a, .top nav .link { padding: 0.4rem 0.55rem; }
+  .top .bar { row-gap: 0.1rem; padding-bottom: 0.3rem; }
   .dash-head .usage { flex: 1 1 100%; }
+  .tabs { flex-wrap: nowrap; gap: 0; margin-left: -1.25rem; margin-right: -1.25rem; padding: 0 0.3rem; }
+  .tabs button { flex: 1 1 0; min-width: 0; padding: 0.55rem 0.1rem; font-size: 0.72rem; text-align: center; white-space: nowrap; }
   th, td { padding: 0.5rem 0.3rem; }
   table { font-size: 0.86rem; }
   .table-wrap { padding: 0.25rem 0.5rem; }
