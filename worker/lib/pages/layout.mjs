@@ -35,8 +35,8 @@ function navLinks(principal, active) {
   items.push(link("/instructions", "Help", "instructions"));
   const name = principal.user?.display_name || "Account";
   items.push(`<a class="who" href="/dashboard#account" title="Your account"><span class="avatar" aria-hidden="true">${escapeHtml(initials(name))}</span><span>${escapeHtml(name)}</span></a>`);
+  if (principal.isAdmin) items.push(link("/admin", "Admin", "admin"));
   items.push(`<form method="post" action="/logout" class="inline"><button type="submit" class="link">Sign Out</button></form>`);
-  if (principal.isAdmin) items.push(`<a class="nav-admin" href="/admin"${active === "admin" ? ' aria-current="page"' : ""}>Admin</a>`);
   return items.join("");
 }
 

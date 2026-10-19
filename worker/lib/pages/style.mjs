@@ -55,9 +55,6 @@ pre { background: var(--navy); color: #dbe7ff; padding: 0.9rem 1rem; border-radi
 .top nav a, .top nav .link { color: var(--muted); text-decoration: none; padding: 0.5rem 0.75rem; border-radius: 8px; font-weight: 600; font-size: 0.95rem; min-height: 40px; display: inline-flex; align-items: center; }
 .top nav a:hover, .top nav .link:hover { background: var(--soft); color: var(--ink); }
 .top nav a[aria-current="page"] { color: var(--brand); background: #eaf1ff; }
-.top nav a.nav-admin { margin-left: 1.25rem; border: 1px solid var(--line); color: var(--ink); background: #fff; }
-.top nav a.nav-admin:hover { background: var(--soft); color: var(--ink); }
-.top nav a.nav-admin[aria-current="page"] { color: var(--brand); background: #eaf1ff; border-color: transparent; }
 .top nav a.button { color: #fff; margin-left: 0.25rem; background: var(--brand); }
 .top nav a.button:hover { color: #fff; background: var(--brand-dark); }
 .top nav a.button.secondary { background: #fff; color: var(--ink); border-color: #c7d2e3; }
