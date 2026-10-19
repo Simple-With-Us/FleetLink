@@ -10,10 +10,12 @@ name: iOS TestFlight
 # Ship path: scripts/ios-ship-testflight.sh -> scripts/ios-fleet/ship-testflight.sh
 # (the vendored fleet script, pinned by scripts/ios-fleet.sha256).  It reads the
 # commit count from git, shipping 1.0.<commit count> with CFBundleVersion set
-# to the same integer, raised past any build already on App Store Connect, declares export compliance (ensure-tf-ready), and
-# publishes the mandatory "What to Test" note from the commit range since the
-# last ship.  ios/project.yml carries placeholders only; nothing is hand-edited
-# per release.
+# to the same integer, raised past any build already on App Store Connect,
+# declares export compliance (ensure-tf-ready), and publishes the mandatory
+# "What to Test" note from the commit range since the last ship.  When App Store
+# Connect already holds that commit count, the pair moves up together to
+# <floor + 1>, so the build number no longer names a commit.  ios/project.yml
+# carries placeholders only; nothing is hand-edited per release.
 #
 # Rate gate and same-HEAD skip stay at the fleet defaults (one upload per hour,
 # nothing twice for one commit).  No IOS_TF_MIN_INTERVAL_SEC and no --force-ship
