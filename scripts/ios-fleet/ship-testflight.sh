@@ -876,9 +876,10 @@ if [[ -n "$UPLOAD_ONLY_IPA" ]]; then
   log "version: taken from the existing IPA (--upload-only); sequence neither consulted nor consumed"
 elif [[ -n "$FORCE_BUILD" || -n "$FORCE_VERSION" ]]; then
   # Explicit operator override: honour exactly what was asked.  A bare --version
-  # still gets an auto build number from the repo commit count, which is higher
-  # than anything already uploaded - that is the whole point of the scheme, so an
-  # operator picking the marketing version does not have to reason about it.
+  # still gets an auto build number from the repo commit count, so an operator
+  # picking the marketing version does not have to reason about it.  The commit
+  # count is usually higher than anything already uploaded, but not always:  the
+  # floor below raises the build number when it is not.
   MARKETING="${FORCE_VERSION:-$DEFAULT_MARKETING}"
   if [[ -n "$FORCE_BUILD" ]]; then
     # An explicit --build is honoured exactly.
