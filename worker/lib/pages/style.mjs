@@ -286,6 +286,7 @@ td .rowmenu { position: relative; }
 .step { display: flex; flex-direction: column; }
 .step pre { margin-top: auto; }
 .section h2 { font-size: 1.5rem; }
+#guide .card > h2 { font-size: 2rem; }
 #guide .card h3 { font-size: 1.5rem; }
 .section > pre, .section .two-col pre, .section .card pre { font-size: 0.82rem; }
 .section .card pre { margin-bottom: 0; }
