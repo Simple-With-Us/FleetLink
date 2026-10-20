@@ -86,7 +86,12 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
 
     // Signed out, the landing page leads to sign-in and sign-up.
     await page.goto("/");
-    assert.equal(await page.locator("header .brand img:not(.brand-wordmark)").getAttribute("src").then((s) => s.startsWith("/assets/logo-64.png")), true);
+    // The public top bar intentionally carries no brand until the hero intro is
+    // scrolled past; then the wordmark fades in.  The plain logo lives in the footer.
+    assert.equal(await page.locator("header .brand img:not(.brand-wordmark)").count(), 0);
+    assert.equal(await page.locator("footer .brand img").getAttribute("src").then((s) => s.startsWith("/assets/logo-64.png")), true);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.locator("header .brand img.brand-wordmark").waitFor({ state: "visible" });
     // Top nav intentionally carries no Create Account (Jay: sign-in flow and the
     // hero/footer buttons cover signup).  Nav = Features, For Agents, How It
     // Works, boxed Sign In.
