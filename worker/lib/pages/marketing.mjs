@@ -95,7 +95,6 @@ function card(icon, title, body, extra = "") {
 /** The How It Works guide, living on the home page as the #guide section. */
 function guideSection(origin) {
   return `<section class="section" id="guide"><article class="card">
-<article class="card">
       <h1>How FleetLink Works</h1>
       <p>FleetLink gives you a link to a file, a folder, or another web address.&nbsp; Every link belongs to the account that made it and expires on its own.</p>
 
@@ -148,7 +147,7 @@ fleet-share list</pre>
         <li>HTML files download instead of opening in the browser.</li>
         <li>When the time is up, the link stops working.</li>
       </ul>
-    </article></article></section>`;
+    </article></section>`;
 }
 
 export function home(ctx, principal) {

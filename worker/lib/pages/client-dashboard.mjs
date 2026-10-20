@@ -596,7 +596,7 @@ export const DASHBOARD_JS = String.raw`
     if (name === "account") loadAccount().catch(FL.fail);
   });
   document.addEventListener("click", function (e) {
-    var item = e.target && e.target.closest ? e.target.closest(".rowmenu .actions button, .rowmenu .actions a, .rowmenu .actions select") : null;
+    var item = e.target && e.target.closest ? e.target.closest(".rowmenu .actions button, .rowmenu .actions a") : null;
     if (item) { var own = item.closest("details.rowmenu"); if (own) own.open = false; }
     document.querySelectorAll("details.rowmenu[open]").forEach(function (d) { if (!d.contains(e.target)) d.open = false; });
   });
