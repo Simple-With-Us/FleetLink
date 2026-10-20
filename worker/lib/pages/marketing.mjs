@@ -95,13 +95,13 @@ function card(icon, title, body, extra = "") {
 /** The How It Works guide, living on the home page as the #guide section. */
 function guideSection(origin) {
   return `<section class="section" id="guide"><article class="card">
-      <h1>How FleetLink Works</h1>
+      <h2>How FleetLink Works</h2>
       <p>FleetLink gives you a link to a file, a folder, or another web address.&nbsp; Every link belongs to the account that made it and expires on its own.</p>
 
-      <h2>Accounts</h2>
+      <h3>Accounts</h3>
       <p>Create an account on the <a href="/login">sign-in page</a> with a passkey.&nbsp; There is no password.&nbsp; Add a second passkey from your dashboard so you can sign in from another device.&nbsp; Your dashboard lists your links, your API tokens, your teams, and the devices you are signed in on.</p>
 
-      <h2>Sharing On The Website</h2>
+      <h3>Sharing On The Website</h3>
       <ol>
         <li>Open the <a href="/dashboard#new">dashboard</a> and choose New Share.</li>
         <li>Pick files, or paste a web address for a short link.</li>
@@ -109,7 +109,7 @@ function guideSection(origin) {
         <li>Copy the link.</li>
       </ol>
 
-      <h2>How Long A Link Lasts</h2>
+      <h3>How Long A Link Lasts</h3>
       <div class="table-wrap"><table>
         <thead><tr><th>Who</th><th>Files</th><th>Short links</th></tr></thead>
         <tbody>
@@ -119,7 +119,7 @@ function guideSection(origin) {
       </table></div>
       <p>Each account has a storage quota across its live links.&nbsp; A link can be renewed three times.&nbsp; A password is optional; without one, anyone with the link can open it.</p>
 
-      <h2>Agents, Scripts, And The CLI</h2>
+      <h3>Agents, Scripts, And The CLI</h3>
       <p>Create an API token on the <a href="/dashboard#tokens">dashboard</a>.&nbsp; The token acts as you, can be limited (largest file, longest share, no short links, one team), and can be revoked at any time.</p>
       <pre>export FLEETLINK_TOKEN=fla_…
 fleet-share notes.md
@@ -134,13 +134,13 @@ fleet-share list</pre>
   -H "X-Expire-Days: 3"</pre>
       <p>Agents that speak MCP can connect to <code>${origin}/mcp</code> with the same token.</p>
 
-      <h2>iPhone</h2>
+      <h3>iPhone</h3>
       <p>The FleetLink app signs in with your passkey, lists your links, and makes new ones.&nbsp; To share from the Share sheet, create an API token, <a href="/api/shortcut/download">download the Shortcut</a>, and paste the token when Shortcuts asks.</p>
 
-      <h2>Teams</h2>
+      <h3>Teams</h3>
       <p>A team shares a space for links.&nbsp; Everyone in the team sees its links.&nbsp; Team owners and admins can change or delete any of them; members change their own.&nbsp; A token can be tied to one team so an agent's uploads land there.</p>
 
-      <h2>What People See</h2>
+      <h3>What People See</h3>
       <ul>
         <li>A Markdown file opens as a formatted page.</li>
         <li>Several files under one link open as a list.</li>
