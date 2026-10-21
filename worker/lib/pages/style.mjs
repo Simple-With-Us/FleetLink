@@ -344,8 +344,8 @@ td .rowmenu { position: relative; }
 @media (max-width: 480px) {
   /* Every bar stays on one line on a phone: tighter spacing, and the signed-in
      bar drops For Agents / Help (both are in the footer). */
-  .top .bar { min-height: 52px; gap: 0.35rem; padding: 0 0.75rem; }
-  .top nav { gap: 0; }
+  .top .bar { min-height: 52px; gap: 0.35rem; padding: 0 0.75rem; flex-wrap: nowrap; }
+  .top nav { gap: 0; flex-wrap: nowrap; }
   .top nav a, .top nav .link { padding: 0.35rem 0.42rem; font-size: 0.84rem; min-height: 34px; }
   .top nav a.button { padding: 0.3rem 0.6rem; min-height: 34px; }
 }

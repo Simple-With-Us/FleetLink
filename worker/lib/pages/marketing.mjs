@@ -174,7 +174,7 @@ export function home(ctx, principal) {
     principal,
     active: "home",
     fullBleed: true,
-    heroBrand: true,
+    heroBrand: !principal,
     scripts: ["app.js"],
     head: ogTags({ title: "FleetLink", description: "Where people and AI agents hand off work: files, folders, notes, and short links with an owner and an expiry.", url: `${origin}/`, image: `${origin}/preview.png` }) + appClipMeta(ctx.env),
     body: `${deleted}<section class="hero">

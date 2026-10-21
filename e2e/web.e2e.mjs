@@ -54,7 +54,7 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
   const env = await makeEnv();
   // The logo animations deploy.sh uploads to R2.
   for (const name of readdirSync(media)) {
-    if (!/\.(mp4|jpg|png)$/i.test(name)) continue;
+    if (!/\.(mp4|jpg|png|webp|gif)$/i.test(name)) continue;
     await env.FLEET_SHARES.put(`site/media/${name}`, readFileSync(join(media, name)));
   }
   const server = await serve(env);
