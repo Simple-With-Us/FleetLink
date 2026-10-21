@@ -91,7 +91,16 @@ test("project.yml carries a 1.0.N placeholder, never a hand-set release train", 
   assert.equal(new Set(marketing).size, 1, "app and App Clip share one version");
   assert.match(marketing[0], /^1\.0\.\d+$/);
   assert.equal(new Set(build).size, 1);
-  assert.match(build[0], /^\d{12}$/);
+  // CFBundleVersion is the commit count, so the two always describe the same
+  // number.  The old assertion demanded 12 digits, which enforced the retired
+  // YYYYMMDDHHMM timestamp; a plain integer is what the fleet scheme uses.
+  assert.match(build[0], /^\d+$/, "CFBundleVersion is a commit count, not a timestamp");
+  assert.doesNotMatch(build[0], /^\d{12}$/, "UTC timestamps are retired");
+  assert.equal(
+    marketing[0],
+    `1.0.${build[0]}`,
+    "marketing version and build number describe the same commit count",
+  );
 });
 
 test("apps.json describes the same app project.yml builds", () => {

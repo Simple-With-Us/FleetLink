@@ -135,7 +135,7 @@ export const ADMIN_JS = String.raw`
     body.replaceChildren();
     data.shares.forEach(function (s) {
       body.append(h("tr", null,
-        h("td", null, h("a", { href: s.url, target: "_blank", rel: "noopener", class: "mono", text: s.slug }), s.title ? h("div", { class: "small muted", text: s.title }) : null),
+        h("td", null, h("a", { href: s.url, target: "_blank", rel: "noopener", class: "mono slug-a", text: s.slug }, FL.openIcon()), s.title ? h("div", { class: "small muted", text: s.title }) : null),
         h("td", { class: "small", text: s.owner.display_name || s.owner.id }),
         h("td", { class: "small" }, s.kind === "link" ? "Link" : s.file_count + " files, " + FL.bytes(s.total_bytes), s.source === "legacy" ? h("span", { class: "pill amber", text: "adopted" }) : null),
         h("td", { class: "small", text: s.expires_at ? FL.relative(s.expires_at) : "Never" }),

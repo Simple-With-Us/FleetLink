@@ -87,9 +87,9 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     // Signed out, the landing page leads to sign-in and sign-up.
     await page.goto("/");
     assert.equal(await page.locator("header .brand img:not(.brand-wordmark)").getAttribute("src").then((s) => s.startsWith("/assets/logo-64.png")), true);
-    // Top nav intentionally carries no Create Account (Jay: sign-in flow and the
-    // hero/footer buttons cover signup).  Nav = Features, For Agents, How It
-    // Works, boxed Sign In.
+    // Top nav intentionally carries no Create Account (sign-in flow and the
+    // hero/footer buttons cover signup).  Nav = Features, Agents, Help,
+    // boxed Sign In.
     assert.equal(await page.locator('header a[href="/login#signup"]').count(), 0);
     assert.equal(await page.locator('header a[href="/login"]').count(), 1);
     await settle();
@@ -203,7 +203,7 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     await page.screenshot({ path: join(shots, "08-admin-audit.png"), fullPage: true });
 
     // Public pages and a share page render cleanly too.
-    for (const [path, name] of [["/", "09-home"], ["/instructions", "10-instructions"], ["/ada-notes/", "11-listing"], ["/privacy", "12-privacy"]]) {
+    for (const [path, name] of [["/", "09-home"], ["/#guide", "10-guide"], ["/ada-notes/", "11-listing"], ["/privacy", "12-privacy"]]) {
       await page.goto(path);
       await settle();
       await page.screenshot({ path: join(shots, `${name}.png`), fullPage: true });
