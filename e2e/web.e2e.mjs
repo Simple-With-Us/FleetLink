@@ -54,7 +54,7 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
   const env = await makeEnv();
   // The logo animations deploy.sh uploads to R2.
   for (const name of readdirSync(media)) {
-    if (!/\.(mp4|jpg|png)$/i.test(name)) continue;
+    if (!/\.(mp4|jpg|png|webp|gif)$/i.test(name)) continue;
     await env.FLEET_SHARES.put(`site/media/${name}`, readFileSync(join(media, name)));
   }
   const server = await serve(env);
@@ -86,7 +86,12 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
 
     // Signed out, the landing page leads to sign-in and sign-up.
     await page.goto("/");
-    assert.equal(await page.locator("header .brand img:not(.brand-wordmark)").getAttribute("src").then((s) => s.startsWith("/assets/logo-64.png")), true);
+    // The public top bar intentionally carries no brand until the hero intro is
+    // scrolled past; then the wordmark fades in.  The plain logo lives in the footer.
+    assert.equal(await page.locator("header .brand img:not(.brand-wordmark)").count(), 0);
+    assert.equal(await page.locator("footer .brand img").getAttribute("src").then((s) => s.startsWith("/assets/logo-64.png")), true);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.locator("header .brand img.brand-wordmark").waitFor({ state: "visible" });
     // Top nav intentionally carries no Create Account (sign-in flow and the
     // hero/footer buttons cover signup).  Nav = Features, Agents, Help,
     // boxed Sign In.
@@ -94,6 +99,10 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     assert.equal(await page.locator('header a[href="/login"]').count(), 1);
     await settle();
     await page.screenshot({ path: join(shots, "00-landing.png"), fullPage: true });
+    // The scrolled hero bar slims down to buttons only (nav links hide), so
+    // return to the top before using the top nav.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('header a[href="/agents"]').waitFor({ state: "visible" });
     await page.click('header a[href="/agents"]');
     await page.waitForURL("**/agents");
     await page.waitForSelector("#mcp pre");

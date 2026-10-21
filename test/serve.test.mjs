@@ -285,14 +285,14 @@ for (const [path, type] of [["/favicon.ico", "image/x-icon"], ["/apple-touch-ico
   assert.equal(await part.text(), "0123");
   assert.equal((await call(env, "GET", "/assets/media/..%2Fsettings%3Aoverrides")).status, 404);
   const home = await (await call(env, "GET", "/")).text();
-  assert.match(home, /<img src="\/assets\/logo-64\.png\?v=[a-z0-9]+" width="32" height="32" alt=""><span class="brand-text">FleetLink<\/span><picture class="brand-wordmark-picture"><source type="image\/webp"[^>]+><img class="brand-wordmark"[^>]+><\/picture><\/a>/);
+  assert.match(home, /<a class="brand" href="\/"><picture class="brand-wordmark-picture"><source type="image\/webp"[^>]+><img class="brand-wordmark"[^>]+><\/picture><\/a>/);
   assert.match(home, /class="brand-wordmark" src="\/assets\/fleetlink-wordmark\.png\?v=[a-z0-9]+" alt="FleetLink"/);
   const wordmark = await call(env, "GET", "/assets/fleetlink-wordmark.png");
   assert.equal(wordmark.status, 200);
   assert.equal(wordmark.headers.get("content-type"), "image/png");
-  assert.ok(home.includes('<header class="top is-public">'), "signed-out header carries is-public for the collapsed-bar state");
+  assert.ok(home.includes('<header class="top is-public is-hero">'), "signed-out hero header carries is-public and is-hero for the collapsed-bar state");
   assert.ok(home.includes('<a class="button secondary" href="/login">Sign In</a>'), "nav Sign In is a boxed secondary button");
-  assert.match(home, /<video class="hero-intro" data-intro autoplay muted playsinline/);
+  assert.match(home, /<picture class="hero-intro" data-intro data-still="\/assets\/media\/fleetlink-wordmark\.jpg"><source type="image\/webp" srcset="\/assets\/media\/fleetlink-wordmark\.webp"><img src="\/assets\/media\/fleetlink-wordmark\.gif" alt="FleetLink"><\/picture>/);
 });
 
 test("old links belong to the fleet owner:  existing operator shares move once, later adoptions and operator-made shares start there, and legacy bytes do not count against the quota", async () => {

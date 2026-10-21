@@ -32,9 +32,12 @@ function code(text) {
   return `<pre><code>${escapeHtml(text)}</code></pre>`;
 }
 
-/** A logo animation that plays once and rests on its last frame, which is also its poster. */
+/** A logo animation that plays once and rests on its last frame.  An animated
+ * image, not a <video>:  Safari's video-autoplay setting cannot block it.
+ * Animated WebP (loop count 1) with a GIF fallback; the .jpg is the still for
+ * prefers-reduced-motion. */
 export function introVideo(name, cls, label) {
-  return `<video class="${cls}" data-intro autoplay muted playsinline preload="auto" poster="/assets/media/${name}.jpg" aria-label="${escapeHtml(label)}"><source src="/assets/media/${name}.mp4" type="video/mp4"></video>`;
+  return `<picture class="${cls}" data-intro data-still="/assets/media/${name}.jpg"><source type="image/webp" srcset="/assets/media/${name}.webp"><img src="/assets/media/${name}.gif" alt="${escapeHtml(label)}"></picture>`;
 }
 
 /** A static picture of the dashboard, built from the dashboard's own components. */
@@ -171,6 +174,7 @@ export function home(ctx, principal) {
     principal,
     active: "home",
     fullBleed: true,
+    heroBrand: !principal,
     scripts: ["app.js"],
     head: ogTags({ title: "FleetLink", description: "Where people and AI agents hand off work: files, folders, notes, and short links with an owner and an expiry.", url: `${origin}/`, image: `${origin}/preview.png` }) + appClipMeta(ctx.env),
     body: `${deleted}<section class="hero">
@@ -220,6 +224,7 @@ export function home(ctx, principal) {
           ${card("link", "Short Links", "Turn a long PR, dashboard, or ticket URL into a short link that lasts up to 180 days.")}
           ${card("lock", "Private Handoffs", "Add a password to any share.&nbsp; Passwords are stored as salted hashes and never shown again.")}
         </div>
+        <p class="small muted center-text">Read <a href="/instructions">how FleetLink works</a> and the <a href="/agents">guide for agents</a>.</p>
       </section>
 
       ${guideSection(origin)}

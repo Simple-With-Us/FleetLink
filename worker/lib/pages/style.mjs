@@ -62,7 +62,14 @@ pre { background: var(--navy); color: #dbe7ff; padding: 0.9rem 1rem; border-radi
 .top nav a.button.secondary:hover { background: var(--soft); color: var(--ink); border-color: #c7d2e3; }
 .top .brand-wordmark-picture, .top .brand-wordmark-picture source { display: none; }
 .top.is-public.is-scrolled .brand-wordmark-picture { display: contents; }
+.top.is-hero .brand-wordmark-picture, .top.is-hero .brand-wordmark-picture source { display: contents; }
 .top .brand-wordmark { display: none; height: 28px; width: auto; border-radius: 0; box-shadow: none; }
+.top.is-hero .bar { position: relative; }
+.top.is-hero .brand { position: absolute; left: 1.25rem; top: 50%; transform: translateY(-50%); }
+.top.is-hero nav { margin-left: auto; }
+.top.is-hero .brand-wordmark { display: inline-block; opacity: 0; visibility: hidden; transition: opacity .3s ease, visibility .3s; }
+.top.is-hero.is-scrolled .brand-wordmark { opacity: 1; visibility: visible; }
+@media (prefers-reduced-motion: reduce) { .top.is-hero .brand-wordmark { transition: none; } }
 .top.is-public.is-scrolled nav a:not(.button) { display: none; }
 /* Owner-requested 1px optical adjustment; flex centering is otherwise unchanged. */
 .top.is-public.is-scrolled nav a.button.secondary { transform: translateY(-1px); }
@@ -197,7 +204,9 @@ td .rowmenu { position: relative; }
 .hero .actions { margin-top: 1.5rem; }
 .hero .fine { margin-top: 1rem; font-size: 0.92rem; color: var(--muted); }
 .hero-intro { display: block; width: min(460px, 100%); aspect-ratio: 16 / 9; margin: -3rem 0 -1.25rem -2rem; mix-blend-mode: multiply; }
+.hero-intro img { display: block; width: 100%; height: auto; }
 .auth-intro { display: block; width: 132px; height: 132px; margin: 0 auto; mix-blend-mode: multiply; }
+.auth-intro img { display: block; width: 100%; height: auto; }
 .hero-mark { width: 64px; height: 64px; border-radius: 16px; box-shadow: 0 6px 24px rgba(25, 167, 230, 0.35); margin-bottom: 1.25rem; }
 .preview { background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-lg); overflow: hidden; transform: perspective(1400px) rotateY(-4deg) rotateX(2deg); }
 .preview-bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.65rem 0.9rem; background: #f3f6fb; border-bottom: 1px solid var(--line); }
@@ -324,10 +333,20 @@ td .rowmenu { position: relative; }
   table { font-size: 0.86rem; }
   .table-wrap { padding: 0.25rem 0.5rem; }
   .table-wrap td, .table-wrap td div, .table-wrap td .mono { overflow-wrap: anywhere; }
+  /* Slim the hero bar on scroll only on small screens; wider bars have room for the wordmark plus links. */
+  .top.is-hero.is-scrolled nav a:not(.button) { display: none; }
   .grid-3 { grid-template-columns: 1fr; }
   .hero h1 { font-size: 2.1rem; }
   .who span { display: none; }
   th.hide-sm, td.hide-sm { display: none; }
   .cta { padding: 1.75rem; }
+}
+@media (max-width: 480px) {
+  /* Every bar stays on one line on a phone: tighter spacing, and the signed-in
+     bar drops For Agents / Help (both are in the footer). */
+  .top .bar { min-height: 52px; gap: 0.35rem; padding: 0 0.75rem; flex-wrap: nowrap; }
+  .top nav { gap: 0; flex-wrap: nowrap; }
+  .top nav a, .top nav .link { padding: 0.35rem 0.42rem; font-size: 0.84rem; min-height: 34px; }
+  .top nav a.button { padding: 0.3rem 0.6rem; min-height: 34px; }
 }
 `;
