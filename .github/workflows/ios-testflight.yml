@@ -248,4 +248,5 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" >/dev/null 2>&1 || true
           rm -f "$RUNNER_TEMP/app-signing-kc-pass"
           rm -rf "$RUNNER_TEMP/ios-signing"
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
           rm -rf "$HOME/.private_keys" "$HOME/private_keys" "$HOME/.appstoreconnect/private_keys"
