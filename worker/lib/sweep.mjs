@@ -8,6 +8,7 @@ import { all, ensureSchema, now, run } from "./db.mjs";
 import { ensureFleetOwner } from "./fleet.mjs";
 import { importLegacyBatch } from "./legacy.mjs";
 import { purgeShare } from "./shares.mjs";
+import { pruneShareStats } from "./stats.mjs";
 import { evaluateValve, flushUsage, pruneUsage } from "./valve.mjs";
 
 const SHARE_BATCH = 15;
@@ -35,6 +36,7 @@ export async function sweep(env, ts = now()) {
   report.upload_grants = await run(env.DB, "DELETE FROM upload_grants WHERE expires_at <= ?", ts - 86400);
   report.invites = await run(env.DB, "DELETE FROM invites WHERE expires_at <= ? OR revoked_at <= ?", ts - 30 * 86400, ts - 30 * 86400);
   report.audit = await run(env.DB, "DELETE FROM audit_events WHERE created_at <= ?", ts - AUDIT_RETENTION_SECONDS);
+  report.share_stats = await pruneShareStats(env, ts);
   try {
     report.legacy = await importLegacyBatch(env, Number(env.LEGACY_IMPORT_BUDGET) || 30);
   } catch (err) {

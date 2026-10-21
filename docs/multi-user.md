@@ -67,6 +67,7 @@ Every request resolves to one principal or none.  The checks are in `worker/lib/
 | See it in a list, read its details and files (view) | yes | yes | yes | yes | no |
 | Add, replace, delete files; change title, description, link destination; renew (edit) | yes | yes | when the share's team access is `edit` | yes | no |
 | Rename, set the password, change the team access level, delete (manage) | yes | yes | no | yes | no |
+| Set an exact expiry date, including never (admin) | no | no | no | yes | no |
 | Share it with a team, move it between teams, make it personal (owner) | yes | no | no | yes | no |
 
 A bot's manager counts as its owner in this table.
@@ -102,6 +103,14 @@ User files are served from the same host as the account pages, so every share re
 
 A token's caps and a person's quota only ever tighten these.  Admins change per-person quotas in the admin panel or with `fleet-share admin user set`.
 
+## Traffic
+
+FleetLink counts the public responses it serves: a short-link open, a folder listing, a rendered note, a file view, and a file download (attachment, forced HTML, Shortcut, or `?download`) each add to the share's day.  File responses record the bytes served, and a download also increments downloads; a byte-range seek adds bytes and a download but not another view.  Counts live in `share_stats` by UTC day and are written in small batches, so they trail the live link by a few seconds; they are not Cloudflare's edge numbers and do not include requests that never reached the worker (cache hits, bot blocks).
+
+- In the dashboard, **Shares → Edit** changes the slug, title, description, password, team access, and — under the existing renewal limit — the duration; admins also get an exact expiry (including *never*).  **Stats** shows one share's last 30 days.  The **Analytics** tab totals views, downloads, bytes, and the busiest shares for your shares, your teams, or (admins) everyone.
+- `GET /api/shares/:slug/analytics` needs view access.  `GET /api/analytics` accepts `scope=mine` (default), `scope=teams`, or — admins — `scope=all`.
+- Cloudflare zone totals (requests, page views, cache, threats) appear in the Analytics tab for admins when the Worker has `CF_ANALYTICS_TOKEN` (Zone → Analytics → Read) and `CF_ZONE_ID` (the zone tag) secrets.  Without them the card says it is not configured.  Free-plan zones keep a short history, so older ranges may return a Cloudflare error, which the card shows as text.
+
 ## Data Model
 
 The schema is `worker/lib/schema.mjs`.  The worker applies pending migrations itself on first use in each isolate, so a deploy cannot run against an older schema.
@@ -113,8 +122,9 @@ The schema is `worker/lib/schema.mjs`.  The worker applies pending migrations it
 - `users.kind`: `person` or `agent` (migration 2);  `users.agent_seat` and `users.manager_id` (migration 3).
 - `upload_grants`: one-time upload URLs (secret hash, share, path, creator, optional token, byte cap, expiry, used time).  The sweep removes them a day after they expire.
 - `share_files`: one row per object with its R2 key, size, and type.  New uploads use `s/<share id>/<path>`, so a slug never collides with an old object or a system asset.
+- `share_stats`: one row per share per UTC day (`views`, `downloads`, `bytes`).  Public responses are counted in memory and written in small batches, so serving a link costs no database write.  The sweep keeps a little over a year.
 - `settings`: admin-editable values.
-- `audit_events`: sign-ups, sign-ins that change state, token and invite changes, role and status changes, share deletes by someone other than the owner.  Kept 90 days.
+- `audit_events`: sign-ups, sign-ins that change state, token and invite changes, role and status changes, share deletes by someone other than the owner, sharing and exact-expiry changes.  Kept 90 days.
 
 Deleting an account marks it `deleted`, signs it out, revokes its tokens and passkeys, and expires its shares.  The hourly sweep deletes the expired shares' objects and then the account row.
 
@@ -142,9 +152,10 @@ All JSON.  Errors are `{ "error": "…" }` with the right status.
 - Me: `GET|PATCH|DELETE /api/me`, `GET /api/me/passkeys`, `POST /api/me/passkeys/options|verify`, `PATCH|DELETE /api/me/passkeys/:id`, `GET|DELETE /api/me/sessions`, `DELETE /api/me/sessions/:id`.
 - Tokens: `GET|POST /api/tokens`, `DELETE /api/tokens/:id`.
 - Teams: `GET|POST /api/teams`, `GET|PATCH|DELETE /api/teams/:id`, `POST /api/teams/:id/members`, `PATCH|DELETE /api/teams/:id/members/:userId`.
-- Shares: `GET|POST /api/shares`, `GET|PATCH|DELETE /api/shares/:slug` (`PATCH` takes `team_id` and `team_access`), `POST /api/shares/:slug/renew`, `PUT|DELETE /api/shares/:slug/files/<path>`, `POST /api/shares/:slug/upload-url`, `POST /api/links`.
+- Shares: `GET|POST /api/shares`, `GET|PATCH|DELETE /api/shares/:slug` (`PATCH` takes `slug`, `title`, `description`, `password`, `team_id`, `team_access`, `url`/`target_url`, and — for admins and agent accounts — `expires_at`), `POST /api/shares/:slug/renew` (`days`), `PUT|DELETE /api/shares/:slug/files/<path>`, `POST /api/shares/:slug/upload-url`, `POST /api/links`.
+- Traffic: `GET /api/analytics?days=30&scope=mine|teams|all` (own, team, or — admins — everyone's totals, series, and busiest shares) and `GET /api/shares/:slug/analytics?days=30` (view access).
 - Upload URLs: `PUT /api/uploads/:secret` (no other credential).
 - Raw upload: `PUT /<slug>/<path>` and `DELETE /<slug>` for curl and the CLI.
 - Bots: `GET|POST /api/bots`, `PATCH /api/bots/:id`, `GET|POST /api/bots/:id/tokens`, `DELETE /api/bots/:id/tokens/:tokenId`, and `POST /api/agent/token` (Agent-Sync credential only).
-- Admin: `GET /api/admin/fleet`, `POST /api/admin/fleet/claim`, `GET /api/admin/stats`, `GET /api/admin/users`, `PATCH|DELETE /api/admin/users/:id`, `GET|POST /api/admin/invites`, `DELETE /api/admin/invites/:id`, `GET /api/admin/teams`, `POST /api/admin/teams/:id/join`, `GET|PUT /api/admin/settings`, `GET /api/admin/audit`.
+- Admin: `GET /api/admin/fleet`, `POST /api/admin/fleet/claim`, `GET /api/admin/stats`, `GET /api/admin/analytics/cloudflare?days=7` (optional; needs `CF_ANALYTICS_TOKEN` and `CF_ZONE_ID`), `GET /api/admin/users`, `PATCH|DELETE /api/admin/users/:id`, `GET|POST /api/admin/invites`, `DELETE /api/admin/invites/:id`, `GET /api/admin/teams`, `POST /api/admin/teams/:id/join`, `GET|PUT /api/admin/settings`, `GET /api/admin/audit`.
 - MCP: `POST /mcp` with the same credentials.  See `docs/mcp.md`.

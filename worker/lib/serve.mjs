@@ -13,6 +13,7 @@ import { adoptLegacySlug, legacyImportDone } from "./legacy.mjs";
 import { optionalPrincipal } from "./auth.mjs";
 import { shareAccess } from "./policy.mjs";
 import { formatBytes, isExpired, shareFiles, shareUrl } from "./shares.mjs";
+import { recordShareHit } from "./stats.mjs";
 import { getObject } from "./storage.mjs";
 import { recordUsage } from "./valve.mjs";
 import { appClipMeta, ogTags, page } from "./pages/layout.mjs";
@@ -103,10 +104,16 @@ export async function handleUnlock(request, env, slug, url) {
   return redirect(url.pathname, 303, { "Set-Cookie": await unlockCookie(env, share) });
 }
 
-function linkResponse(env, share, request, url, setCookie) {
+function countHit(env, exec, share, request, extra) {
+  if (request.method !== "GET") return;
+  recordShareHit(env, exec, share, extra);
+}
+
+function linkResponse(env, exec, share, request, url, setCookie) {
   const target = share.target_url;
   const headers = { "Cache-Control": "no-store" };
   if (setCookie) headers["Set-Cookie"] = setCookie;
+  countHit(env, exec, share, request);
   if (isSocialCrawler(request.headers.get("user-agent")) && (share.title || share.description)) {
     return html(page(env, {
       title: share.title || "Short link",
@@ -196,6 +203,7 @@ async function fileResponse(request, env, share, file, url, setCookie, exec, set
   let type = file.content_type || object.httpMetadata?.contentType || "application/octet-stream";
   if (isMarkdown(file.path, type) && url.searchParams.get("raw") !== "1" && !url.searchParams.has("download") && object.body) {
     if (request.method !== "HEAD") recordUsage(env, exec, { bytes: object.size, requests: 0 });
+    countHit(env, exec, share, request);
     const response = await markdownPage(env, share, file, object, url);
     if (setCookie) response.headers.append("Set-Cookie", setCookie);
     return response;
@@ -227,11 +235,17 @@ async function fileResponse(request, env, share, file, url, setCookie, exec, set
     const length = range.length ?? object.size - offset;
     headers.set("Content-Range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
     headers.set("Content-Length", String(length));
-    if (request.method !== "HEAD") recordUsage(env, exec, { bytes: length, requests: 0 });
+    if (request.method !== "HEAD") {
+      recordUsage(env, exec, { bytes: length, requests: 0 });
+      countHit(env, exec, share, request, { views: offset === 0 ? 1 : 0, downloads: disposition === "attachment" ? 1 : 0, bytes: length });
+    }
     return new Response(request.method === "HEAD" ? null : object.body, { status: 206, headers });
   }
   headers.set("Content-Length", String(object.size));
-  if (request.method !== "HEAD") recordUsage(env, exec, { bytes: object.size, requests: 0 });
+  if (request.method !== "HEAD") {
+    recordUsage(env, exec, { bytes: object.size, requests: 0 });
+    countHit(env, exec, share, request, { downloads: disposition === "attachment" ? 1 : 0, bytes: object.size });
+  }
   return new Response(request.method === "HEAD" ? null : object.body, { headers });
 }
 
@@ -327,10 +341,13 @@ export async function serveShare(request, env, ctx, { slug, rest, url, origin, s
     if (gate.setCookie) setCookie = await unlockCookie(env, share);
   }
 
-  if (share.kind === "link") return linkResponse(env, share, request, url, setCookie);
+  if (share.kind === "link") return linkResponse(env, ctx, share, request, url, setCookie);
 
   const files = await shareFiles(env, share.id);
-  if (url.searchParams.get("manifest") === "1" || (wantsJson(request) && !rest)) return manifest(share, files, origin);
+  if (url.searchParams.get("manifest") === "1" || (wantsJson(request) && !rest)) {
+    countHit(env, ctx, share, request);
+    return manifest(share, files, origin);
+  }
   let decoded;
   try {
     decoded = decodeURIComponent(rest || "");
@@ -341,6 +358,7 @@ export async function serveShare(request, env, ctx, { slug, rest, url, origin, s
     const dir = decoded.replace(/\/+$/, "");
     if (!dir && files.length === 1 && !rest) return fileResponse(request, env, share, files[0], url, setCookie, ctx, settings);
     if (dir && !files.some((f) => f.path.startsWith(`${dir}/`))) return notFoundPage(env, request);
+    countHit(env, ctx, share, request);
     return listingPage(env, share, files, dir, url, origin, setCookie);
   }
   const file = files.find((f) => f.path === decoded);

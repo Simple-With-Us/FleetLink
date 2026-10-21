@@ -8,6 +8,7 @@
 import { appleAppSiteAssociation } from "./lib/aasa.mjs";
 import { accountRoutes } from "./lib/api/account.mjs";
 import { adminRoutes } from "./lib/api/admin.mjs";
+import { analyticsRoutes } from "./lib/api/analytics.mjs";
 import { botRoutes } from "./lib/api/bots.mjs";
 import { rawWrite, shareRoutes } from "./lib/api/shares.mjs";
 import { ensureSchema } from "./lib/db.mjs";
@@ -30,6 +31,7 @@ import { assertValveOpen, rateLimit, recordUsage } from "./lib/valve.mjs";
 const router = new Router();
 accountRoutes(router);
 shareRoutes(router);
+analyticsRoutes(router);
 adminRoutes(router);
 botRoutes(router);
 pageRoutes(router);

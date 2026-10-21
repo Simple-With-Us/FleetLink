@@ -100,6 +100,7 @@ main { flex: 1 0 auto; }
 .card > h2:first-child, .card > h3:first-child { margin-top: 0; }
 .grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 .grid-3 { display: grid; gap: 1.25rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.metric { font-size: 1.7rem; font-weight: 800; margin: 0.1rem 0 0; }
 .eyebrow { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem; font-weight: 800; color: var(--brand); margin-bottom: 0.4rem; }
 .muted { color: var(--muted); }
 .small { font-size: 0.88rem; }
@@ -111,7 +112,7 @@ main { flex: 1 0 auto; }
 #share-search .end button { flex: 1 1 0; white-space: nowrap; }
 label { display: block; font-weight: 600; font-size: 0.92rem; margin: 0.7rem 0 0.3rem; }
 label.check { display: flex; gap: 0.5rem; align-items: center; font-weight: 500; }
-input[type=text], input[type=email], input[type=url], input[type=password], input[type=number], input[type=search], select, textarea {
+input[type=text], input[type=email], input[type=url], input[type=password], input[type=number], input[type=search], input[type=datetime-local], select, textarea {
   width: 100%; font: inherit; padding: 0.6rem 0.75rem; border: 1px solid #c7d2e3; border-radius: 9px; background: #fff; color: var(--ink); min-height: 44px;
 }
 input:focus, select:focus, textarea:focus { border-color: var(--brand); outline: 3px solid rgba(26, 86, 219, 0.18); outline-offset: 0; }

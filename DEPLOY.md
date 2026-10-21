@@ -13,6 +13,7 @@
 | `ADMIN_SECRET` | Worker secret | The operator break-glass credential.  It acts as the built-in `operator` admin account.  Also published as `FLEET_ADMIN_SECRET`. |
 | `SESSION_SECRET` | Worker secret | Pepper for session, API token, and invite hashes, and the key for password-unlock cookies.  Rotating it signs everyone out and invalidates every API token and invite. |
 | `SENTRY_DSN` | Worker secret | Optional error reporting.  The scrubber drops passwords, cookies, and auth headers. |
+| `CF_ANALYTICS_TOKEN`, `CF_ZONE_ID` | Worker secret / plain text | Optional.  Shows Cloudflare zone traffic in the dashboard's Analytics tab.  The token needs **Zone → Analytics → Read** on the zone; the id is the zone tag (`fleetlink.online`).  FleetLink's own per-share counts work without them. |
 | `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `WEBAUTHN_RP_NAME` | plain text | `fleetlink.online`, `https://fleetlink.online`, `FleetLink`.  Passkeys are bound to the RP ID, so do not change it once people have passkeys. |
 | `APPLE_TEAM_ID`, `APPLE_BUNDLE_ID`, `APPLE_CLIP_BUNDLE_ID` | plain text | For `/.well-known/apple-app-site-association` and the App Clip banner. |
 | `SHARE_HOSTS` | plain text, optional | Extra hosts an admin may add to the `share_hosts` setting. |
