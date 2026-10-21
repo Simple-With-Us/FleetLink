@@ -395,13 +395,17 @@ export async function ascAllRows({ api, url }) {
   return { ok: true, rows };
 }
 
+// Apple error text is attacker-influenceable: collapse CR/LF so a multi-line
+// detail can never smuggle GitHub Actions workflow commands (::warning::,
+// ::set-output::, ::add-mask::) onto their own runner-parsed line.  Every
+// Apple-error sink must route through this.
+export function sanitizeAscLog(value) {
+  return String(value ?? "").replace(/[\r\n]+/g, " ").trim();
+}
+
 export function ascErrorText(res) {
   const e = (res?.parsed?.errors || [])[0] || {};
-  // Apple error text is attacker-influenceable: collapse CR/LF so a multi-line
-  // detail can never smuggle GitHub Actions workflow commands (::warning::,
-  // ::set-output::, ::add-mask::) onto their own runner-parsed line.
-  const clean = (v) => String(v ?? "").replace(/[\r\n]+/g, " ").trim();
-  return `HTTP ${res?.status} ${clean(e.code)} ${clean(e.detail || e.title)}`.trim();
+  return `HTTP ${res?.status} ${sanitizeAscLog(e.code)} ${sanitizeAscLog(e.detail || e.title)}`.trim();
 }
 
 export function maskEmail(email) {
@@ -1019,7 +1023,7 @@ async function main() {
       if (!created.ok) {
         const err = (created.parsed.errors || [])[0] || {};
         console.error(
-          `ensure-appstore-profiles: create failed for ${bundleId} name=${profileName} (HTTP ${created.status} ${err.code || err.title || ""})`
+          `ensure-appstore-profiles: create failed for ${bundleId} name=${profileName} (HTTP ${created.status} ${sanitizeAscLog(err.code || err.title)})`
         );
         process.exit(2);
       }
@@ -1172,7 +1176,7 @@ async function main() {
       if (sub.ok) {
         console.error(`${prefix}: submitted ${buildLabel} for Beta App Review; testers are notified when Apple approves`);
       } else {
-        const errs = (sub.parsed?.errors || []).map((e) => `${e.code || ""}: ${e.detail || e.title || ""}`).join(" | ");
+        const errs = (sub.parsed?.errors || []).map((e) => sanitizeAscLog(`${e.code || ""}: ${e.detail || e.title || ""}`)).join(" | ");
         warn(`Beta App Review submission failed (HTTP ${sub.status}) ${errs}.  Fill the TestFlight Test Information (beta app description, feedback email, review contact) in App Store Connect for app ${appId}`);
       }
     } else if (["BETA_REJECTED", "MISSING_EXPORT_COMPLIANCE", "PROCESSING_EXCEPTION", "EXPIRED"].includes(ext)) {

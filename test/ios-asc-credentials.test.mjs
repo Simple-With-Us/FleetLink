@@ -184,3 +184,15 @@ test("ascErrorText collapses CR/LF so Apple errors cannot inject workflow comman
   assert.equal(/[\r\n]/.test(text), false, "no raw CR/LF survives");
   assert.match(text, /HTTP 409 STATE_ERROR bad ::set-output/);
 });
+
+test("sanitizeAscLog covers the sibling Apple-error sinks", async () => {
+  const { sanitizeAscLog } = await import("../scripts/ios-fleet/asc-api.mjs");
+  assert.equal(sanitizeAscLog("a\n::error::b\r\nc"), "a ::error::b c");
+  assert.equal(sanitizeAscLog(undefined), "");
+  const src = read("scripts/ios-fleet/asc-api.mjs");
+  for (const sink of ["ensure-appstore-profiles: create failed", "Beta App Review submission failed"]) {
+    const i = src.indexOf(sink);
+    assert.ok(i > 0, `${sink} exists`);
+    assert.ok(src.slice(Math.max(0, i - 300), i + 300).includes("sanitizeAscLog"), `${sink} is sanitized`);
+  }
+});
