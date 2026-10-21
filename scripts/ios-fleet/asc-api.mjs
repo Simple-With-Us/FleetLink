@@ -97,6 +97,32 @@ function fleetSecretsGet(name, folder) {
   }
 }
 
+// Env-first, then Infisical, values only in memory: the contract
+// test/ios-asc-credentials.test.mjs pins for hosted runs.  Same resolution
+// order as resolveCredential below; this export is the stable shape tests
+// and sibling tooling import.
+export function resolveAscCredentials() {
+  const pick = (name) => {
+    const fromEnv = process.env[name];
+    return fromEnv != null && String(fromEnv).trim() !== "" ? String(fromEnv).trim() : "";
+  };
+  let keyId = pick("ASC_KEY_ID");
+  let issuerId = pick("ASC_ISSUER_ID");
+  const keyPath = pick("ASC_KEY_PATH");
+  if (keyId && issuerId && keyPath && existsSync(keyPath)) {
+    return { keyId, issuerId, privateKeyPem: readFileSync(keyPath, "utf8"), keyPathSet: true };
+  }
+  if (!keyId) keyId = fleetSecretsGet("ASC_KEY_ID", "/asc").trim();
+  if (!issuerId) issuerId = fleetSecretsGet("ASC_ISSUER_ID", "/asc").trim();
+  let privateKeyPem = "";
+  if (/^[A-Za-z0-9]+$/.test(keyId)) {
+    if (keyId === fleetSecretsGet("ASC_KEY_ID", "/asc").trim()) privateKeyPem = fleetSecretsGet("ASC_KEY_P8", "/asc");
+    if (!privateKeyPem) privateKeyPem = fleetSecretsGet(`AUTHKEY_${keyId}`, `/authkey-${keyId.toLowerCase()}-p8`);
+    if (privateKeyPem && !privateKeyPem.endsWith("\n")) privateKeyPem += "\n";
+  }
+  return { keyId, issuerId, privateKeyPem, keyPathSet: Boolean(keyPath) };
+}
+
 function fromFile(keyId, issuerId, keyPath, source) {
   try {
     return { keyId: keyId.trim(), issuerId: issuerId.trim(), privateKeyPem: readFileSync(keyPath, "utf8"), source };
