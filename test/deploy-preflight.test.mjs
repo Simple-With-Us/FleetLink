@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
+import {readFileSync} from "node:fs";
 test("deploy preflight accepts only existing bindings and schedule",()=>{
  const r=spawnSync("python3",["-c",String.raw`
 import importlib.util
@@ -56,4 +57,44 @@ assert m.worker_changed(moved,unicode_name,cwd=d) is True
 for unknown in ["old","","unknown","a"*40,"A"*40,live[:12]]:
  assert m.worker_changed(unknown,docs_only,cwd=d) is True,unknown
 `],{encoding:"utf8"});assert.equal(r.status,0,r.stderr);
+});
+
+// The two lists that decide "does this change need a deploy" must be one list.  GitHub's push
+// filter cannot be reused by the workflow_run, schedule, and workflow_dispatch triggers, so
+// deploy-preflight.py repeats it; this keeps the copies from drifting apart.
+function workerPathsFromPreflight() {
+  const r = spawnSync("python3", ["-c", String.raw`
+import importlib.util, json
+s=importlib.util.spec_from_file_location("guard","scripts/deploy-preflight.py");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+print(json.dumps(m.WORKER_PATHS))
+`], {encoding: "utf8"});
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test("worker-deploy.yml push paths match the preflight WORKER_PATHS list", () => {
+  const workflow = readFileSync(".github/workflows/worker-deploy.yml", "utf8");
+  const match = workflow.match(/^\s*paths:\s*\[(.*)\]\s*$/m);
+  assert.ok(match, "push paths list not found in worker-deploy.yml");
+  const pushPaths = match[1].split(",").map((p) => p.trim().replace(/^'|'$/g, "").replace(/^"|"$/g, ""));
+  assert.deepEqual([...pushPaths].sort(), [...workerPathsFromPreflight()].sort());
+});
+
+test("every source file the Worker bundle reads is covered by WORKER_PATHS", async () => {
+  const {build} = await import("esbuild");
+  const result = await build({
+    entryPoints: ["worker/index.mjs"], bundle: true, write: false, metafile: true, format: "esm",
+    platform: "browser", target: "es2022", mainFields: ["browser", "module", "main"],
+    conditions: ["browser", "import", "module", "default"], logLevel: "silent"
+  });
+  // npm packages are covered by package.json and package-lock.json; everything else is repo source.
+  const sources = Object.keys(result.metafile.inputs).filter((p) => !p.split("/").includes("node_modules"));
+  assert.ok(sources.includes("worker/index.mjs"), "bundle inputs should include the entry point");
+  const r = spawnSync("python3", ["-c", String.raw`
+import importlib.util, json, sys
+s=importlib.util.spec_from_file_location("guard","scripts/deploy-preflight.py");m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+print(json.dumps([p for p in json.load(sys.stdin) if not m.touches_worker([p])]))
+`], {encoding: "utf8", input: JSON.stringify(sources)});
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), [], "files the bundle reads that a deploy would not be triggered by");
 });
