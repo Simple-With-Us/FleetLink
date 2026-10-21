@@ -56,7 +56,7 @@ function login(ctx, principal, settings) {
         </form>
       </section>
       </div>
-      <p class="small muted center-text">New to FleetLink?&nbsp; <a href="/">See what it does</a> or read <a href="/instructions">how it works</a>.</p>
+      <p class="small muted center-text">New to FleetLink?&nbsp; <a href="/">See what it does</a> or read <a href="/#guide">how it works</a>.</p>
     </div>`
   });
 }
@@ -110,7 +110,7 @@ function dashboard(ctx, principal) {
           <button type="button" class="chip" data-filter="password">Password</button>
         </div>
         <div id="share-summary" class="share-summary"></div>
-        ${table("share-rows", [["Name", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Expires", "sortable", "expires"], ["", ""]])}
+        ${table("share-rows", [["Slug", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Expires", "sortable", "expires"], ["", ""]])}
         <p id="share-empty" class="empty" hidden>Nothing here yet.&nbsp; Use New Share to make a link.</p>
         <p><button type="button" id="share-more" class="secondary" hidden>Load More</button></p>
       </section>
@@ -257,7 +257,7 @@ function admin(ctx, principal) {
       </section>
       <section id="panel-shares" role="tabpanel" hidden>
         <form id="share-search" class="row"><div><label for="share-q">Find a share</label><input id="share-q" type="search" placeholder="Name or title"></div><div class="end"><button type="submit" class="secondary">Search</button></div></form>
-        ${table("share-rows", [["Share"], ["Owner"], ["Contents"], ["Expires"], [""]])}
+        ${table("share-rows", [["Slug"], ["Owner"], ["Contents"], ["Expires"], [""]])}
         <p id="share-empty" class="empty" hidden>No live shares.</p>
       </section>
       <section id="panel-settings" role="tabpanel" hidden>
@@ -274,69 +274,6 @@ function admin(ctx, principal) {
   });
 }
 
-function instructions(ctx, principal) {
-  const o = escapeHtml(origin(ctx));
-  return page(ctx.env, {
-    title: "How It Works",
-    principal,
-    active: "instructions",
-    head: ogTags({ title: "How FleetLink Works", description: "Accounts, sharing, API tokens, teams, and limits.", url: `${origin(ctx)}/instructions`, image: `${origin(ctx)}/preview.png` }),
-    body: `<article class="card">
-      <h1>How FleetLink Works</h1>
-      <p>FleetLink gives you a link to a file, a folder, or another web address.&nbsp; Every link belongs to the account that made it and expires on its own.</p>
-
-      <h2>Accounts</h2>
-      <p>Create an account on the <a href="/login">sign-in page</a> with a passkey.&nbsp; There is no password.&nbsp; Add a second passkey from your dashboard so you can sign in from another device.&nbsp; Your dashboard lists your links, your API tokens, your teams, and the devices you are signed in on.</p>
-
-      <h2>Sharing On The Website</h2>
-      <ol>
-        <li>Open the <a href="/dashboard#new">dashboard</a> and choose New Share.</li>
-        <li>Pick files, or paste a web address for a short link.</li>
-        <li>Choose how long it stays up.&nbsp; Add a name, a title, a password, or a team if you like.</li>
-        <li>Copy the link.</li>
-      </ol>
-
-      <h2>How Long A Link Lasts</h2>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Who</th><th>Files</th><th>Short links</th></tr></thead>
-        <tbody>
-          <tr><td>Signed in</td><td>Up to 7 days (3 by default).&nbsp; 100 MB per file, 500 MB and 500 files per share.</td><td>Up to 180 days (30 by default).</td></tr>
-          <tr><td>Admin</td><td>Any length, or never.&nbsp; 300 MB per file, 1 GB per share.&nbsp; A share that never expires holds up to 500 MB.</td><td>Any length, or never.</td></tr>
-        </tbody>
-      </table></div>
-      <p>Each account has a storage quota across its live links.&nbsp; A link can be renewed three times.&nbsp; A password is optional; without one, anyone with the link can open it.</p>
-
-      <h2>Agents, Scripts, And The CLI</h2>
-      <p>Create an API token on the <a href="/dashboard#tokens">dashboard</a>.&nbsp; The token acts as you, can be limited (largest file, longest share, no short links, one team), and can be revoked at any time.</p>
-      <pre>export FLEETLINK_TOKEN=fla_…
-fleet-share notes.md
-fleet-share --days 7 ./report/
-fleet-share link https://example.com/long/address
-fleet-share list</pre>
-      <p>Or use <code>curl</code>:</p>
-      <pre>curl -X PUT "${o}/notes/notes.md" \\
-  -T ./notes.md \\
-  -H "Authorization: Bearer $FLEETLINK_TOKEN" \\
-  -H "Content-Type: text/markdown; charset=utf-8" \\
-  -H "X-Expire-Days: 3"</pre>
-      <p>Agents that speak MCP can connect to <code>${o}/mcp</code> with the same token.</p>
-
-      <h2>iPhone</h2>
-      <p>The FleetLink app signs in with your passkey, lists your links, and makes new ones.&nbsp; To share from the Share sheet, create an API token, <a href="/api/shortcut/download">download the Shortcut</a>, and paste the token when Shortcuts asks.</p>
-
-      <h2>Teams</h2>
-      <p>A team shares a space for links.&nbsp; Everyone in the team sees its links.&nbsp; Team owners and admins can change or delete any of them; members change their own.&nbsp; A token can be tied to one team so an agent's uploads land there.</p>
-
-      <h2>What People See</h2>
-      <ul>
-        <li>A Markdown file opens as a formatted page.</li>
-        <li>Several files under one link open as a list.</li>
-        <li>HTML files download instead of opening in the browser.</li>
-        <li>When the time is up, the link stops working.</li>
-      </ul>
-    </article>`
-  });
-}
 
 function privacy(ctx, principal) {
   return page(ctx.env, {
@@ -382,7 +319,7 @@ export function pageRoutes(router) {
   router.on("GET", "/agents", async (ctx) => html(agents(ctx, await optionalPrincipal(ctx.request, ctx.env))));
   router.on("GET", "/features", async () => redirect("/#features", 301));
   router.on("GET", "/intro", async () => redirect("/", 301));
-  router.on("GET", "/help", async () => redirect("/instructions", 301));
+  router.on("GET", "/help", async () => redirect("/#guide", 301));
   router.on("GET", "/login", async (ctx) => {
     const principal = await optionalPrincipal(ctx.request, ctx.env);
     if (principal) return redirect("/dashboard");
@@ -403,7 +340,7 @@ export function pageRoutes(router) {
     return html(admin(ctx, principal));
   });
   router.on("GET", "/portal", async () => redirect("/dashboard", 301));
-  router.on("GET", "/instructions", async (ctx) => html(instructions(ctx, await optionalPrincipal(ctx.request, ctx.env))));
+  router.on("GET", "/instructions", async () => redirect("/#guide", 301));
   router.on("GET", "/privacy", async (ctx) => html(privacy(ctx, await optionalPrincipal(ctx.request, ctx.env))));
   router.on("GET", "/privacy-policy", async () => redirect("/privacy", 301));
 }

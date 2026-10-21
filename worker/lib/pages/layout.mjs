@@ -28,15 +28,17 @@ function initials(name) {
 function navLinks(principal, active) {
   const link = (href, label, key) => `<a href="${href}"${active === key ? ' aria-current="page"' : ""}>${label}</a>`;
   if (!principal) {
-    return `${link("/#features", "Features", "features")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a>`;
+    return `${link("/#features", "Features", "features")}${link("/agents", "Agents", "agents")}${link("/#guide", "Help", "guide")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a>`;
   }
   const items = [link("/dashboard", "Dashboard", "dashboard")];
-  if (principal.isAdmin) items.push(link("/admin", "Admin", "admin"));
   items.push(link("/#features", "Features", "features"));
+  items.push(link("/agents", "Agents", "agents"));
+  items.push(link("/#guide", "Help", "guide"));
   const name = principal.user?.display_name || "Account";
-  items.push(`<a class="who" href="/dashboard#account" title="Your account"><span class="avatar" aria-hidden="true">${escapeHtml(initials(name))}</span><span>${escapeHtml(name)}</span></a>`);
-  items.push(`<form method="post" action="/logout" class="inline"><button type="submit" class="link">Sign Out</button></form>`);
-  return items.join("");
+  const account = [`<a class="who" href="/dashboard#account" title="Your account"><span class="avatar" aria-hidden="true">${escapeHtml(initials(name))}</span><span>${escapeHtml(name)}</span></a>`];
+  if (principal.isAdmin) account.push(link("/admin", "Admin", "admin"));
+  account.push(`<form method="post" action="/logout" class="inline"><button type="submit" class="link">Sign Out</button></form>`);
+  return `<span class="nav-pages">${items.join("")}</span><span class="nav-account">${account.join("")}</span>`;
 }
 
 /**
@@ -64,7 +66,7 @@ ${head}
 <a class="skip" href="#main">Skip to content</a>
 <header class="top${principal ? "" : " is-public"}${heroBrand ? " is-hero" : ""}"><div class="bar"><a class="brand" href="/">${heroBrand ? "" : `${logoImg(64)}<span class="brand-text">FleetLink</span>`}${BRAND_FILES["fleetlink-wordmark.png"] ? `<picture class="brand-wordmark-picture"><source type="image/webp" srcset="/assets/fleetlink-wordmark.webp?v=${ASSET_VERSION}"><img class="brand-wordmark" src="/assets/fleetlink-wordmark.png?v=${ASSET_VERSION}" alt="FleetLink"></picture>` : ""}</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
 <main id="main"${fullBleed ? "" : ' class="wrap"'}>${body}</main>
-<footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : ""}<a href="/#features">Features</a><a href="/agents">For Agents</a><a href="/instructions">How It Works</a><a href="/privacy">Privacy</a><a href="mailto:support@fleetlink.online">Support</a></nav></div></footer>
+<footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : ""}<a href="/#features">Features</a><a href="/agents">Agents</a><a href="/#guide">Help</a><a class="mail-icon" href="mailto:support@fleetlink.online" aria-label="Email support" title="Email support"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></a></nav><nav aria-label="Legal" class="legal"><a href="/privacy">Privacy</a></nav></div></footer>
 ${scriptTags}
 </body>
 </html>`;

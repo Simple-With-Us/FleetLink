@@ -19,11 +19,10 @@
 # changing the standing limit means editing DEFAULT_MIN_INTERVAL_SEC.
 #
 # VERSION NUMBERS: ios/project.yml carries a placeholder only.  The fleet script
-# reads the highest 1.0.N already on App Store Connect and ships the next one,
-# so there is nothing to hand-edit and nothing to forget.  MARKETING_VERSION is 1.0.<seq> (+1 every rebuild) and
-# CURRENT_PROJECT_VERSION is a UTC YYYYMMDDHHMM stamp, so App Store Connect
-# shows "1.0.8 (202608121315)" -- the parenthetical says when the build was cut
-# instead of repeating the version.
+# takes the repo's commit count and ships that pair, so there is nothing to
+# hand-edit and nothing to forget.  MARKETING_VERSION is 1.0.<commit_count> and
+# CURRENT_PROJECT_VERSION is the same commit count, so App Store Connect shows
+# "1.0.148 (148)" -- both numbers describe one commit.
 #
 # STABLE XCODE IS MANDATORY (owner, reaffirmed 2026-08-11).
 # Xcode-beta's SDK breaks TestFlight / App Store Connect compatibility: a binary

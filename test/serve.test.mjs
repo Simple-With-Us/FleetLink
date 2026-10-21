@@ -234,7 +234,10 @@ test("health, well-known documents, assets, and pages", async () => {
   const css = await call(env, "GET", "/assets/app.css");
   assert.equal(css.headers.get("content-type"), "text/css; charset=utf-8");
   assert.equal((await call(env, "GET", "/assets/nope.js")).status, 404);
-  for (const path of ["/", "/login", "/instructions", "/privacy", "/agents"]) {
+  const instr = await call(env, "GET", "/instructions");
+  assert.equal(instr.status, 301);
+  assert.equal(instr.headers.get("location"), "/#guide");
+  for (const path of ["/", "/login", "/privacy", "/agents"]) {
     const res = await call(env, "GET", path);
     assert.equal(res.status, 200, path);
     assert.match(res.headers.get("content-security-policy"), /script-src 'self'/);
