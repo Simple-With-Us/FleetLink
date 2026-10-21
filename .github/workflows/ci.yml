@@ -34,6 +34,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Fleet ship tooling matches its sha256 pin
         run: bash scripts/ios-fleet-pin.sh --check
       - name: Ship scripts parse
@@ -45,6 +48,12 @@ jobs:
           done
       - name: Scheduled ship gate decisions
         run: bash scripts/test-ios-scheduled-ship-gate.sh
+      # The App Store Connect credential rules (AFC-459):  the key comes from
+      # the environment or from Infisical, and a named ASC_KEY_PATH is ignored.
+      - name: App Store Connect credential rules
+        run: node --test scripts/ios-fleet/*.test.mjs
+      - name: App Store Connect credential precedence
+        run: bash scripts/ios-fleet/test-asc-credentials.sh
   test:
     runs-on: ubuntu-latest
     steps:

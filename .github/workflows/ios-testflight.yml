@@ -209,12 +209,11 @@ jobs:
           for e in $(printf '%s' "${ASC_STANDING_TESTERS:-}" | tr ',;' '  '); do
             echo "::add-mask::${e}"
           done
-          if [ -n "${ASC_KEY_P8:-}" ] && [ -z "${ASC_KEY_PATH:-}" ]; then
-            ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID:-fleet}.p8"
-            printf '%s\n' "$ASC_KEY_P8" > "$ASC_KEY_PATH"
-            chmod 600 "$ASC_KEY_PATH"
-            export ASC_KEY_PATH
-          fi
+          # The client takes the credential from the environment:  the hosted
+          # APPLE_API_* trio (the key id, the issuer and the key as base64) that
+          # ios-load-signing.mjs published.  No key file is staged and no key
+          # path is published, because a path on disk is not an approved
+          # credential source (AFC-459, Kody rule 42).
           set +e
           appleid="$(python3 -c 'import json;print(json.load(open("scripts/ios-fleet/apps.json"))["apps"]["fleetlink"]["appleId"])')"
           appleid_rc=$?

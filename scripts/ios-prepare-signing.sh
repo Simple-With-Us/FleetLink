@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # Import the Apple Distribution identity and stage the App Store Connect API key.
-# Reads ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, IOS_DIST_P12_BASE64, and
-# IOS_DIST_P12_PASSWORD from the environment.  Never prints those values.
+# Reads ASC_KEY_ID, ASC_ISSUER_ID, the key material (ASC_KEY_P8, or the hosted
+# APPLE_API_KEY_P8_BASE64 trio), IOS_DIST_P12_BASE64, and IOS_DIST_P12_PASSWORD
+# from the environment.  Never prints those values.
+#
+# The staged key file is a MATERIALIZATION for the Apple tools that can only
+# read a key from disk (altool, xcodebuild -authenticationKeyPath).  It is
+# written FROM the credential in the environment and is never read back as a
+# credential (AFC-459, Kody rule 42).  A named ASC_KEY_PATH is not a credential
+# source, so this script does not publish one.
 set -euo pipefail
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -17,9 +24,22 @@ fi
 
 : "${ASC_KEY_ID:?ASC_KEY_ID required}"
 : "${ASC_ISSUER_ID:?ASC_ISSUER_ID required}"
-: "${ASC_KEY_P8:?ASC_KEY_P8 required}"
 : "${IOS_DIST_P12_BASE64:?IOS_DIST_P12_BASE64 required}"
 : "${IOS_DIST_P12_PASSWORD:?IOS_DIST_P12_PASSWORD required}"
+
+# The key material comes from the environment.  The hosted form is the base64
+# trio (APPLE_API_KEY_ID, APPLE_API_ISSUER_ID, APPLE_API_KEY_P8_BASE64):  base64
+# is one line, so the raw PEM never has to cross a GitHub Actions step
+# boundary.  The plain ASC_KEY_P8 form is accepted too, for a run that exports
+# it directly.
+KEY_MATERIAL=""
+if [[ -n "${APPLE_API_KEY_P8_BASE64:-}" ]]; then
+  KEY_MATERIAL="$(printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode 2>/dev/null)" || KEY_MATERIAL=""
+fi
+if [[ -z "$KEY_MATERIAL" && -n "${ASC_KEY_P8:-}" ]]; then
+  KEY_MATERIAL="$ASC_KEY_P8"
+fi
+[[ -n "$KEY_MATERIAL" ]] || die "no ASC key material in the environment (APPLE_API_KEY_P8_BASE64 or ASC_KEY_P8)"
 
 umask 077
 # Runner temp only.  Nothing here touches the home directory except the three
@@ -29,9 +49,10 @@ mkdir -p "$STAGE_DIR"
 chmod 700 "$STAGE_DIR"
 
 KEY_PATH="${STAGE_DIR}/AuthKey.p8"
-printf '%s\n' "$ASC_KEY_P8" > "$KEY_PATH"
+printf '%s\n' "$KEY_MATERIAL" > "$KEY_PATH"
 chmod 600 "$KEY_PATH"
 grep -q "BEGIN " "$KEY_PATH" || die "ASC p8 did not contain a PEM private key"
+unset KEY_MATERIAL
 
 install_private_key() {
   local dir="$1"
@@ -44,14 +65,12 @@ install_private_key "${HOME}/.private_keys"
 install_private_key "${HOME}/.appstoreconnect/private_keys"
 install_private_key "${HOME}/private_keys"
 
-# scripts/ios-fleet/ship-testflight.sh and asc-api.mjs read ASC_KEY_ID,
-# ASC_ISSUER_ID and ASC_KEY_PATH from the environment.  On a hosted runner the
-# first two are already in $GITHUB_ENV (ios-load-signing.mjs);  add the staged
-# key path.  An owner Mac never runs this script for its own signing.
-if [[ -n "${GITHUB_ACTIONS:-}" && -n "${GITHUB_ENV:-}" ]]; then
-  echo "ASC_KEY_PATH=${KEY_PATH}" >> "$GITHUB_ENV"
-  log "ASC_KEY_PATH exported for the fleet ship script"
-fi
+# The fleet ship script and the App Store Connect client take the credential
+# from the environment (ASC_KEY_ID, ASC_ISSUER_ID and the hosted
+# APPLE_API_* trio), never from a path.  This script does not publish a key
+# path:  a named path is not an approved credential source (AFC-459, Kody
+# rule 42), and the ship script stages its own mode-600 copy for the Apple
+# tools anyway.
 
 P12_PATH="${STAGE_DIR}/ios-distribution.p12"
 python3 - "$P12_PATH" <<'PY'

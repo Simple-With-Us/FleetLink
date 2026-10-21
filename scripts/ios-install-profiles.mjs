@@ -2,7 +2,7 @@
 // Prints profile names, bundle ids, and UUIDs only.  Never prints key material.
 import { createPrivateKey, createSign } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
@@ -134,10 +134,13 @@ async function ascGet(fetchImpl, token, path, schema) {
 }
 
 async function tokenFromEnv() {
-  const staged = join(process.env.RUNNER_TEMP || tmpdir(), "ios-signing", "AuthKey.p8");
-  const pem = process.env.ASC_KEY_P8?.includes("BEGIN ")
-    ? process.env.ASC_KEY_P8
-    : readFileSync(staged, "utf8");
+  // The key comes from the environment.  A path on disk is not an approved
+  // credential source (AFC-459, Kody rule 42), so there is no file fallback:
+  // a stale or foreign path must never decide which key signs the request.
+  const pem = process.env.ASC_KEY_P8;
+  if (!pem || !pem.includes("BEGIN ")) {
+    throw new Error("ASC_KEY_P8 is not in the environment.  The App Store Connect key is a secret and is only read from the environment.");
+  }
   return signAscJwt(pem, requireEnv("ASC_KEY_ID"), requireEnv("ASC_ISSUER_ID"));
 }
 

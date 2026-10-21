@@ -67,9 +67,12 @@ test("the vendored fleet script declares export compliance, notes and the rate g
   assert.match(ship, /asc_client ensure-tf-ready/);
   assert.match(ship, /^DEFAULT_MIN_INTERVAL_SEC=3600$/m);
   assert.match(ship, /fleetlink\) echo "fleetlink"/);
-  // The client runs through the reader, so the key reaches it in the child's
-  // environment and never as a command argument.
-  assert.match(ship, /asc-key\.mjs" exec "\$ASC_STAGED_KEY_PATH" -- node "\$\{FLEET_DIR\}\/asc-api\.mjs"/);
+  // The client runs directly, with the key in the child's environment as
+  // ASC_KEY_P8:  there is no reader and no exec wrapper, because a path on
+  // disk is not an approved credential source (AFC-459, Kody rule 42).
+  assert.match(ship, /node "\$\{FLEET_DIR\}\/asc-api\.mjs" "\$@"/);
+  assert.doesNotMatch(ship, /asc-key\.mjs" (exec|read)/,
+    "the client must not be handed a key through a file reader");
   const asc = read("scripts/ios-fleet/asc-api.mjs");
   assert.doesNotMatch(asc, /\} CT`/, "release notes carry no timezone abbreviation");
 });
