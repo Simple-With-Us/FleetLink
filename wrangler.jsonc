@@ -26,6 +26,7 @@
     "WEBAUTHN_ORIGINS": "https://fleetlink.online",
     "WEBAUTHN_RP_NAME": "FleetLink",
     "SHARE_HOSTS": "fleetlink.online,fleetlink.app"
-    // Secrets (never vars): ADMIN_SECRET, SESSION_SECRET, SENTRY_DSN.
+    // Secrets (never vars): ADMIN_SECRET, SESSION_SECRET, SENTRY_DSN,
+    // and optionally CF_ANALYTICS_TOKEN (with CF_ZONE_ID) for zone traffic.
   }
 }

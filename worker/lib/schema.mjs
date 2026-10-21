@@ -263,6 +263,21 @@ CREATE INDEX users_created_at ON users(created_at);
 CREATE INDEX share_files_created_at ON share_files(created_at);
 `;
 
+// Per-share traffic, rolled up by UTC day.  One row per share per day keeps the
+// table small and the dashboard queries cheap.  The worker buffers increments
+// in memory for a few seconds (stats.mjs), so a public view costs no D1 write.
+const SHARE_ANALYTICS = `
+CREATE TABLE share_stats (
+  share_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  views INTEGER NOT NULL DEFAULT 0,
+  downloads INTEGER NOT NULL DEFAULT 0,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (share_id, day)
+);
+CREATE INDEX share_stats_day ON share_stats(day);
+`;
+
 export const MIGRATIONS = [
   { version: 1, name: "multi_user", sql: INIT },
   { version: 2, name: "team_sharing", sql: TEAM_SHARING },
@@ -274,7 +289,9 @@ export const MIGRATIONS = [
   // Appended after 4 so it follows the shipped fleet_bots and token_limits_from
   // migrations.  Versions 3 and 4 already shipped in #99, so the valve takes the
   // next free number rather than reusing 3.
-  { version: 5, name: "safety_valve", sql: SAFETY_VALVE }
+  { version: 5, name: "safety_valve", sql: SAFETY_VALVE },
+  // Per-share daily traffic for the dashboard's analytics view.
+  { version: 6, name: "share_analytics", sql: SHARE_ANALYTICS }
 ];
 
 /**

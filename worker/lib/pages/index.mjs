@@ -89,6 +89,7 @@ function dashboard(ctx, principal) {
       </div>
       <div class="tabs" role="tablist" aria-label="Dashboard sections">
         <button type="button" role="tab" data-tab="shares">Shares</button>
+        <button type="button" role="tab" data-tab="analytics">Analytics</button>
         <button type="button" role="tab" data-tab="new">New Share</button>
         <button type="button" role="tab" data-tab="tokens">API Tokens</button>
         <button type="button" role="tab" data-tab="teams">Teams</button>
@@ -113,6 +114,35 @@ function dashboard(ctx, principal) {
         ${table("share-rows", [["Slug", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Expires", "sortable", "expires"], ["", ""]])}
         <p id="share-empty" class="empty" hidden>Nothing here yet.&nbsp; Use New Share to make a link.</p>
         <p><button type="button" id="share-more" class="secondary" hidden>Load More</button></p>
+      </section>
+
+      <section id="panel-analytics" role="tabpanel" hidden>
+        <div class="dash-head">
+          <div><p class="eyebrow">Traffic</p><h2>Views And Downloads</h2></div>
+          <div class="actions">
+            <div><label for="analytics-scope">Show</label><select id="analytics-scope"><option value="mine">My shares</option><option value="teams">My teams</option>${principal.isAdmin ? '<option value="all">Everyone (admin)</option>' : ""}</select></div>
+            <div><label for="analytics-days">Last</label><select id="analytics-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select></div>
+            <button type="button" id="analytics-refresh" class="secondary" title="Refresh traffic">↻ Refresh</button>
+          </div>
+        </div>
+        <p class="small muted">FleetLink counts each public view and download it serves, by day (UTC).&nbsp; Password unlocks, folder listings, short-link opens, and file bytes are included.&nbsp; A view can take up to a few seconds to appear.</p>
+        <div id="analytics-summary" class="grid"><div class="card"><p class="small muted">Loading…</p></div></div>
+        <h3>Busiest Shares</h3>
+        <div class="table-wrap"><table><thead><tr><th>Share</th><th>Views</th><th>Downloads</th><th>Bytes</th></tr></thead><tbody id="analytics-top"></tbody></table></div>
+        <p id="analytics-top-empty" class="empty" hidden>No traffic in this window.</p>
+        <h3>Daily</h3>
+        <div class="table-wrap"><table><thead><tr><th>Day</th><th>Views</th><th>Downloads</th><th>Bytes</th></tr></thead><tbody id="analytics-series"></tbody></table></div>
+        <p id="analytics-series-empty" class="empty" hidden>No traffic in this window.</p>
+        ${principal.isAdmin ? `<div class="card" id="cf-analytics">
+          <div class="actions split">
+            <h2>Cloudflare Site Traffic</h2>
+            <div class="actions">
+              <div><label for="cf-days">Last</label><select id="cf-days"><option value="1">1 day</option><option value="7" selected>7 days</option><option value="30">30 days</option></select></div>
+              <button type="button" id="cf-refresh" class="secondary" title="Refresh Cloudflare traffic">↻ Refresh</button>
+            </div>
+          </div>
+          <div id="cf-body"><p class="small muted">Loading…</p></div>
+        </div>` : ""}
       </section>
 
       <section id="panel-new" role="tabpanel" hidden>

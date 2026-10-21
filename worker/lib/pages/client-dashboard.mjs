@@ -16,12 +16,21 @@ export const DASHBOARD_JS = String.raw`
     if (keep) select.value = keep;
   }
 
-  function daysOptions(select, kind) {
+  function dayChoices(kind) {
     var list = kind === "link" ? [["1", "1 day"], ["7", "7 days"], ["30", "30 days"], ["90", "90 days"], ["180", "180 days"]] : [["1", "1 day"], ["3", "3 days"], ["7", "7 days"]];
     if (isAdmin) list = list.concat(kind === "link" ? [["365", "1 year"], ["forever", "Never expires"]] : [["30", "30 days"], ["365", "1 year"], ["forever", "Never expires"]]);
+    return list;
+  }
+
+  function daysOptions(select, kind) {
     select.replaceChildren();
-    list.forEach(function (o) { select.append(h("option", { value: o[0], text: o[1] })); });
+    dayChoices(kind).forEach(function (o) { select.append(h("option", { value: o[0], text: o[1] })); });
     select.value = kind === "link" ? "30" : "3";
+  }
+
+  function extendOptions(select, kind) {
+    select.replaceChildren(h("option", { value: "", text: "Don't extend" }));
+    dayChoices(kind).forEach(function (o) { select.append(h("option", { value: o[0], text: o[1] })); });
   }
 
   async function loadMe() {
@@ -70,14 +79,165 @@ export const DASHBOARD_JS = String.raw`
       h("a", { class: "button small secondary", href: share.url, target: "_blank", rel: "noopener", text: "Open" }));
     var sharing = sharingControl(share);
     if (sharing) actions.append(sharing);
-    if (share.can_edit && share.expires_at) actions.append(h("button", { type: "button", class: "small secondary", text: "Renew", onclick: function () { renew(share); } }));
+    if (share.can_edit || share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Edit", onclick: function () { openEditor(share, row); } }));
+    actions.append(h("button", { type: "button", class: "small secondary", text: "Stats", onclick: function () { openStats(share, row); } }));
     if (share.can_manage) actions.append(h("button", { type: "button", class: "small danger", text: "Delete", onclick: function () { remove(share); } }));
-    return h("tr", null,
+    var row = h("tr", null,
       h("td", null, h("a", { href: share.url, target: "_blank", rel: "noopener", class: "mono slug-a", text: share.slug }, FL.openIcon()), share.title ? h("div", { class: "small muted", text: share.title }) : null, share.kind === "link" ? h("div", { class: "small muted", text: "→ " + share.target_url }) : null),
       h("td", null, tags),
       h("td", { class: "hide-sm" }, share.owner && share.owner.display_name ? share.owner.display_name : ""),
       h("td", null, expires),
       h("td", { class: "row-actions" }, rowMenu(actions)));
+    return row;
+  }
+
+  // Only one inline editor or stats panel is open at a time.
+  function closeTransient(except) {
+    document.querySelectorAll("tr.editor-row, tr.stats-row").forEach(function (row) {
+      if (row !== except) row.remove();
+    });
+  }
+
+  function localInput(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  function field(label, input, hint) {
+    return h("div", null, h("label", { text: label }), input, hint ? h("div", { class: "small muted", text: hint }) : null);
+  }
+
+  function openEditor(share, row) {
+    closeTransient();
+    var manage = Boolean(share.can_manage), edit = Boolean(share.can_edit || manage);
+    var extend = h("select", { name: "extend", disabled: !edit || !share.expires_at });
+    extendOptions(extend, share.kind);
+    var never = null, exact = null;
+    var kids = [
+      h("div", { class: "row" },
+        field("Name (slug)", h("input", { type: "text", name: "slug", value: share.slug, maxlength: "64", autocomplete: "off", disabled: !manage })),
+        field("Title", h("input", { type: "text", name: "title", value: share.title || "", maxlength: "200", disabled: !edit })),
+        field("Password", h("input", { type: "password", name: "password", autocomplete: "new-password", placeholder: share.has_password ? "Leave blank to keep it" : "Optional", disabled: !manage })),
+        field("Extend by", extend, share.expires_at ? "The share will expire this many days from now." : "This share does not expire.")
+      ),
+      h("div", { class: "row" },
+        field("Description", h("input", { type: "text", name: "description", value: share.description || "", maxlength: "500", disabled: !edit })),
+        share.kind === "link" ? field("Destination", h("input", { type: "url", name: "url", value: share.target_url || "", maxlength: "2048", disabled: !edit })) : null,
+        manage ? h("div", null, h("label", null, h("input", { type: "checkbox", name: "clear_password" }), " Remove the password")) : null
+      )
+    ];
+    if (isAdmin && manage) {
+      exact = h("input", { type: "datetime-local", name: "expires_at", value: localInput(share.expires_at) });
+      never = h("input", { type: "checkbox", name: "never", checked: !share.expires_at, onchange: function () { exact.disabled = never.checked; } });
+      exact.disabled = never.checked;
+      kids.push(h("div", { class: "row" },
+        field("Expires exactly (admin)", exact, "Overrides Extend by.  Uncheck Never expires to use it."),
+        h("div", null, h("label", null, never, " Never expires"))
+      ));
+    }
+    kids.push(h("p", { class: "small muted", text: "Renewals used: " + share.renewals + "." }));
+    var save = h("button", { type: "submit", text: "Save Changes" });
+    var form = h("form", { onsubmit: function (e) { saveEditor(e, share, row, extend, never, exact, save); } },
+      kids,
+      h("div", { class: "actions mt" },
+        save,
+        h("button", { type: "button", class: "secondary", text: "Cancel", onclick: function () { editorRow.remove(); } })));
+    var editorRow = h("tr", { class: "editor-row" }, h("td", { colspan: "5" }, h("div", { class: "card" }, h("h3", { text: "Edit " + share.slug }), form)));
+    row.after(editorRow);
+  }
+
+  async function saveEditor(e, share, row, extendSelect, never, exact, button) {
+    e.preventDefault();
+    var form = e.currentTarget, f = FL.form(form);
+    var body = {};
+    if (share.can_manage) {
+      var slug = String(f.slug || "").trim();
+      if (!slug) { FL.toast("A share needs a name.", "error"); return; }
+      if (slug !== share.slug) body.slug = slug;
+      if (form.clear_password && form.clear_password.checked) body.password = null;
+      else if (f.password) body.password = f.password;
+    }
+    if (share.can_edit || share.can_manage) {
+      if ("title" in f && (f.title || "") !== (share.title || "")) body.title = f.title || "";
+      if ("description" in f && (f.description || "") !== (share.description || "")) body.description = f.description || "";
+      if (share.kind === "link" && "url" in f && f.url !== (share.target_url || "")) body.url = f.url;
+    }
+    if (never && never.checked) {
+      if (share.expires_at) body.expires_at = null;
+    } else if (exact && f.expires_at && f.expires_at !== localInput(share.expires_at)) {
+      var when = new Date(f.expires_at);
+      if (isNaN(when.getTime())) { FL.toast("Give a valid expiry date and time.", "error"); return; }
+      body.expires_at = when.toISOString();
+    }
+    var extendBy = extendSelect && !extendSelect.disabled ? extendSelect.value : "";
+    if (body.expires_at !== undefined) extendBy = "";
+    // Renew sets the expiry to at least now + days; asking for a shorter life
+    // than the share already has would spend a renewal and change nothing.
+    if (extendBy && extendBy !== "forever" && share.expires_at) {
+      var wanted = Date.now() + Number(extendBy) * 86_400_000;
+      if (wanted <= Date.parse(share.expires_at) + 1000) {
+        FL.toast("Pick an extension longer than the current expiry.", "error");
+        return;
+      }
+    }
+    if (!Object.keys(body).length && !extendBy) { FL.toast("Nothing changed."); return; }
+    FL.busy(button, true);
+    try {
+      var updated = Object.keys(body).length
+        ? (await FL.api("PATCH", "/api/shares/" + encodeURIComponent(share.slug), body)).share
+        : share;
+      if (extendBy) {
+        var renewed = await FL.api("POST", "/api/shares/" + encodeURIComponent(updated.slug) + "/renew", { days: extendBy });
+        FL.toast("Renewed " + updated.slug + " until " + FL.when(renewed.share.expires_at) + ".");
+      } else {
+        FL.toast("Saved " + updated.slug + ".");
+      }
+      var editor = row.nextElementSibling;
+      if (editor && editor.classList.contains("editor-row")) editor.remove();
+      loadShares(false).catch(FL.fail);
+      loadMe().catch(FL.fail);
+      if (loaded.analytics) loadAnalytics().catch(FL.fail);
+    } catch (err) {
+      FL.fail(err);
+    } finally {
+      FL.busy(button, false);
+    }
+  }
+
+  function metric(label, value) {
+    return h("div", { class: "card" }, h("p", { class: "small muted", text: label }), h("p", { class: "metric", text: String(value) }));
+  }
+
+  function openStats(share, row) {
+    var next = row.nextElementSibling;
+    if (next && next.classList.contains("stats-row") && next.dataset.slug === share.slug) { next.remove(); return; }
+    closeTransient();
+    var cell = h("td", { colspan: "5" }, h("p", { class: "small muted", text: "Loading traffic…" }));
+    var statsRow = h("tr", { class: "stats-row", "data-slug": share.slug }, cell);
+    row.after(statsRow);
+    FL.api("GET", "/api/shares/" + encodeURIComponent(share.slug) + "/analytics?days=30").then(function (data) {
+      var kids = [
+        h("div", { class: "actions split" },
+          h("strong", { text: "Traffic for " + share.slug + " (last 30 days)" }),
+          h("button", { type: "button", class: "small secondary", text: "Close", onclick: function () { statsRow.remove(); } })),
+        h("p", { class: "small", text: data.totals.views + " views · " + data.totals.downloads + " downloads · " + FL.bytes(data.totals.bytes) + " served." })
+      ];
+      if (data.rows.length) {
+        kids.push(h("div", { class: "table-wrap" }, h("table", null,
+          h("thead", null, h("tr", null, h("th", { text: "Day" }), h("th", { text: "Views" }), h("th", { text: "Downloads" }), h("th", { text: "Bytes" }))),
+          h("tbody", null, data.rows.slice().reverse().map(function (r) {
+            return h("tr", null, h("td", { class: "small", text: r.day }), h("td", { class: "small", text: String(r.views) }), h("td", { class: "small", text: String(r.downloads) }), h("td", { class: "small", text: FL.bytes(r.bytes) }));
+          })))));
+      } else {
+        kids.push(h("p", { class: "small muted", text: "No traffic in the last 30 days." }));
+      }
+      cell.replaceChildren.apply(cell, kids);
+    }).catch(function (err) {
+      cell.replaceChildren(h("p", { class: "notice error", text: err.message }));
+    });
   }
 
   function renderShares() {
@@ -197,14 +357,6 @@ export const DASHBOARD_JS = String.raw`
     renderShares();
   }
 
-  async function renew(share) {
-    try {
-      var data = await FL.api("POST", "/api/shares/" + encodeURIComponent(share.slug) + "/renew", {});
-      FL.toast("Renewed until " + FL.when(data.share.expires_at) + ".");
-      loadShares(false);
-    } catch (err) { FL.fail(err); }
-  }
-
   async function remove(share) {
     if (!FL.confirm("Delete " + share.slug + " and all of its files?  The link stops working right away.")) return;
     try {
@@ -213,6 +365,91 @@ export const DASHBOARD_JS = String.raw`
       loadShares(false);
       loadMe();
     } catch (err) { FL.fail(err); }
+  }
+
+  // Analytics
+  function analyticsValue(id) {
+    var el = document.getElementById(id);
+    return el ? el.value : "";
+  }
+
+  async function loadAnalytics() {
+    var summary = document.getElementById("analytics-summary");
+    if (!summary) return;
+    var days = analyticsValue("analytics-days") || "30";
+    var scope = analyticsValue("analytics-scope") || "mine";
+    var data = await FL.api("GET", "/api/analytics?days=" + encodeURIComponent(days) + "&scope=" + encodeURIComponent(scope));
+    summary.replaceChildren(
+      metric("Views", data.totals.views),
+      metric("Downloads", data.totals.downloads),
+      metric("Bytes served", FL.bytes(data.totals.bytes)),
+      metric("Shares with traffic", data.totals.shares)
+    );
+    var top = document.getElementById("analytics-top");
+    top.replaceChildren();
+    data.top.forEach(function (s) {
+      var known = state.allShares.filter(function (x) { return x.slug === s.slug; })[0];
+      top.append(h("tr", null,
+        h("td", null,
+          h("a", { href: known ? known.url : "/" + s.slug, target: "_blank", rel: "noopener", class: "mono", text: s.slug }),
+          s.title ? h("div", { class: "small muted", text: s.title }) : null),
+        h("td", { class: "small", text: String(s.views) }),
+        h("td", { class: "small", text: String(s.downloads) }),
+        h("td", { class: "small", text: FL.bytes(s.bytes) })));
+    });
+    document.getElementById("analytics-top-empty").hidden = data.top.length > 0;
+    var series = document.getElementById("analytics-series");
+    series.replaceChildren();
+    data.series.slice().reverse().forEach(function (r) {
+      series.append(h("tr", null,
+        h("td", { class: "small mono", text: r.day }),
+        h("td", { class: "small", text: String(r.views) }),
+        h("td", { class: "small", text: String(r.downloads) }),
+        h("td", { class: "small", text: FL.bytes(r.bytes) })));
+    });
+    document.getElementById("analytics-series-empty").hidden = data.series.length > 0;
+    if (isAdmin) await loadCloudflare();
+  }
+
+  async function loadCloudflare() {
+    var body = document.getElementById("cf-body");
+    if (!body) return;
+    var days = analyticsValue("cf-days") || "7";
+    body.replaceChildren(h("p", { class: "small muted", text: "Loading Cloudflare traffic…" }));
+    try {
+      var data = await FL.api("GET", "/api/admin/analytics/cloudflare?days=" + encodeURIComponent(days));
+      if (!data.configured) {
+        body.replaceChildren(h("p", { class: "small muted", text: "Not configured.  Add CF_ANALYTICS_TOKEN and CF_ZONE_ID as Worker secrets to show Cloudflare's zone totals here." }));
+        return;
+      }
+      var t = data.totals || {};
+      var cached = t.requests ? Math.round((t.cached_requests / t.requests) * 100) : 0;
+      var kids = [
+        h("div", { class: "grid" },
+          metric("Requests", t.requests || 0),
+          metric("Page views", t.page_views || 0),
+          metric("Bytes served", FL.bytes(t.bytes || 0)),
+          metric("Threats blocked", t.threats || 0)),
+        h("p", { class: "small muted", text: cached + "% of requests came from cache.  Free-plan zones keep a short history, so older ranges can be unavailable." })
+      ];
+      if (data.rows && data.rows.length) {
+        kids.push(h("div", { class: "table-wrap" }, h("table", null,
+          h("thead", null, h("tr", null, h("th", { text: "Day" }), h("th", { text: "Requests" }), h("th", { text: "Visitors" }), h("th", { text: "Bytes" }), h("th", { text: "Cache" }))),
+          h("tbody", null, data.rows.slice().reverse().map(function (r) {
+            return h("tr", null,
+              h("td", { class: "small mono", text: r.date || "" }),
+              h("td", { class: "small", text: String(r.requests) }),
+              h("td", { class: "small", text: String(r.uniques) }),
+              h("td", { class: "small", text: FL.bytes(r.bytes) }),
+              h("td", { class: "small", text: (r.requests ? Math.round((r.cached_requests / r.requests) * 100) : 0) + "%" }));
+          })))));
+      } else {
+        kids.push(h("p", { class: "small muted", text: "No Cloudflare traffic in this window." }));
+      }
+      body.replaceChildren.apply(body, kids);
+    } catch (err) {
+      body.replaceChildren(h("p", { class: "notice error", text: err.message }));
+    }
   }
 
   // New share
@@ -586,10 +823,22 @@ export const DASHBOARD_JS = String.raw`
     });
   }
 
+  var analyticsDays = document.getElementById("analytics-days");
+  if (analyticsDays) analyticsDays.addEventListener("change", function () { loadAnalytics().catch(FL.fail); });
+  var analyticsScope = document.getElementById("analytics-scope");
+  if (analyticsScope) analyticsScope.addEventListener("change", function () { loadAnalytics().catch(FL.fail); });
+  var analyticsRefresh = document.getElementById("analytics-refresh");
+  if (analyticsRefresh) analyticsRefresh.addEventListener("click", function () { loadAnalytics().catch(FL.fail); });
+  var cfDays = document.getElementById("cf-days");
+  if (cfDays) cfDays.addEventListener("change", function () { loadCloudflare().catch(FL.fail); });
+  var cfRefresh = document.getElementById("cf-refresh");
+  if (cfRefresh) cfRefresh.addEventListener("click", function () { loadCloudflare().catch(FL.fail); });
+
   var loaded = {};
   var show = FL.tabs(root, function (name) {
     if (loaded[name]) return;
     loaded[name] = true;
+    if (name === "analytics") loadAnalytics().catch(FL.fail);
     if (name === "tokens") loadTokens().catch(FL.fail);
     if (name === "teams") loadTeamsPanel().catch(FL.fail);
     if (name === "bots") loadBots().catch(FL.fail);

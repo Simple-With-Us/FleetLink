@@ -380,6 +380,7 @@ export async function deleteShareFile(env, share, path) {
 export async function purgeShare(env, share) {
   const files = await all(env.DB, "SELECT r2_key FROM share_files WHERE share_id = ?", share.id);
   await deleteKeys(env, files.map((f) => f.r2_key));
+  await run(env.DB, "DELETE FROM share_stats WHERE share_id = ?", share.id).catch(() => {});
   await run(env.DB, "DELETE FROM shares WHERE id = ?", share.id);
   return files.length;
 }
@@ -403,7 +404,10 @@ export const UpdateShareBody = z.object({
   team_id: z.string().max(64).nullable().optional(),
   team_access: z.enum(["view", "edit"]).optional(),
   url: z.string().max(4096).optional(),
-  target_url: z.string().max(4096).optional()
+  target_url: z.string().max(4096).optional(),
+  // An exact expiry, for admins (or the fleet's bot accounts): an ISO date, unix
+  // seconds, null or "never" for no expiry.  Everyone else extends with renew.
+  expires_at: z.union([z.string().max(40), z.number()]).nullable().optional()
 }).strict();
 
 /**
@@ -462,6 +466,31 @@ export async function updateShare(env, principal, slug, body) {
     sets.push("target_url = ?");
     args.push(normalizeTargetUrl(input.url ?? input.target_url));
   }
+  let exactExpiry;
+  if (input.expires_at !== undefined) {
+    if (!fullLimits(principal)) throw forbidden("Only admins can set an exact expiry.  Extend the share instead.");
+    need("manage");
+    if (input.expires_at === null || String(input.expires_at).trim() === "" || /^(never|forever)$/i.test(String(input.expires_at).trim())) {
+      exactExpiry = null;
+      const settings = await loadSettings(env).catch(() => null);
+      const foreverMax = tier(principal, settings).foreverMaxBytes ?? FOREVER_MAX_BYTES;
+      if (foreverMax && Number(share.total_bytes || 0) > foreverMax) {
+        throw new HttpError(413, `A share that never expires holds at most ${foreverMax / MB} MB.  Give it an expiry.`);
+      }
+    } else {
+      let seconds;
+      if (typeof input.expires_at === "number") {
+        seconds = input.expires_at > 1e12 ? input.expires_at / 1000 : input.expires_at;
+      } else {
+        seconds = Date.parse(String(input.expires_at)) / 1000;
+      }
+      if (!Number.isFinite(seconds)) throw badRequest("Give an expiry date and time.");
+      exactExpiry = Math.floor(seconds);
+      if (exactExpiry <= now()) throw badRequest("An expiry must be in the future.");
+    }
+    sets.push("expires_at = ?");
+    args.push(exactExpiry);
+  }
   if (!sets.length) return share;
   sets.push("updated_at = ?");
   args.push(now());
@@ -472,6 +501,7 @@ export async function updateShare(env, principal, slug, body) {
     throw err;
   }
   if (Object.keys(changes).length) await audit(env, principal.user.id, "share.sharing", share.slug, { owner_id: share.owner_id, ...changes });
+  if (exactExpiry !== undefined) await audit(env, principal.user.id, "share.expiry", share.slug, { owner_id: share.owner_id, expires_at: exactExpiry });
   return first(env.DB, "SELECT * FROM shares WHERE id = ?", share.id);
 }
 
