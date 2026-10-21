@@ -397,7 +397,11 @@ export async function ascAllRows({ api, url }) {
 
 export function ascErrorText(res) {
   const e = (res?.parsed?.errors || [])[0] || {};
-  return `HTTP ${res?.status} ${e.code || ""} ${e.detail || e.title || ""}`.trim();
+  // Apple error text is attacker-influenceable: collapse CR/LF so a multi-line
+  // detail can never smuggle GitHub Actions workflow commands (::warning::,
+  // ::set-output::, ::add-mask::) onto their own runner-parsed line.
+  const clean = (v) => String(v ?? "").replace(/[\r\n]+/g, " ").trim();
+  return `HTTP ${res?.status} ${clean(e.code)} ${clean(e.detail || e.title)}`.trim();
 }
 
 export function maskEmail(email) {

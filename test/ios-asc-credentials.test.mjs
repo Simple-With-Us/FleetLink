@@ -173,3 +173,14 @@ test("asc-api.mjs resolves the key from the environment, then Infisical, in memo
     rmSync(s.dir, { recursive: true, force: true });
   }
 });
+
+test("ascErrorText collapses CR/LF so Apple errors cannot inject workflow commands", async () => {
+  const { ascErrorText } = await import("../scripts/ios-fleet/asc-api.mjs");
+  const res = {
+    status: 409,
+    parsed: { errors: [{ code: "STATE_ERROR", detail: "bad\n::set-output name=x::1\r\n::add-mask::leaked" }] },
+  };
+  const text = ascErrorText(res);
+  assert.equal(/[\r\n]/.test(text), false, "no raw CR/LF survives");
+  assert.match(text, /HTTP 409 STATE_ERROR bad ::set-output/);
+});
