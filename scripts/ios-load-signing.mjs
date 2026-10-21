@@ -2,6 +2,13 @@
 // ASC API key: Fleet-OPS prod /asc (shared team key; do not mint another).
 // Distribution identity: Fleet Secrets (Fleet-OPS) prod /mac-certs (IOS_DIST_P12_BASE64, IOS_DIST_P12_PASSWORD).
 // Values are masked and written to GITHUB_ENV.  They are never printed.
+//
+// The ASC key is handed to the next step in the HOSTED form:  the key id, the
+// issuer and the key body as base64 (APPLE_API_KEY_ID, APPLE_API_ISSUER_ID,
+// APPLE_API_KEY_P8_BASE64).  Base64 is one line, so the raw PEM never has to
+// cross a GitHub Actions step boundary (AFC-459, Kody rule 42).  The key id and
+// the issuer are published under their plain names as well, because the Apple
+// tools that need a key on disk are told which key it is.
 import { randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -61,13 +68,21 @@ export async function loadSigning({ env = process.env, fetchImpl = fetch, log = 
   const values = {
     ASC_KEY_ID: asc.get("ASC_KEY_ID").trim(),
     ASC_ISSUER_ID: asc.get("ASC_ISSUER_ID").trim(),
-    ASC_KEY_P8: pem,
+    // The hosted trio:  the key id, the issuer and the key belong together, and
+    // the key body is base64, so the whole handoff is one line per name and
+    // the raw PEM never enters $GITHUB_ENV (AFC-459, Kody rule 42).
+    APPLE_API_KEY_ID: asc.get("ASC_KEY_ID").trim(),
+    APPLE_API_ISSUER_ID: asc.get("ASC_ISSUER_ID").trim(),
+    APPLE_API_KEY_P8_BASE64: Buffer.from(pem, "utf8").toString("base64"),
     IOS_DIST_P12_BASE64: macCerts.get("IOS_DIST_P12_BASE64").trim(),
     IOS_DIST_P12_PASSWORD: macCerts.get("IOS_DIST_P12_PASSWORD").trim()
   };
   const sentry = app.get("SENTRY_DSN")?.trim();
   if (sentry) values.SENTRY_DSN = sentry;
 
+  // The PEM is masked too, even though it is no longer written anywhere:  if it
+  // ever shows up in a log it must already be masked.
+  mask(pem, log);
   for (const value of Object.values(values)) mask(value, log);
   for (const [name, value] of Object.entries(values)) writeEnv(githubEnv, name, value);
   log("Loaded the shared ASC key from Fleet-OPS prod /asc and the distribution identity from Fleet Secrets prod /mac-certs.");

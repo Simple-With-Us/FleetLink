@@ -1,13 +1,14 @@
 // AFC-359 / AFC-459: the iOS ship tooling reads App Store Connect credentials
 // from the environment or Infisical (`fleet-secrets get ... --path /asc`), never
 // from the old home-directory secrets folder and never from a key file the
-// client reads itself.  These tests run the real credential block of
-// scripts/ios-fleet/ship-testflight.sh against a stub fleet-secrets.  Every key
-// is generated here at test time, so no secret is involved and none is
-// committed.
+// client reads itself.  A named ASC_KEY_PATH is not a credential source at all
+// (AFC-459, Kody rule 42):  it is ignored wherever it appears.  These tests run
+// the real credential block of scripts/ios-fleet/ship-testflight.sh against a
+// stub fleet-secrets.  Every key is generated here at test time, so no secret is
+// involved and none is committed.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +28,11 @@ const KEY_PEM = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateK
 // signed with.
 const OTHER_PEM = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey
   .export({ type: "pkcs8", format: "pem" });
+
+// The fingerprint of a key, so a test can prove WHICH key ended up in the
+// staging copy without printing a key.
+const sha = (value) => createHash("sha256").update(value).digest("hex");
+const shaPem = (pem) => sha(`${pem.trim()}\n`);
 
 const STUB = `#!/bin/sh
 echo "$@" >> "$STUB_CALLS"
@@ -71,10 +77,10 @@ echo "mode=$AUTH_MODE"
 if [ "$AUTH_MODE" = api_key ]; then
   echo "path=$ASC_KEY_PATH"
   echo "keysdir=\${API_PRIVATE_KEYS_DIR:-}"
-  echo "staged=\${ASC_STAGED_KEY_PATH:-}"
   echo "keyperm=$(perl -e 'printf "%o", (stat shift)[2] & 07777' "$ASC_KEY_PATH")"
   echo "dirperm=$(perl -e 'printf "%o", (stat shift)[2] & 07777' "$(dirname "$ASC_KEY_PATH")")"
   echo "pem=$(grep -c 'BEGIN PRIVATE KEY' "$ASC_KEY_PATH")"
+  echo "sha=$(node -e 'const c=require("crypto"),f=require("fs");process.stdout.write(c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"))' "$ASC_KEY_PATH")"
 fi
 `;
 
@@ -124,7 +130,9 @@ test("a key id that differs from the /asc one falls back to its per-key copy", (
 
 test("a complete ASC_* environment wins over a named key file", () => {
   // The environment holds the key, so the named file is never the credential
-  // in play and fleet-secrets is never consulted.
+  // in play and fleet-secrets is never consulted.  The named path is ignored
+  // (AFC-459):  a path on disk is not an approved credential source, so the
+  // run stages its own copy from the credential it resolved.
   const s = scratch();
   try {
     const key = join(s.dir, "AuthKey_ENVKEY.p8");
@@ -137,17 +145,45 @@ test("a complete ASC_* environment wins over a named key file", () => {
     assert.equal(r.status, 0, r.stderr);
     const out = parse(r.stdout);
     assert.equal(out.mode, "api_key");
-    assert.equal(out.path, key, "the named file is left alone; the environment holds the credential");
-    assert.equal(out.staged, "", "no file was staged for the client");
+    assert.notEqual(out.path, key, "the named file is not the credential");
+    assert.match(out.path, /\/AuthKey_ENVKEY\.p8$/, "a fresh staging copy was written for the Apple tools");
+    assert.equal(out.sha, shaPem(KEY_PEM), "the staged copy holds the key from the environment");
+    assert.notEqual(out.sha, shaPem(OTHER_PEM), "the key in the named file was used");
     assert.equal(existsSync(s.calls), false, "fleet-secrets was not called");
   } finally {
     rmSync(s.dir, { recursive: true, force: true });
   }
 });
 
-test("a named key file is used as a file when the environment holds no key", () => {
-  // The file is a file:  the shell never reads it, and the client is handed
-  // the key in its own environment by the reader.
+test("a named key file is not a credential: the credential comes from Infisical", () => {
+  // The named path names a real key and is still not a credential:  the run
+  // takes the key from Infisical and stages its own copy of it.
+  const s = scratch();
+  try {
+    const key = join(s.dir, "AuthKey_NAMED.p8");
+    writeFileSync(key, OTHER_PEM);
+    chmodSync(key, 0o600);
+    const r = runBlock(
+      { HOME: s.dir, TMPDIR: s.dir, FLEET_SECRETS_BIN: s.stub, STUB_CALLS: s.calls, STUB_PEM: s.pem, ASC_KEY_ID: "TESTKEY123", ASC_ISSUER_ID: "iss", ASC_KEY_PATH: key },
+      REPORT,
+    );
+    assert.equal(r.status, 0, r.stderr);
+    const out = parse(r.stdout);
+    assert.equal(out.mode, "api_key");
+    assert.notEqual(out.path, key, "the named file is not the credential");
+    assert.match(out.path, /\/AuthKey_TESTKEY123\.p8$/);
+    assert.equal(out.sha, shaPem(KEY_PEM), "the credential is the one from Infisical");
+    assert.notEqual(out.sha, shaPem(OTHER_PEM), "the key in the named file was used");
+    const calls = readFileSync(s.calls, "utf8");
+    assert.match(calls, /get ASC_KEY_P8 --path \/asc/);
+  } finally {
+    rmSync(s.dir, { recursive: true, force: true });
+  }
+});
+
+test("a named key file and nothing else leaves AUTH_MODE=none", () => {
+  // No key in the environment and no stored key for the named key id:  a path
+  // on disk never becomes the credential, so the run fails closed.
   const s = scratch();
   try {
     const key = join(s.dir, "AuthKey_NAMED.p8");
@@ -158,11 +194,8 @@ test("a named key file is used as a file when the environment holds no key", () 
       REPORT,
     );
     assert.equal(r.status, 0, r.stderr);
-    const out = parse(r.stdout);
-    assert.equal(out.mode, "api_key");
-    assert.equal(out.path, key, "the named file is used where it lies");
-    assert.equal(out.staged, key, "the client is handed that file");
-    assert.equal(existsSync(s.calls), false, "fleet-secrets was not called");
+    assert.equal(parse(r.stdout).mode, "none");
+    assert.match(r.stderr, /Infisical \/asc/);
   } finally {
     rmSync(s.dir, { recursive: true, force: true });
   }

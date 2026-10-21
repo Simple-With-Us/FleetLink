@@ -111,9 +111,22 @@ test("loadSigning masks Infisical values and fails closed without the distributi
     githubEnv
   });
   const written = readFileSync(githubEnv, "utf8");
-  for (const name of ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_KEY_P8", "IOS_DIST_P12_BASE64", "IOS_DIST_P12_PASSWORD", "SENTRY_DSN"]) {
+  for (const name of ["ASC_KEY_ID", "ASC_ISSUER_ID", "APPLE_API_KEY_ID", "APPLE_API_ISSUER_ID", "APPLE_API_KEY_P8_BASE64", "IOS_DIST_P12_BASE64", "IOS_DIST_P12_PASSWORD", "SENTRY_DSN"]) {
     assert.match(written, new RegExp(`^${name}<<`, "m"));
   }
+  // The raw PEM never enters $GITHUB_ENV (AFC-459):  base64 is one line, so
+  // the handoff across a step boundary never carries a multi-line secret.
+  assert.doesNotMatch(written, /^ASC_KEY_P8</m, "the raw PEM was published to GITHUB_ENV");
+  assert.doesNotMatch(written, /BEGIN PRIVATE KEY/, "the raw PEM was published to GITHUB_ENV");
+  // The hosted trio round-trips back to the same key.
+  const base64Line = written.split("\n").find((line) => line.startsWith("APPLE_API_KEY_P8_BASE64<<"));
+  assert.ok(base64Line, "the hosted key is published");
+  const encoded = written.split("\n").slice(written.split("\n").indexOf(base64Line) + 1)[0];
+  assert.equal(
+    Buffer.from(encoded, "base64").toString("utf8").includes("-----BEGIN PRIVATE KEY-----"),
+    true,
+    "the hosted key decodes to a PEM",
+  );
   assert.ok(logs.some((line) => line === "::add-mask::pw"));
   assert.ok(logs.some((line) => line.startsWith("Loaded the shared ASC key")));
 });
