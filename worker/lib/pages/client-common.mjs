@@ -42,6 +42,28 @@ export const APP_JS = String.raw`
     return el;
   };
 
+  /** External-link glyph (box with arrow out the corner) for links that open a share. */
+  FL.openIcon = function () {
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2.2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    [["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }],
+     ["polyline", { points: "15 3 21 3 21 9" }],
+     ["line", { x1: "10", y1: "14", x2: "21", y2: "3" }]].forEach(function (spec) {
+      var el = document.createElementNS(NS, spec[0]);
+      Object.keys(spec[1]).forEach(function (k) { el.setAttribute(k, spec[1][k]); });
+      svg.append(el);
+    });
+    return svg;
+  };
+
   FL.api = async function (method, path, body) {
     var init = { method: method, credentials: "same-origin", headers: { Accept: "application/json" } };
     if (body instanceof FormData) init.body = body;
