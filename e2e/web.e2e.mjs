@@ -99,6 +99,10 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     assert.equal(await page.locator('header a[href="/login"]').count(), 1);
     await settle();
     await page.screenshot({ path: join(shots, "00-landing.png"), fullPage: true });
+    // The scrolled hero bar slims down to buttons only (nav links hide), so
+    // return to the top before using the top nav.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('header a[href="/agents"]').waitFor({ state: "visible" });
     await page.click('header a[href="/agents"]');
     await page.waitForURL("**/agents");
     await page.waitForSelector("#mcp pre");
