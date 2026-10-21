@@ -64,9 +64,12 @@ test("the wrapper ships FleetLink through the pinned in-repo fleet script", () =
 test("the vendored fleet script declares export compliance, notes and the rate gate defaults", () => {
   const ship = read("scripts/ios-fleet/ship-testflight.sh");
   assert.match(ship, /^ensure_tf_ready\(\)/m);
-  assert.match(ship, /asc-api\.mjs" ensure-tf-ready/);
+  assert.match(ship, /asc_client ensure-tf-ready/);
   assert.match(ship, /^DEFAULT_MIN_INTERVAL_SEC=3600$/m);
   assert.match(ship, /fleetlink\) echo "fleetlink"/);
+  // The client runs through the reader, so the key reaches it in the child's
+  // environment and never as a command argument.
+  assert.match(ship, /asc-key\.mjs" exec "\$ASC_STAGED_KEY_PATH" -- node "\$\{FLEET_DIR\}\/asc-api\.mjs"/);
   const asc = read("scripts/ios-fleet/asc-api.mjs");
   assert.doesNotMatch(asc, /\} CT`/, "release notes carry no timezone abbreviation");
 });
@@ -75,7 +78,7 @@ test("the fleet tooling pin matches the vendored files", () => {
   const pin = read("scripts/ios-fleet.sha256")
     .split("\n")
     .filter((line) => line && !line.startsWith("#"));
-  assert.deepEqual(pin.map((line) => line.split(/\s+/)[1]).sort(), ["apps.json", "asc-api.mjs", "ship-testflight.sh"]);
+  assert.deepEqual(pin.map((line) => line.split(/\s+/)[1]).sort(), ["apps.json", "asc-api.mjs", "asc-key.mjs", "ship-testflight.sh"]);
   for (const line of pin) {
     const [sha, name] = line.split(/\s+/);
     const actual = createHash("sha256").update(readFileSync(new URL(`scripts/ios-fleet/${name}`, root))).digest("hex");
