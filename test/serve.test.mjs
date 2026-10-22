@@ -200,6 +200,9 @@ test("the sweep deletes expired shares and their bytes, empty shares, and closed
   await put(env, ada, "/sweep-me/a.txt", "a");
   await put(env, ada, "/keep-me/b.txt", "b");
   await callJson(env, "POST", "/api/shares", { auth: ada, json: { slug: "never-filled" } });
+  // An empty share can still have traffic rows; the sweep must remove both.
+  const empty = await env.DB.prepare("SELECT id FROM shares WHERE slug = 'never-filled'").first();
+  await env.DB.prepare("INSERT INTO share_stats (share_id, day, views, downloads, bytes) VALUES (?, '2026-10-21', 3, 0, 12)").bind(empty.id).run();
   await env.DB.prepare("UPDATE shares SET expires_at = 1 WHERE slug = 'sweep-me'").run();
   await env.DB.prepare("UPDATE shares SET created_at = 1 WHERE slug = 'never-filled'").run();
   const report = await sweep(env);
@@ -207,6 +210,7 @@ test("the sweep deletes expired shares and their bytes, empty shares, and closed
   assert.equal(report.empty_shares, 1);
   assert.deepEqual((await env.DB.prepare("SELECT slug FROM shares").all()).results.map((r) => r.slug), ["keep-me"]);
   assert.equal(env.FLEET_SHARES.keys().filter((k) => k.endsWith("a.txt")).length, 0);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM share_stats WHERE share_id = ?").bind(empty.id).first()).n, 0);
 
   await callJson(env, "DELETE", "/api/me", { auth: ada, json: { confirm: "delete my account" } });
   const after = await sweep(env);

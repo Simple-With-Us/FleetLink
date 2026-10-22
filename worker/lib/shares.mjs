@@ -380,8 +380,11 @@ export async function deleteShareFile(env, share, path) {
 export async function purgeShare(env, share) {
   const files = await all(env.DB, "SELECT r2_key FROM share_files WHERE share_id = ?", share.id);
   await deleteKeys(env, files.map((f) => f.r2_key));
-  await run(env.DB, "DELETE FROM share_stats WHERE share_id = ?", share.id).catch(() => {});
-  await run(env.DB, "DELETE FROM shares WHERE id = ?", share.id);
+  // One batch so a failure cannot remove the stats while leaving the share.
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM share_stats WHERE share_id = ?").bind(share.id),
+    env.DB.prepare("DELETE FROM shares WHERE id = ?").bind(share.id)
+  ]);
   return files.length;
 }
 
@@ -470,7 +473,11 @@ export async function updateShare(env, principal, slug, body) {
   if (input.expires_at !== undefined) {
     if (!fullLimits(principal)) throw forbidden("Only admins can set an exact expiry.  Extend the share instead.");
     need("manage");
+    // A token's lifetime cap also caps an exact expiry, just as resolveExpiry
+    // does for a create or a renew.  null ("never") is outside every cap.
+    const tokenTtl = principal.token?.max_ttl_seconds ? Number(principal.token.max_ttl_seconds) : null;
     if (input.expires_at === null || String(input.expires_at).trim() === "" || /^(never|forever)$/i.test(String(input.expires_at).trim())) {
+      if (tokenTtl) throw forbidden(`This API token is limited to ${tokenTtl / DAY} days.`);
       exactExpiry = null;
       const settings = await loadSettings(env).catch(() => null);
       const foreverMax = tier(principal, settings).foreverMaxBytes ?? FOREVER_MAX_BYTES;
@@ -478,15 +485,22 @@ export async function updateShare(env, principal, slug, body) {
         throw new HttpError(413, `A share that never expires holds at most ${foreverMax / MB} MB.  Give it an expiry.`);
       }
     } else {
+      // Accept an ISO date, unix seconds, or unix milliseconds; a numeric
+      // string (a form field) is unix seconds too, not a date.
+      const raw = typeof input.expires_at === "number" ? input.expires_at : String(input.expires_at).trim();
       let seconds;
-      if (typeof input.expires_at === "number") {
-        seconds = input.expires_at > 1e12 ? input.expires_at / 1000 : input.expires_at;
+      if (typeof raw === "number" || /^\d+$/.test(raw)) {
+        const n = Number(raw);
+        seconds = n > 1e12 ? n / 1000 : n;
       } else {
-        seconds = Date.parse(String(input.expires_at)) / 1000;
+        seconds = Date.parse(raw) / 1000;
       }
       if (!Number.isFinite(seconds)) throw badRequest("Give an expiry date and time.");
       exactExpiry = Math.floor(seconds);
       if (exactExpiry <= now()) throw badRequest("An expiry must be in the future.");
+      if (tokenTtl && exactExpiry > now() + tokenTtl) {
+        throw forbidden(`This API token is limited to ${tokenTtl / DAY} days.`);
+      }
     }
     sets.push("expires_at = ?");
     args.push(exactExpiry);

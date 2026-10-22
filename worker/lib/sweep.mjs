@@ -20,11 +20,16 @@ export async function sweep(env, ts = now()) {
   const expired = await all(env.DB, "SELECT * FROM shares WHERE expires_at IS NOT NULL AND expires_at <= ? ORDER BY expires_at LIMIT ?", ts, SHARE_BATCH);
   for (const share of expired) await purgeShare(env, share);
   report.expired_shares = expired.length;
-  report.empty_shares = await run(
+  // Empty shares go through purgeShare too, so their traffic rows cannot be
+  // orphaned by a direct DELETE.
+  const empty = await all(
     env.DB,
-    "DELETE FROM shares WHERE kind = 'files' AND file_count = 0 AND created_at <= ? AND NOT EXISTS (SELECT 1 FROM share_files f WHERE f.share_id = shares.id)",
-    ts - EMPTY_SHARE_GRACE_SECONDS
+    "SELECT * FROM shares WHERE kind = 'files' AND file_count = 0 AND created_at <= ? AND NOT EXISTS (SELECT 1 FROM share_files f WHERE f.share_id = shares.id) ORDER BY created_at LIMIT ?",
+    ts - EMPTY_SHARE_GRACE_SECONDS,
+    SHARE_BATCH
   );
+  for (const share of empty) await purgeShare(env, share);
+  report.empty_shares = empty.length;
   report.closed_accounts = await run(
     env.DB,
     "DELETE FROM users WHERE status = 'deleted' AND is_system = 0 AND NOT EXISTS (SELECT 1 FROM shares s WHERE s.owner_id = users.id)"
