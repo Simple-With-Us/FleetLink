@@ -2,13 +2,15 @@
  * Per-share traffic.  Public views and downloads are buffered in memory for a
  * few seconds and rolled up by UTC day in D1 (share_stats), so serving a link
  * costs no database write and the table stays small.  A batch is written from
- * `waitUntil`, which keeps the response fast and survives the request.
+ * `waitUntil`, which keeps the response fast and survives the request.  An
+ * isolate eviction can drop the counts still buffered in its final window; a
+ * later hit after FLUSH_MS flushes them, so the loss is bounded, not permanent.
  *
  * These are FleetLink's own counts: they cover share paths this worker served,
  * including password unlocks and short-link redirects.  Cloudflare's zone
  * analytics are separate (cloudflare-analytics.mjs).
  */
-import { all, first, now, run } from "./db.mjs";
+import { all, now, run } from "./db.mjs";
 import { forbidden } from "./http.mjs";
 
 export const STATS_RETENTION_DAYS = 400;
@@ -154,31 +156,34 @@ export async function scopedStats(env, principal, { days = 30, scope = "mine" } 
   const { clause, args } = scopeClause(principal, scope);
   const join = "FROM share_stats st JOIN shares s ON s.id = st.share_id";
   const where = `st.day >= ? AND ${clause}`;
-  const [seriesRows, topRows, active] = await Promise.all([
+  const [seriesRows, perShareRows] = await Promise.all([
     all(env.DB, `SELECT st.day, SUM(st.views) AS views, SUM(st.downloads) AS downloads, SUM(st.bytes) AS bytes ${join} WHERE ${where} GROUP BY st.day ORDER BY st.day ASC`, since, ...args),
     all(
       env.DB,
       `SELECT s.slug, s.kind, s.title, SUM(st.views) AS views, SUM(st.downloads) AS downloads, SUM(st.bytes) AS bytes
-       ${join} WHERE ${where} GROUP BY s.id ORDER BY views DESC, s.slug ASC LIMIT 12`,
+       ${join} WHERE ${where} GROUP BY s.id`,
       since, ...args
-    ),
-    first(env.DB, `SELECT COUNT(DISTINCT st.share_id) AS n ${join} WHERE ${where}`, since, ...args)
+    )
   ]);
   const series = seriesRows.map(normalizeRow);
+  const shares = perShareRows.map((row) => ({
+    slug: row.slug,
+    kind: row.kind,
+    title: row.title ?? null,
+    views: Number(row.views) || 0,
+    downloads: Number(row.downloads) || 0,
+    bytes: Number(row.bytes) || 0
+  }));
+  // One scan covers both the share count and the busiest-shares list; the old
+  // third query repeated the same window just to count distinct shares.
+  shares.sort((a, b) => b.views - a.views || String(a.slug).localeCompare(String(b.slug)));
   return {
     scope,
     days: span,
     since,
-    totals: { ...totalsOf(series), shares: Number(active?.n ?? 0) },
+    totals: { ...totalsOf(series), shares: shares.length },
     series,
-    top: topRows.map((row) => ({
-      slug: row.slug,
-      kind: row.kind,
-      title: row.title ?? null,
-      views: Number(row.views) || 0,
-      downloads: Number(row.downloads) || 0,
-      bytes: Number(row.bytes) || 0
-    }))
+    top: shares.slice(0, 12)
   };
 }
 

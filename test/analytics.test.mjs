@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { call, callJson, makeAdmin, makeEnv, signUp } from "./helpers/harness.mjs";
+import { zoneAnalytics } from "../worker/lib/cloudflare-analytics.mjs";
+import { call, callJson, createToken, makeAdmin, makeEnv, signUp } from "./helpers/harness.mjs";
 
 async function person(env, name) {
   const who = await signUp(env, name, { email: `${name.toLowerCase()}@example.com` });
@@ -147,4 +148,54 @@ test("exact expiry is an admin tool; renew takes a chosen duration", async () =>
   const never = await callJson(env, "PATCH", "/api/shares/dated", { auth: ada, json: { expires_at: null } });
   assert.equal(never.status, 200);
   assert.equal(never.data.share.expires_at, null);
+});
+
+test("an exact expiry respects a token's lifetime cap and accepts unix seconds as a string", async () => {
+  const env = await makeEnv();
+  const ada = await person(env, "Ada");
+  await makeShare(env, ada, { slug: "dated" });
+  await makeAdmin(env, ada);
+  const token = await createToken(env, ada, { max_days: 2 });
+
+  // A capped token cannot outlive its own cap, even though its owner is an admin.
+  const far = new Date(Date.now() + 10 * 86_400_000).toISOString();
+  const tooFar = await callJson(env, "PATCH", "/api/shares/dated", { auth: { token }, json: { expires_at: far } });
+  assert.equal(tooFar.status, 403);
+  assert.match(tooFar.data.error, /limited to 2 days/);
+  const never = await callJson(env, "PATCH", "/api/shares/dated", { auth: { token }, json: { expires_at: null } });
+  assert.equal(never.status, 403);
+
+  const soon = new Date(Date.now() + 86_400_000).toISOString();
+  const within = await callJson(env, "PATCH", "/api/shares/dated", { auth: { token }, json: { expires_at: soon } });
+  assert.equal(within.status, 200, JSON.stringify(within.data));
+
+  // The docs allow unix seconds; a form-field string must work too.
+  const unix = Math.floor(Date.now() / 1000) + 3 * 86_400;
+  const fromString = await callJson(env, "PATCH", "/api/shares/dated", { auth: ada, json: { expires_at: String(unix) } });
+  assert.equal(fromString.status, 200, JSON.stringify(fromString.data));
+  assert.equal(fromString.data.share.expires_at, new Date(unix * 1000).toISOString());
+});
+
+test("cloudflare analytics rejects a non-OK status and an invalid body", async () => {
+  const env = await makeEnv({ CF_ANALYTICS_TOKEN: "token", CF_ZONE_ID: "zone-test-schema" });
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response("nope", { status: 500 });
+    await assert.rejects(
+      () => zoneAnalytics(env, { days: 1 }),
+      (err) => err.status === 502 && /answered 500/.test(err.message)
+    );
+    globalThis.fetch = async () => new Response(JSON.stringify({ errors: [{ message: { code: 1 } }] }), { status: 500 });
+    await assert.rejects(
+      () => zoneAnalytics(env, { days: 1 }),
+      (err) => err.status === 502 && /answered 500/.test(err.message)
+    );
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: "bad" }), { status: 200 });
+    await assert.rejects(
+      () => zoneAnalytics(env, { days: 1 }),
+      (err) => err.status === 502 && /invalid response/.test(err.message)
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
 });
