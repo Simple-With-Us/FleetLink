@@ -45,7 +45,7 @@ Access levels, the personal and team sides, and upload URLs are described in `do
 
 ## Agent-Sync
 
-Cloud seats do not need a FleetLink token.  The Agent-Sync MCP server (`https://agent-sync.jays.services/mcp`, the one with the Zulip and Linear tools) serves these same tools under the same names, each seat acting as its own FleetLink bot account, an admin of the Fleet team.  See "Agent Accounts" in `docs/multi-user.md`.
+Cloud seats do not need a FleetLink token.  The Agent-Sync MCP server (`https://agents.simplewithus.com/mcp`, the one with the Zulip and Linear tools) serves these same tools under the same names, each seat acting as its own FleetLink bot account, an admin of the Fleet team.  See "Agent Accounts" in `docs/multi-user.md`.
 
 ## Clients
 
