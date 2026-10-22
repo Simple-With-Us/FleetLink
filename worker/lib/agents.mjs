@@ -1,7 +1,7 @@
 /**
  * Agent accounts: the fleet's AI seats, acting through a trusted server.
  *
- * The Agent-Sync MCP server (agent-sync.jays.services) already authenticates
+ * The Agent-Sync MCP server (agents.simplewithus.com) already authenticates
  * each seat with its own OAuth grant.  It calls FleetLink with one shared
  * server credential, AGENT_SYNC_SECRET, and names the seat in X-Fleet-Seat.
  * Each seat gets its own FleetLink account (the fleet's bots are made up front
