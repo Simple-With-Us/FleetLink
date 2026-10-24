@@ -6,9 +6,8 @@
  *
  * The pages are rendered for real.  marketing.mjs exports its render
  * functions, and index.mjs only exports its routes, so those are captured
- * with a stub router and called the way the worker calls them.  When a module
- * cannot be loaded at all (a missing dependency, say), the test falls back to
- * the module source and checks the same sentences there.
+ * with a stub router and called the way the worker calls them.  A module that
+ * cannot be loaded, or a page that cannot be rendered, fails the test.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -20,6 +19,20 @@ const MARKETING_URL = new URL("marketing.mjs", PAGES_DIR);
 
 const NAMED_ENTITY = "&nbsp;";
 const NUMERIC_REFERENCE = "&#160;";
+
+/** Every page the run must have rendered. */
+const EXPECTED_PAGES = [
+  "home (signed out)",
+  "home (signed in)",
+  "agents (signed out)",
+  "agents (signed in)",
+  "home via / (signed out)",
+  "home via / (signed in)",
+  "sign-in",
+  "privacy",
+  "dashboard (signed in)",
+  "admin (signed in)"
+];
 
 /** A session cookie that matches the worker's session token shape. */
 const SESSION_TOKEN = "a".repeat(64);
@@ -71,13 +84,9 @@ function makeCtx(path, { signedIn = false, admin = false } = {}) {
   };
 }
 
-/** Load a module, or null when it cannot be loaded here. */
-async function loadModule(url) {
-  try {
-    return await import(url.href);
-  } catch {
-    return null;
-  }
+/** Load a module.  An import failure fails the test; it is never swallowed. */
+function loadModule(url) {
+  return import(url.href);
 }
 
 /** Render every page the two modules are responsible for. */
@@ -87,30 +96,28 @@ async function renderPages() {
   const marketing = await loadModule(MARKETING_URL);
   const index = await loadModule(INDEX_URL);
 
-  if (marketing) {
-    const principal = { kind: "session", user: userRow(), isAdmin: false };
-    pages.set("home (signed out)", marketing.home(makeCtx("/"), null));
-    pages.set("home (signed in)", marketing.home(makeCtx("/"), principal));
-    pages.set("agents (signed out)", marketing.agents(makeCtx("/agents"), null));
-    pages.set("agents (signed in)", marketing.agents(makeCtx("/agents"), principal));
-  }
+  const principal = { kind: "session", user: userRow(), isAdmin: false };
+  pages.set("home (signed out)", marketing.home(makeCtx("/"), null));
+  pages.set("home (signed in)", marketing.home(makeCtx("/"), principal));
+  pages.set("agents (signed out)", marketing.agents(makeCtx("/agents"), null));
+  pages.set("agents (signed in)", marketing.agents(makeCtx("/agents"), principal));
   sources.set("marketing.mjs", readFileSync(MARKETING_URL, "utf8"));
 
-  if (index) {
-    const routes = new Map();
-    index.pageRoutes({ on(method, pattern, handler) { routes.set(pattern, handler); } });
-    const wanted = [
-      ["home via / (signed out)", "/", { signedIn: false }],
-      ["home via / (signed in)", "/", { signedIn: true }],
-      ["sign-in", "/login", { signedIn: false }],
-      ["privacy", "/privacy", { signedIn: false }],
-      ["dashboard (signed in)", "/dashboard", { signedIn: true }],
-      ["admin (signed in)", "/admin", { signedIn: true, admin: true }]
-    ];
-    for (const [label, path, opts] of wanted) {
-      const res = await routes.get(path)(makeCtx(path, opts));
-      pages.set(label, await res.text());
-    }
+  const routes = new Map();
+  index.pageRoutes({ on(method, pattern, handler) { routes.set(pattern, handler); } });
+  const wanted = [
+    ["home via / (signed out)", "/", { signedIn: false }],
+    ["home via / (signed in)", "/", { signedIn: true }],
+    ["sign-in", "/login", { signedIn: false }],
+    ["privacy", "/privacy", { signedIn: false }],
+    ["dashboard (signed in)", "/dashboard", { signedIn: true }],
+    ["admin (signed in)", "/admin", { signedIn: true, admin: true }]
+  ];
+  for (const [label, path, opts] of wanted) {
+    const handler = routes.get(path);
+    assert.ok(handler, `the ${label} route must exist`);
+    const res = await handler(makeCtx(path, opts));
+    pages.set(label, await res.text());
   }
   sources.set("index.mjs", readFileSync(INDEX_URL, "utf8"));
   return { pages, sources };
@@ -124,7 +131,9 @@ function rendered() {
 
 test("no rendered page uses the named nbsp entity", async () => {
   const { pages } = await rendered();
-  assert.ok(pages.size > 0, "the pages must render");
+  for (const label of EXPECTED_PAGES) {
+    assert.ok(pages.has(label), `${label} must render`);
+  }
   for (const [label, html] of pages) {
     assert.ok(html.includes("<!doctype html>"), `${label} must render a whole page`);
     assert.equal(html.includes(NAMED_ENTITY), false, `${label} must not contain ${NAMED_ENTITY}`);
@@ -132,9 +141,9 @@ test("no rendered page uses the named nbsp entity", async () => {
 });
 
 test("the known sentence gaps use the numeric no-break reference", async () => {
-  const { pages, sources } = await rendered();
-  const signIn = pages.get("sign-in") ?? sources.get("index.mjs");
-  const home = pages.get("home (signed out)") ?? sources.get("marketing.mjs");
+  const { pages } = await rendered();
+  const signIn = pages.get("sign-in");
+  const home = pages.get("home (signed out)");
   assert.ok(signIn, "the sign-in page must be available");
   assert.ok(home, "the home page must be available");
   assert.ok(
