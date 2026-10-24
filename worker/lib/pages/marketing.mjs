@@ -75,7 +75,7 @@ function handoffFlow() {
       <h3>The link goes where the work is</h3>
       <p>The agent posts it in the pull request, the chat thread, or the ticket.</p>
       <div class="chat-card"><div class="chat-head"><span class="avatar">B</span><b>build-agent</b><span class="dim">just now</span></div>
-        <p>Tests pass on PR #2214.&nbsp; Report and screenshots:</p>
+        <p>Tests pass on PR #2214.&#160; Report and screenshots:</p>
         <div class="link-card"><span class="link-icon">${ICONS.link}</span><div><b>PR 2214 review</b><small>fleetlink.online/pr-2214-review · 15 files · 3 days</small></div></div>
       </div>
     </div>
@@ -99,16 +99,16 @@ function card(icon, title, body, extra = "") {
 function guideSection(origin) {
   return `<section class="section" id="guide"><article class="card">
       <h2>How FleetLink Works</h2>
-      <p>FleetLink gives you a link to a file, a folder, or another web address.&nbsp; Every link belongs to the account that made it and expires on its own.</p>
+      <p>FleetLink gives you a link to a file, a folder, or another web address.&#160; Every link belongs to the account that made it and expires on its own.</p>
 
       <h3>Accounts</h3>
-      <p>Create an account on the <a href="/login">sign-in page</a> with a passkey.&nbsp; There is no password.&nbsp; Add a second passkey from your dashboard so you can sign in from another device.&nbsp; Your dashboard lists your links, your API tokens, your teams, and the devices you are signed in on.</p>
+      <p>Create an account on the <a href="/login">sign-in page</a> with a passkey.&#160; There is no password.&#160; Add a second passkey from your dashboard so you can sign in from another device.&#160; Your dashboard lists your links, your API tokens, your teams, and the devices you are signed in on.</p>
 
       <h3>Sharing On The Website</h3>
       <ol>
         <li>Open the <a href="/dashboard#new">dashboard</a> and choose New Share.</li>
         <li>Pick files, or paste a web address for a short link.</li>
-        <li>Choose how long it stays up.&nbsp; Add a name, a title, a password, or a team if you like.</li>
+        <li>Choose how long it stays up.&#160; Add a name, a title, a password, or a team if you like.</li>
         <li>Copy the link.</li>
       </ol>
 
@@ -116,14 +116,14 @@ function guideSection(origin) {
       <div class="table-wrap"><table>
         <thead><tr><th>Who</th><th>Files</th><th>Short links</th></tr></thead>
         <tbody>
-          <tr><td>Signed in</td><td>Up to 7 days (3 by default).&nbsp; 100 MB per file, 500 MB and 500 files per share.</td><td>Up to 180 days (30 by default).</td></tr>
-          <tr><td>Admin</td><td>Any length, or never.&nbsp; 300 MB per file, 1 GB per share.&nbsp; A share that never expires holds up to 500 MB.</td><td>Any length, or never.</td></tr>
+          <tr><td>Signed in</td><td>Up to 7 days (3 by default).&#160; 100 MB per file, 500 MB and 500 files per share.</td><td>Up to 180 days (30 by default).</td></tr>
+          <tr><td>Admin</td><td>Any length, or never.&#160; 300 MB per file, 1 GB per share.&#160; A share that never expires holds up to 500 MB.</td><td>Any length, or never.</td></tr>
         </tbody>
       </table></div>
-      <p>Each account has a storage quota across its live links.&nbsp; A link can be renewed three times.&nbsp; A password is optional; without one, anyone with the link can open it.</p>
+      <p>Each account has a storage quota across its live links.&#160; A link can be renewed three times.&#160; A password is optional; without one, anyone with the link can open it.</p>
 
       <h3>Agents, Scripts, And The CLI</h3>
-      <p>Create an API token on the <a href="/dashboard#tokens">dashboard</a>.&nbsp; The token acts as you, can be limited (largest file, longest share, no short links, one team), and can be revoked at any time.</p>
+      <p>Create an API token on the <a href="/dashboard#tokens">dashboard</a>.&#160; The token acts as you, can be limited (largest file, longest share, no short links, one team), and can be revoked at any time.</p>
       <pre>export FLEETLINK_TOKEN=fla_…
 fleet-share notes.md
 fleet-share --days 7 ./report/
@@ -138,10 +138,10 @@ fleet-share list</pre>
       <p>Agents that speak MCP can connect to <code>${origin}/mcp</code> with the same token.</p>
 
       <h3>iPhone</h3>
-      <p>The FleetLink app signs in with your passkey, lists your links, and makes new ones.&nbsp; To share from the Share sheet, create an API token, <a href="/api/shortcut/download">download the Shortcut</a>, and paste the token when Shortcuts asks.</p>
+      <p>The FleetLink app signs in with your passkey, lists your links, and makes new ones.&#160; To share from the Share sheet, create an API token, <a href="/api/shortcut/download">download the Shortcut</a>, and paste the token when Shortcuts asks.</p>
 
       <h3>Teams</h3>
-      <p>A team shares a space for links.&nbsp; Everyone in the team sees its links.&nbsp; Team owners and admins can change or delete any of them; members change their own.&nbsp; A token can be tied to one team so an agent's uploads land there.</p>
+      <p>A team shares a space for links.&#160; Everyone in the team sees its links.&#160; Team owners and admins can change or delete any of them; members change their own.&#160; A token can be tied to one team so an agent's uploads land there.</p>
 
       <h3>What People See</h3>
       <ul>
@@ -161,10 +161,10 @@ export function home(ctx, principal) {
     ? `<a class="button large" href="/dashboard">Open Your Dashboard</a><a class="button large secondary" href="/agents">Connect An Agent</a>`
     : `<a class="button large" href="/login#signup">Create Your Account</a><a class="button large secondary" href="/agents">Connect An Agent</a>`;
   const fine = signedIn
-    ? `Signed in as ${escapeHtml(name)}.&nbsp; Your links, tokens, and teams are on the <a href="/dashboard">dashboard</a>.`
-    : `Already have an account?&nbsp; <a href="/login">Sign in</a> with your passkey.`;
+    ? `Signed in as ${escapeHtml(name)}.&#160; Your links, tokens, and teams are on the <a href="/dashboard">dashboard</a>.`
+    : `Already have an account?&#160; <a href="/login">Sign in</a> with your passkey.`;
   const deleted = ctx.url.searchParams.get("deleted") === "1"
-    ? '<div class="wrap"><p class="notice ok">Your account was deleted.&nbsp; Its shares are removed within the hour.</p></div>'
+    ? '<div class="wrap"><p class="notice ok">Your account was deleted.&#160; Its shares are removed within the hour.</p></div>'
     : "";
   const closing = signedIn
     ? `<div><h2>Pick up where you left off.</h2><p>Your shares, API tokens, and teams are one click away.</p></div><div class="actions"><a class="button large gold" href="/dashboard">Open Dashboard</a><a class="button large secondary" href="/agents">Connect An Agent</a></div>`
@@ -195,7 +195,7 @@ export function home(ctx, principal) {
     </div></div>
     <div class="wrap landing">
       <section class="section" id="handoffs">
-        <div class="section-head"><p class="eyebrow">How a handoff works</p><h2>One link from the agent that made it to everyone who needs it.</h2><p class="muted">Agents stop pasting walls of output into chat.&nbsp; They publish the artifact, post the link, and move on.&nbsp; The link knows who owns it, which team can see it, and when it goes away.</p></div>
+        <div class="section-head"><p class="eyebrow">How a handoff works</p><h2>One link from the agent that made it to everyone who needs it.</h2><p class="muted">Agents stop pasting walls of output into chat.&#160; They publish the artifact, post the link, and move on.&#160; The link knows who owns it, which team can see it, and when it goes away.</p></div>
         ${handoffFlow()}
       </section>
 
@@ -205,11 +205,11 @@ export function home(ctx, principal) {
           <a class="button secondary" href="/agents">Read the agent guide →</a>
         </div>
         <div class="grid-3">
-          ${card("key", "A Token Per Agent", "Give each agent an <code>fla_</code> token that acts as you, with its own cap on file size and lifetime.&nbsp; Revoke one without touching the rest.")}
-          ${card("agent", "MCP Server", "Connect Claude Code, Cursor, Codex, or Grok to <code>fleetlink.online/mcp</code>.&nbsp; Seven tools create, list, renew, and delete shares.")}
+          ${card("key", "A Token Per Agent", "Give each agent an <code>fla_</code> token that acts as you, with its own cap on file size and lifetime.&#160; Revoke one without touching the rest.")}
+          ${card("agent", "MCP Server", "Connect Claude Code, Cursor, Codex, or Grok to <code>fleetlink.online/mcp</code>.&#160; Seven tools create, list, renew, and delete shares.")}
           ${card("cli", "One-Line CLI", "<code>fleet-share ./out/</code> uploads a file or a whole folder as one link and prints every file's URL.")}
           ${card("team", "Team-Bound Output", "Tie a token to a team and every upload lands in the team space, where the people who need it can see it.")}
-          ${card("doc", "Readable By Agents", "Add <code>?raw=1</code> for the source of any note, or ask for JSON to get a folder's file list.&nbsp; Agents read what other agents wrote.")}
+          ${card("doc", "Readable By Agents", "Add <code>?raw=1</code> for the source of any note, or ask for JSON to get a folder's file list.&#160; Agents read what other agents wrote.")}
           ${card("box", "Install The Skill", "<code>fleet-share skill install</code> teaches Claude, Cursor, Codex, and Grok how to use FleetLink, pinned and checksum-verified.")}
         </div>
       </section>
@@ -217,12 +217,12 @@ export function home(ctx, principal) {
       <section class="section" id="features">
         <div class="section-head"><p class="eyebrow">Artifacts and work in progress</p><h2>Share anything a project produces.</h2><p class="muted">Everything gets a clean viewer, so a link is useful the moment it lands.</p></div>
         <div class="grid-3">
-          ${card("box", "Build Artifacts", "Zips, binaries, and logs up to 100 MB a file and 500 MB a share.&nbsp; Large folders upload file by file.")}
+          ${card("box", "Build Artifacts", "Zips, binaries, and logs up to 100 MB a file and 500 MB a share.&#160; Large folders upload file by file.")}
           ${card("image", "Reports And Screenshots", "Test reports, coverage, and screenshot sets open as a folder of previews.")}
           ${card("doc", "Notes And Specs", "Markdown renders as a clean page with linked headings: perfect for specs, plans, and handoff notes.")}
           ${card("folder", "Whole Folders", "Share a directory as one link with a browsable listing, or open any file inside it directly.")}
           ${card("link", "Short Links", "Turn a long PR, dashboard, or ticket URL into a short link that lasts up to 180 days.")}
-          ${card("lock", "Private Handoffs", "Add a password to any share.&nbsp; Passwords are stored as salted hashes and never shown again.")}
+          ${card("lock", "Private Handoffs", "Add a password to any share.&#160; Passwords are stored as salted hashes and never shown again.")}
         </div>
         <p class="small muted center-text">Read <a href="/instructions">how FleetLink works</a> and the <a href="/agents">guide for agents</a>.</p>
       </section>
@@ -234,13 +234,13 @@ export function home(ctx, principal) {
           <div>
             <p class="eyebrow">Teams and accounts</p>
             <h2>Many people, many agents, no stepping on each other.</h2>
-            <p class="muted">Every link has an owner.&nbsp; Nobody else can see your list, change your links, or claim your names, unless you share a team.</p>
+            <p class="muted">Every link has an owner.&#160; Nobody else can see your list, change your links, or claim your names, unless you share a team.</p>
             <ul class="checks">
-              <li><b>Personal until you share it.</b>&nbsp; Move any share to a team's side with view or edit access, and back again.&nbsp; You stay the owner.</li>
-              <li><b>Team spaces.</b>&nbsp; Members see every team link and, with edit access, add files to work in progress; owners and admins manage them.</li>
-              <li><b>Passkey accounts.</b>&nbsp; Face ID, Touch ID, or a security key.&nbsp; No passwords to leak.</li>
-              <li><b>Sessions you control.</b>&nbsp; See every signed-in device and sign out the ones you do not recognize.</li>
-              <li><b>Admin console.</b>&nbsp; Invites, sign-up policy, per-person quotas, disabling accounts, and an audit log.</li>
+              <li><b>Personal until you share it.</b>&#160; Move any share to a team's side with view or edit access, and back again.&#160; You stay the owner.</li>
+              <li><b>Team spaces.</b>&#160; Members see every team link and, with edit access, add files to work in progress; owners and admins manage them.</li>
+              <li><b>Passkey accounts.</b>&#160; Face ID, Touch ID, or a security key.&#160; No passwords to leak.</li>
+              <li><b>Sessions you control.</b>&#160; See every signed-in device and sign out the ones you do not recognize.</li>
+              <li><b>Admin console.</b>&#160; Invites, sign-up policy, per-person quotas, disabling accounts, and an audit log.</li>
             </ul>
           </div>
           <div class="card team-card" aria-hidden="true">
@@ -256,7 +256,7 @@ export function home(ctx, principal) {
       <section class="section" id="everywhere">
         <div class="section-head"><p class="eyebrow">Wherever you are</p><h2>Make and open links from any surface.</h2></div>
         <div class="grid">
-          ${card("web", "The Dashboard", "Upload, make short links, renew, rename, and delete.&nbsp; Manage tokens, teams, passkeys, and sessions.", `<p><a href="${signedIn ? "/dashboard" : "/login#signup"}">${signedIn ? "Open the dashboard" : "Create an account"} →</a></p>`)}
+          ${card("web", "The Dashboard", "Upload, make short links, renew, rename, and delete.&#160; Manage tokens, teams, passkeys, and sessions.", `<p><a href="${signedIn ? "/dashboard" : "/login#signup"}">${signedIn ? "Open the dashboard" : "Create an account"} →</a></p>`)}
           ${card("cli", "The Terminal", "Sign in once with <code>fleet-share login</code>, then share, list, renew, and delete from any shell.", `<p><a href="/agents#cli">CLI guide →</a></p>`)}
           ${card("chat", "Chat And Tickets", "Links unfurl with a title and preview image in Slack, Zulip, and Messages.", "")}
           ${card("phone", "iPhone", "The FleetLink app lists your links and makes new ones; the App Clip opens a link without installing anything.", `<p><a href="/#guide">Set it up →</a></p>`)}
@@ -267,8 +267,8 @@ export function home(ctx, principal) {
         <div class="section-head"><p class="eyebrow">Safe by default</p><h2>Built so a shared file cannot hurt the person who opens it.</h2></div>
         <div class="grid-3">
           ${card("shield", "Sandboxed Files", "Every shared file opens in a browser sandbox, and HTML always downloads, so a link cannot act as you.")}
-          ${card("clock", "Gone On Time", "Files expire in up to 7 days and short links in up to 180, then they are deleted.&nbsp; Renew when you need longer.")}
-          ${card("key", "Hashed Credentials", "Sessions, tokens, and invite codes are stored only as peppered hashes.&nbsp; A database copy is not a key ring.")}
+          ${card("clock", "Gone On Time", "Files expire in up to 7 days and short links in up to 180, then they are deleted.&#160; Renew when you need longer.")}
+          ${card("key", "Hashed Credentials", "Sessions, tokens, and invite codes are stored only as peppered hashes.&#160; A database copy is not a key ring.")}
         </div>
       </section>
 
@@ -290,12 +290,12 @@ export function home(ctx, principal) {
       <section class="section" id="faq">
         <div class="section-head"><p class="eyebrow">Questions</p><h2>Good to know.</h2></div>
         <div class="faq">
-          <details><summary>Who can open a link?</summary><p>Anyone who has it, unless it has a password.&nbsp; Only you, your team's owners and admins, and FleetLink admins can see your list of links or change them.</p></details>
-          <details><summary>How do agents sign in?</summary><p>They do not need to.&nbsp; Create an API token on the dashboard and give it to the agent as <code>FLEETLINK_TOKEN</code>.&nbsp; It acts as you, inside the limits you set, and you can revoke it any time.</p></details>
-          <details><summary>What happens when a link expires?</summary><p>It stops working right away and its files are deleted within 15 minutes.&nbsp; You can renew a link before then, up to three times.</p></details>
-          <details><summary>Can agents read what other agents shared?</summary><p>Yes.&nbsp; Add <code>?raw=1</code> to a note for its source, or send <code>Accept: application/json</code> to a folder link for its file list.</p></details>
-          <details><summary>Why does an HTML file download instead of opening?</summary><p>So a shared page can never run as fleetlink.online with your sign-in.&nbsp; Every other file opens in a sandbox for the same reason.</p></details>
-          <details><summary>Do I need an invite?</summary><p>Not right now: anyone can create an account.&nbsp; Admins can switch FleetLink to invite-only at any time.</p></details>
+          <details><summary>Who can open a link?</summary><p>Anyone who has it, unless it has a password.&#160; Only you, your team's owners and admins, and FleetLink admins can see your list of links or change them.</p></details>
+          <details><summary>How do agents sign in?</summary><p>They do not need to.&#160; Create an API token on the dashboard and give it to the agent as <code>FLEETLINK_TOKEN</code>.&#160; It acts as you, inside the limits you set, and you can revoke it any time.</p></details>
+          <details><summary>What happens when a link expires?</summary><p>It stops working right away and its files are deleted within 15 minutes.&#160; You can renew a link before then, up to three times.</p></details>
+          <details><summary>Can agents read what other agents shared?</summary><p>Yes.&#160; Add <code>?raw=1</code> to a note for its source, or send <code>Accept: application/json</code> to a folder link for its file list.</p></details>
+          <details><summary>Why does an HTML file download instead of opening?</summary><p>So a shared page can never run as fleetlink.online with your sign-in.&#160; Every other file opens in a sandbox for the same reason.</p></details>
+          <details><summary>Do I need an invite?</summary><p>Not right now: anyone can create an account.&#160; Admins can switch FleetLink to invite-only at any time.</p></details>
         </div>
       </section>
 
@@ -316,14 +316,14 @@ export function agents(ctx, principal) {
     head: ogTags({ title: "FleetLink For Agents", description: "Give every agent a token, a CLI, and an MCP server for sharing artifacts and work in progress.", url: `${ctx.url.origin}/agents`, image: `${ctx.url.origin}/preview.png` }),
     body: `<div class="dash-head"><div><p class="eyebrow">For agents</p><h1>Connect an agent in three steps.</h1><p class="muted lead-sm">Agents publish builds, reports, notes, and work in progress with their own token, then post the link wherever the team is working.</p></div></div>
     <div class="steps">
-      <div class="card step"><span class="step-num">1</span><h3>Create a token</h3><p>On the dashboard, open API Tokens.&nbsp; Name it after the agent, cap its file size or lifetime if you like, and tie it to a team so its output lands there.</p><div class="actions">${tokenStep}</div></div>
-      <div class="card step"><span class="step-num">2</span><h3>Give it to the agent</h3><p>Set it in the agent's environment.&nbsp; Never paste it into a prompt or a file you commit.</p>${code('export FLEETLINK_TOKEN=fla_…')}</div>
-      <div class="card step"><span class="step-num">3</span><h3>Share</h3><p>Use the CLI, MCP, or plain HTTP.&nbsp; Every link the agent makes shows up on your dashboard.</p>${code('fleet-share ./report/')}</div>
+      <div class="card step"><span class="step-num">1</span><h3>Create a token</h3><p>On the dashboard, open API Tokens.&#160; Name it after the agent, cap its file size or lifetime if you like, and tie it to a team so its output lands there.</p><div class="actions">${tokenStep}</div></div>
+      <div class="card step"><span class="step-num">2</span><h3>Give it to the agent</h3><p>Set it in the agent's environment.&#160; Never paste it into a prompt or a file you commit.</p>${code('export FLEETLINK_TOKEN=fla_…')}</div>
+      <div class="card step"><span class="step-num">3</span><h3>Share</h3><p>Use the CLI, MCP, or plain HTTP.&#160; Every link the agent makes shows up on your dashboard.</p>${code('fleet-share ./report/')}</div>
     </div>
 
     <section class="section" id="cli">
       <h2>The CLI</h2>
-      <p class="muted"><code>fleet-share</code> needs Python 3 and nothing else.&nbsp; It reads <code>FLEETLINK_TOKEN</code>, or a token saved with <code>fleet-share login</code>.</p>
+      <p class="muted"><code>fleet-share</code> needs Python 3 and nothing else.&#160; It reads <code>FLEETLINK_TOKEN</code>, or a token saved with <code>fleet-share login</code>.</p>
       <div class="two-col">
         ${code(`fleet-share notes.md ./screenshots/        # one share, every file
 fleet-share --slug pr-2214 --team mobile ./out/
@@ -341,7 +341,7 @@ fleet-share whoami               # account, usage, limits`)}
 
     <section class="section" id="mcp">
       <h2>MCP</h2>
-      <p class="muted">Streamable HTTP at <code>${origin}/mcp</code> with the token as a bearer header.&nbsp; Tools create shares and links, list and read them, <code>fleetlink_share_to_team</code> and <code>fleetlink_make_personal</code> to move work between your personal side and a team's, <code>fleetlink_add_file</code> and <code>fleetlink_read_file</code> to collaborate on a teammate's work in progress, and <code>fleetlink_upload_url</code> for a one-time <code>curl -T</code> upload of anything too big for a tool call.&nbsp; Fleet cloud seats get the same tools on the Agent-Sync MCP server, with no token of their own.</p>
+      <p class="muted">Streamable HTTP at <code>${origin}/mcp</code> with the token as a bearer header.&#160; Tools create shares and links, list and read them, <code>fleetlink_share_to_team</code> and <code>fleetlink_make_personal</code> to move work between your personal side and a team's, <code>fleetlink_add_file</code> and <code>fleetlink_read_file</code> to collaborate on a teammate's work in progress, and <code>fleetlink_upload_url</code> for a one-time <code>curl -T</code> upload of anything too big for a tool call.&#160; Fleet cloud seats get the same tools on the Agent-Sync MCP server, with no token of their own.</p>
       <div class="two-col">
         <div class="card"><h3>Claude Code</h3>${code(`claude mcp add --transport http fleetlink \\
   ${ctx.url.origin}/mcp \\
@@ -363,13 +363,13 @@ headers = { "Authorization" = "Bearer \${FLEETLINK_TOKEN}" }`)}</div>
 
     <section class="section" id="skill">
       <h2>The agent skill</h2>
-      <p class="muted">Installs FleetLink's instructions into Claude, Cursor, Codex, Grok, and <code>~/.agents</code>, so an agent knows when and how to share.&nbsp; Outside a checkout the download is pinned to a commit and checked against SHA-256 hashes before anything runs.</p>
+      <p class="muted">Installs FleetLink's instructions into Claude, Cursor, Codex, Grok, and <code>~/.agents</code>, so an agent knows when and how to share.&#160; Outside a checkout the download is pinned to a commit and checked against SHA-256 hashes before anything runs.</p>
       ${code("fleet-share skill install\nfleet-share skill install --check")}
     </section>
 
     <section class="section" id="http">
       <h2>Plain HTTP</h2>
-      <p class="muted">Anything that can make a request can share.&nbsp; Settings for a new share travel in headers.</p>
+      <p class="muted">Anything that can make a request can share.&#160; Settings for a new share travel in headers.</p>
       <div class="two-col">
         ${code(`curl -X PUT ${ctx.url.origin}/pr-2214/report.md \\
   -T report.md \\
@@ -389,12 +389,12 @@ curl -H "Authorization: Bearer $FLEETLINK_TOKEN" \\
     <section class="section" id="etiquette">
       <h2>Good habits for agents</h2>
       <div class="grid-3">
-        ${card("clock", "Pick a lifetime", "Default to the shortest that works.&nbsp; Work in progress rarely needs more than 3 days.")}
+        ${card("clock", "Pick a lifetime", "Default to the shortest that works.&#160; Work in progress rarely needs more than 3 days.")}
         ${card("team", "Use a team token", "Bind each agent's token to the team that should see its output, so nobody has to forward links.")}
         ${card("chat", "Post the link, not the payload", "Share the report and put one line and the link in the PR or thread.")}
         ${card("doc", "Read raw", "Fetch notes with <code>?raw=1</code> and folders as JSON instead of scraping the page.")}
         ${card("lock", "Password the sensitive", "Add a password for anything outside the team's eyes, and send it separately.")}
-        ${card("key", "One token per agent", "Never share a token between agents.&nbsp; Revoke it when the agent is retired.")}
+        ${card("key", "One token per agent", "Never share a token between agents.&#160; Revoke it when the agent is retired.")}
       </div>
     </section>`
   });

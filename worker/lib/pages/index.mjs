@@ -19,7 +19,7 @@ function login(ctx, principal, settings) {
     : `<label for="su-invite">Invite code</label><input id="su-invite" name="invite" type="text" autocomplete="off" required placeholder="ABCD-EFGH-JKLM-NPQR">`;
   const signupNote = mode === "open"
     ? "Anyone can create an account."
-    : mode === "invite" ? "FleetLink is invite-only right now.&nbsp; Ask an admin for a code." : "Sign-up is closed.&nbsp; An invite code still works.";
+    : mode === "invite" ? "FleetLink is invite-only right now.&#160; Ask an admin for a code." : "Sign-up is closed.&#160; An invite code still works.";
   return page(ctx.env, {
     title: "Sign In",
     principal,
@@ -36,7 +36,7 @@ function login(ctx, principal, settings) {
       <div class="auth-grid">
       <section class="card" id="signin">
         <h2>Sign In</h2>
-        <p class="muted">Use the passkey you made for FleetLink.&nbsp; Your device asks for Face ID, Touch ID, or your security key.</p>
+        <p class="muted">Use the passkey you made for FleetLink.&#160; Your device asks for Face ID, Touch ID, or your security key.</p>
         <form id="signin-form">
           <label for="si-email">Email (optional)</label>
           <input id="si-email" name="email" type="email" autocomplete="username webauthn" placeholder="Only needed if your device does not offer the passkey">
@@ -45,7 +45,7 @@ function login(ctx, principal, settings) {
       </section>
       <section class="card" id="signup">
         <h2>Create An Account</h2>
-        <p class="muted">${signupNote}&nbsp; Your account is protected by a passkey on this device.</p>
+        <p class="muted">${signupNote}&#160; Your account is protected by a passkey on this device.</p>
         <form id="signup-form">
           <label for="su-name">Display name</label>
           <input id="su-name" name="display_name" type="text" maxlength="64" autocomplete="name" required>
@@ -56,7 +56,7 @@ function login(ctx, principal, settings) {
         </form>
       </section>
       </div>
-      <p class="small muted center-text">New to FleetLink?&nbsp; <a href="/">See what it does</a> or read <a href="/#guide">how it works</a>.</p>
+      <p class="small muted center-text">New to FleetLink?&#160; <a href="/">See what it does</a> or read <a href="/#guide">how it works</a>.</p>
     </div>`
   });
 }
@@ -112,7 +112,7 @@ function dashboard(ctx, principal) {
         </div>
         <div id="share-summary" class="share-summary"></div>
         ${table("share-rows", [["Slug", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Expires", "sortable", "expires"], ["", ""]])}
-        <p id="share-empty" class="empty" hidden>Nothing here yet.&nbsp; Use New Share to make a link.</p>
+        <p id="share-empty" class="empty" hidden>Nothing here yet.&#160; Use New Share to make a link.</p>
         <p><button type="button" id="share-more" class="secondary" hidden>Load More</button></p>
       </section>
 
@@ -125,7 +125,7 @@ function dashboard(ctx, principal) {
             <button type="button" id="analytics-refresh" class="secondary" title="Refresh traffic">↻ Refresh</button>
           </div>
         </div>
-        <p class="small muted">FleetLink counts each public view and download it serves, by day (UTC).&nbsp; Password unlocks, folder listings, short-link opens, and file bytes are included.&nbsp; A view can take up to a few seconds to appear.</p>
+        <p class="small muted">FleetLink counts each public view and download it serves, by day (UTC).&#160; Password unlocks, folder listings, short-link opens, and file bytes are included.&#160; A view can take up to a few seconds to appear.</p>
         <div id="analytics-summary" class="grid"><div class="card"><p class="small muted">Loading…</p></div></div>
         <h3>Busiest Shares</h3>
         <div class="table-wrap"><table><thead><tr><th>Share</th><th>Views</th><th>Downloads</th><th>Bytes</th></tr></thead><tbody id="analytics-top"></tbody></table></div>
@@ -169,7 +169,7 @@ function dashboard(ctx, principal) {
       <section id="panel-tokens" role="tabpanel" hidden>
         <div class="card">
           <h2>API Tokens</h2>
-          <p class="muted">Give each agent, script, or Shortcut its own token.&nbsp; It acts as you, within the limits you set here, and you can revoke it at any time.</p>
+          <p class="muted">Give each agent, script, or Shortcut its own token.&#160; It acts as you, within the limits you set here, and you can revoke it at any time.</p>
           <p id="token-quota" class="small muted"></p>
           <form id="token-form">
             <div class="row">
@@ -191,7 +191,7 @@ function dashboard(ctx, principal) {
       <section id="panel-teams" role="tabpanel" hidden>
         <form id="team-form" class="card">
           <h2>Teams</h2>
-          <p class="muted">A team shares a space for links.&nbsp; Members see the team's shares, and team owners and admins can change or delete them.</p>
+          <p class="muted">A team shares a space for links.&#160; Members see the team's shares, and team owners and admins can change or delete them.</p>
           <div class="row"><div><label for="team-name">New team name</label><input id="team-name" name="name" type="text" maxlength="64" required></div>
           <div class="end"><button type="submit">Create Team</button></div></div>
         </form>
@@ -201,7 +201,7 @@ function dashboard(ctx, principal) {
       <section id="panel-bots" role="tabpanel" hidden>
         <div class="card">
           <h2>Bots</h2>
-          <p class="muted">Bot identities under your account.&nbsp; Each bot signs in as itself, through the Agent-Sync MCP server or with a token you give it here.&nbsp; You see and manage everything your bots own, and the fleet's bots work in the Fleet team with you, where they and you can edit and overwrite each other's shares.</p>
+          <p class="muted">Bot identities under your account.&#160; Each bot signs in as itself, through the Agent-Sync MCP server or with a token you give it here.&#160; You see and manage everything your bots own, and the fleet's bots work in the Fleet team with you, where they and you can edit and overwrite each other's shares.</p>
           <p id="bot-summary" class="small muted"></p>
           <form id="bot-form" class="row">
             <div><label for="bot-seat">New bot seat</label><input id="bot-seat" name="seat" type="text" maxlength="24" required placeholder="QA-BOT" autocomplete="off"></div>
@@ -233,7 +233,7 @@ function dashboard(ctx, principal) {
         </div>
         <form id="delete-form" class="card">
           <h2>Delete Account</h2>
-          <p class="muted">This removes your passkeys, tokens, and sessions now, and your shares within the hour.&nbsp; It cannot be undone.</p>
+          <p class="muted">This removes your passkeys, tokens, and sessions now, and your shares within the hour.&#160; It cannot be undone.</p>
           <label for="del-confirm">Type <strong>delete my account</strong> to confirm</label>
           <input id="del-confirm" name="confirm" type="text" autocomplete="off">
           <div class="actions mt"><button type="submit" class="danger">Delete My Account</button></div>
@@ -281,7 +281,7 @@ function admin(ctx, principal) {
       </section>
       <section id="panel-teams" role="tabpanel" hidden>
         <div class="card"><h2>Fleet Bots</h2><p id="fleet-owner" class="small muted">Loading…</p><div id="fleet-actions" class="actions"></div></div>
-        <p class="small muted">Every team.&nbsp; Fleet is where the fleet owner and the AI seats share work; join a team to see and edit its shares from your dashboard.</p>
+        <p class="small muted">Every team.&#160; Fleet is where the fleet owner and the AI seats share work; join a team to see and edit its shares from your dashboard.</p>
         ${table("team-rows", [["Team"], ["Members"], ["Live shares"], [""]])}
         <p id="team-empty" class="empty" hidden>No teams yet.</p>
       </section>
@@ -312,28 +312,28 @@ function privacy(ctx, principal) {
     head: ogTags({ title: "Privacy Policy — FleetLink", description: "What FleetLink stores, how long a link stays up, and how to ask a question.", url: `${origin(ctx)}/privacy`, image: `${origin(ctx)}/preview.png` }),
     body: `<article class="card">
       <h1>Privacy Policy</h1>
-      <p class="small muted">Effective October 15, 2026.&nbsp; Covers fleetlink.online, fleetlink.app, the FleetLink iPhone app and App Clip, and the fleet-share CLI.&nbsp; Operator: Simple With Us.</p>
+      <p class="small muted">Effective October 15, 2026.&#160; Covers fleetlink.online, fleetlink.app, the FleetLink iPhone app and App Clip, and the fleet-share CLI.&#160; Operator: Simple With Us.</p>
       <h2>What This Covers</h2>
-      <p>FleetLink holds a file or a web address for a set time, then removes it.&nbsp; Opening a link does not need an account.&nbsp; Making one does.&nbsp; We do not sell what you upload, and we do not use it for advertising.</p>
+      <p>FleetLink holds a file or a web address for a set time, then removes it.&#160; Opening a link does not need an account.&#160; Making one does.&#160; We do not sell what you upload, and we do not use it for advertising.</p>
       <h2>Your Account</h2>
       <ul>
-        <li><strong>Passkeys.</strong>&nbsp; FleetLink stores the public half of your passkey.&nbsp; The private half never leaves your device.</li>
-        <li><strong>Profile.</strong>&nbsp; Your display name, and your email if you add one.</li>
-        <li><strong>Sessions and tokens.</strong>&nbsp; Stored as one-way hashes, with a short device label and when each was last used.</li>
-        <li><strong>Security log.</strong>&nbsp; Sign-ups, token and invite changes, and admin actions are kept for 90 days.</li>
+        <li><strong>Passkeys.</strong>&#160; FleetLink stores the public half of your passkey.&#160; The private half never leaves your device.</li>
+        <li><strong>Profile.</strong>&#160; Your display name, and your email if you add one.</li>
+        <li><strong>Sessions and tokens.</strong>&#160; Stored as one-way hashes, with a short device label and when each was last used.</li>
+        <li><strong>Security log.</strong>&#160; Sign-ups, token and invite changes, and admin actions are kept for 90 days.</li>
       </ul>
       <h2>What You Share</h2>
       <ul>
-        <li><strong>Files.</strong>&nbsp; Kept only until the link expires or you delete it.&nbsp; HTML files are offered as downloads, not shown as pages.</li>
-        <li><strong>Short links.</strong>&nbsp; The address the link opens.</li>
-        <li><strong>Passwords on links.</strong>&nbsp; Stored as a salted one-way hash.</li>
+        <li><strong>Files.</strong>&#160; Kept only until the link expires or you delete it.&#160; HTML files are offered as downloads, not shown as pages.</li>
+        <li><strong>Short links.</strong>&#160; The address the link opens.</li>
+        <li><strong>Passwords on links.</strong>&#160; Stored as a salted one-way hash.</li>
       </ul>
       <h2>Who Can See What</h2>
-      <p>Anyone with a link can open it, unless it has a password.&nbsp; Only you, the admins of a team the link is in, and FleetLink admins can see your list of links or change them.</p>
+      <p>Anyone with a link can open it, unless it has a password.&#160; Only you, the admins of a team the link is in, and FleetLink admins can see your list of links or change them.</p>
       <h2>Deleting</h2>
-      <p>Delete a link from your dashboard and it is removed then.&nbsp; Delete your account from the Account tab and your passkeys, tokens, and sessions go at once, and your links within the hour.</p>
+      <p>Delete a link from your dashboard and it is removed then.&#160; Delete your account from the Account tab and your passkeys, tokens, and sessions go at once, and your links within the hour.</p>
       <h2>iPhone App</h2>
-      <p>The app and App Clip do not ask for contacts or location, and read photos only when you pick one to share.&nbsp; A release build may send a crash report with your name, email, and file contents removed.</p>
+      <p>The app and App Clip do not ask for contacts or location, and read photos only when you pick one to share.&#160; A release build may send a crash report with your name, email, and file contents removed.</p>
       <h2>Questions</h2>
       <p>Write to <a href="mailto:support@fleetlink.online">support@fleetlink.online</a>.</p>
     </article>`
