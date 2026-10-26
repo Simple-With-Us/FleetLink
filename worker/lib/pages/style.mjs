@@ -168,6 +168,7 @@ td .rowmenu { position: relative; }
 }
 .table-wrap { overflow-x: auto; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 0.25rem 0.75rem; box-shadow: var(--shadow); margin-bottom: 1rem; }
 .table-wrap tr:last-child td { border-bottom: none; }
+.table-wrap td.day { white-space: nowrap; }
 .pill { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 0.12rem 0.55rem; border-radius: 999px; background: #e8efff; color: var(--brand-dark); margin-right: 0.25rem; white-space: nowrap; }
 .pill.gray { background: #eef2f7; color: var(--muted); }
 .pill.green { background: var(--ok-soft); color: var(--ok); }
