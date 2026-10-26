@@ -211,6 +211,7 @@ function dashboard(ctx, principal) {
           </form>
           <div id="bot-secret"></div>
         </div>
+        <div id="bot-defaults"></div>
         ${table("bot-rows", [["Bot"], ["Shares", "hide-sm"], ["Tokens"], ["Status"], [""]])}
         <p id="bot-empty" class="empty" hidden>No bots under your account yet.</p>
       </section>
