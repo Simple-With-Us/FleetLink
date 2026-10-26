@@ -790,9 +790,10 @@ private struct ShareFilesSection: View {
     let token: String
 
     @State private var shareFiles: [PortalShareFile] = []
+    @State private var loadFailed: Bool = false
     @State private var isLoading: Bool = true
     @State private var showFilePicker: Bool = false
-    @State private var busyPath: String? = nil
+    @State private var busyPaths: Set<String> = []
     @State private var errorText: String? = nil
 
     var body: some View {
@@ -807,6 +808,10 @@ private struct ShareFilesSection: View {
                     Text("Loading files\u{2026}")
                         .foregroundColor(.secondary)
                 }
+            } else if loadFailed {
+                Label("Could not load the file list.\u{00A0} Close and reopen to try again.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundColor(.red)
             } else if shareFiles.isEmpty {
                 Text("No files in this share yet.")
                     .font(.caption)
@@ -823,7 +828,7 @@ private struct ShareFilesSection: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        if busyPath == file.path {
+                        if busyPaths.contains(file.path) {
                             ProgressView()
                         } else {
                             Button(role: .destructive) {
@@ -844,7 +849,7 @@ private struct ShareFilesSection: View {
             } label: {
                 Label("Add File", systemImage: "plus")
             }
-            .disabled(busyPath != nil)
+            .disabled(!busyPaths.isEmpty)
         }
         .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let picked = urls.first {
@@ -852,17 +857,21 @@ private struct ShareFilesSection: View {
             }
         }
         .task {
-            shareFiles = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) ?? []
+            if let files = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) {
+                shareFiles = files
+            } else {
+                loadFailed = true
+            }
             isLoading = false
         }
     }
 
     private func removeFile(_ file: PortalShareFile) {
-        busyPath = file.path
+        busyPaths.insert(file.path)
         errorText = nil
         Task {
             let ok = await portalManager.removeShareFile(slug: share.slug, path: file.path, host: serverHost, token: token)
-            busyPath = nil
+            busyPaths.remove(file.path)
             if ok {
                 shareFiles.removeAll { $0.path == file.path }
             } else {
@@ -872,14 +881,14 @@ private struct ShareFilesSection: View {
     }
 
     private func addFile(_ url: URL) {
-        busyPath = url.lastPathComponent
+        busyPaths.insert(url.lastPathComponent)
         errorText = nil
         Task {
             let ok = await portalManager.addShareFile(slug: share.slug, fileURL: url, host: serverHost, token: token)
-            busyPath = nil
-            if ok {
-                shareFiles = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) ?? shareFiles
-            } else {
+            busyPaths.remove(url.lastPathComponent)
+            if ok, let files = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) {
+                shareFiles = files
+            } else if !ok {
                 errorText = portalManager.errorMessage ?? "Could not add the file.\u{00A0} Try again."
             }
         }

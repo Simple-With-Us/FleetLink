@@ -145,7 +145,9 @@ public struct PortalShareFile: Identifiable, Codable, Hashable, Sendable {
         if size < 1024 { return "\(size) B" }
         let kb = Double(size) / 1024
         if kb < 1024 { return String(format: "%.1f KB", kb) }
-        return String(format: "%.1f MB", kb / 1024)
+        let mb = kb / 1024
+        if mb < 1024 { return String(format: "%.1f MB", mb) }
+        return String(format: "%.1f GB", mb / 1024)
     }
 }
 
@@ -436,8 +438,8 @@ public final class PortalManager: ObservableObject {
         host: String = "https://fleetlink.online",
         token: String = ""
     ) async -> Bool {
-        guard let url = URL(string: "\(normalizedHost(host))/api/shares/\(Self.pathSegment(slug))") else { return false }
-        var request = authorizedRequest(url: url, method: "PATCH", token: token)
+        guard let requestURL = URL(string: "\(normalizedHost(host))/api/shares/\(Self.pathSegment(slug))") else { return false }
+        var request = authorizedRequest(url: requestURL, method: "PATCH", token: token)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var payload: [String: Any] = [:]
         if let teamId = teamId, !teamId.isEmpty {
@@ -453,7 +455,7 @@ public final class PortalManager: ObservableObject {
         }
         if let title = title { payload["title"] = title }
         if let description = description { payload["description"] = description }
-        if let url = url { payload["url"] = url }
+        if let destination = url { payload["url"] = destination }
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
         request.httpBody = body
         do {
@@ -508,7 +510,7 @@ public final class PortalManager: ObservableObject {
     public func addShareFile(slug: String, fileURL: URL, host: String = "https://fleetlink.online", token: String = "") async -> Bool {
         let accessing = fileURL.startAccessingSecurityScopedResource()
         defer { if accessing { fileURL.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: fileURL) else {
+        guard let stream = InputStream(url: fileURL), let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize else {
             errorMessage = "Could not read that file."
             return false
         }
@@ -516,7 +518,8 @@ public final class PortalManager: ObservableObject {
         guard let url = URL(string: "\(normalizedHost(host))/api/shares/\(Self.pathSegment(slug))/files/\(Self.pathSegment(name))") else { return false }
         var request = authorizedRequest(url: url, method: "PUT", token: token)
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-        request.httpBody = data
+        request.setValue(String(size), forHTTPHeaderField: "Content-Length")
+        request.httpBodyStream = stream
         do {
             let (responseData, http) = try await send(request)
             guard (200...299).contains(http.statusCode) else {
