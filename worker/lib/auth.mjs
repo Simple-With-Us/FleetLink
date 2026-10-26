@@ -1,18 +1,52 @@
 import { AGENT_SECRET, ensureAgentUser, isAgentSecret } from "./agents.mjs";
 import { safeEqual } from "./bytes.mjs";
+import { first } from "./db.mjs";
 import { getUser } from "./users.mjs";
 import { cookie, forbidden, HttpError, unauthorized } from "./http.mjs";
 import { OPERATOR_USER_ID } from "./schema.mjs";
 import { lookupSession, SESSION_COOKIE, SESSION_TOKEN } from "./sessions.mjs";
-import { API_TOKEN, lookupToken, tokenLimitsUser } from "./tokens.mjs";
+import { API_TOKEN, lookupToken, STANDARD_LIMITS_USER, tokenLimitsUser } from "./tokens.mjs";
 
 /**
  * A principal is who a request acts as:
- *   { kind: "session" | "token" | "operator" | "agent", user, isAdmin, sessionId?, token?, seat?, limitsUser?, viaCookie }
- * limitsUser, when set, is whose limits apply (a bot token that follows its manager).
+ *   { kind: "session" | "token" | "operator" | "agent", user, isAdmin, sessionId?, token?, seat?, limitsUser?, limitsOverride?, viaCookie }
+ * limitsUser, when set, is whose limits apply (a bot that follows its manager).
+ * limitsOverride, when set, clamps that tier with a bot's manual caps.
  * Every credential resolves to a real user row, including the operator secret,
  * which acts as the built-in operator account.
  */
+
+/** A bot's manual caps come from JSON on its user row; anything unusable is ignored. */
+export function parseAgentLimits(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The limit policy a bot works under (users.agent_limit_mode):
+ *   'legacy'  - the shipped behavior:  the bot's own, widest tier.  Existing
+ *               bots keep it; nothing about their limits changes.
+ *   'account' - the bot follows its manager's live allowance, so a change to
+ *               the manager reaches the bot on its next request and the bot is
+ *               never wider than its manager.  A missing or inactive manager
+ *               falls back to the standard person's limits, never wider.
+ *   'manual'  - the manager's live allowance clamped by the bot's stored caps;
+ *               a cap can only tighten, never widen.
+ * A bot without a mode, or not a bot at all:  no resolution.
+ */
+export async function agentLimitsResolution(env, user) {
+  const mode = user?.kind === "agent" ? user.agent_limit_mode : null;
+  if (mode !== "account" && mode !== "manual") return {};
+  const manager = user.manager_id ? await first(env.DB, "SELECT * FROM users WHERE id = ? AND status = 'active' AND kind = 'person'", user.manager_id) : null;
+  const limitsUser = manager ?? STANDARD_LIMITS_USER;
+  if (mode === "manual") return { limitsUser, limitsOverride: parseAgentLimits(user.agent_limits) };
+  return { limitsUser };
+}
 
 export function operatorSecret(env) {
   return String(env?.ADMIN_SECRET || env?.FLEET_ADMIN_SECRET || "").trim();
@@ -38,14 +72,16 @@ async function operatorPrincipal(env) {
 /** The Agent-Sync server acting for one seat (agents.mjs).  Agents are never admins. */
 async function agentPrincipal(env, request) {
   const user = await ensureAgentUser(env, request.headers.get("x-fleet-seat"));
-  return { ...principalFor("agent", user), isAdmin: false, seat: user.agent_seat };
+  const botLimits = await agentLimitsResolution(env, user);
+  return { ...principalFor("agent", user), isAdmin: false, seat: user.agent_seat, ...(botLimits.limitsUser ? { limitsUser: botLimits.limitsUser } : {}), ...(botLimits.limitsOverride ? { limitsOverride: botLimits.limitsOverride } : {}) };
 }
 
 async function fromToken(env, secret) {
   const found = await lookupToken(env, secret);
   if (!found) throw unauthorized("That API token is not valid, has expired, or was revoked.");
-  const limitsUser = await tokenLimitsUser(env, found.user, found.token);
-  return principalFor("token", found.user, { token: found.token, ...(limitsUser ? { limitsUser } : {}) });
+  const botLimits = await agentLimitsResolution(env, found.user);
+  const limitsUser = botLimits.limitsUser ?? (await tokenLimitsUser(env, found.user, found.token));
+  return principalFor("token", found.user, { token: found.token, ...(limitsUser ? { limitsUser } : {}), ...(botLimits.limitsOverride ? { limitsOverride: botLimits.limitsOverride } : {}) });
 }
 
 async function fromSession(env, token, viaCookie) {

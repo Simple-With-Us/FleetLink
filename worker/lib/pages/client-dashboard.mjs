@@ -157,8 +157,90 @@ export const DASHBOARD_JS = String.raw`
       h("div", { class: "actions mt" },
         save,
         h("button", { type: "button", class: "secondary", text: "Cancel", onclick: function () { editorRow.remove(); } })));
-    var editorRow = h("tr", { class: "editor-row" }, h("td", { colspan: "5" }, h("div", { class: "card" }, h("h3", { text: "Edit " + share.slug }), form)));
+    var card = h("div", { class: "card" }, h("h3", { text: "Edit " + share.slug }), form);
+    if (share.kind !== "link" && edit) {
+      var filesBox = h("div", null, h("p", { class: "small muted", text: "Loading files…" }));
+      card.append(h("h3", { class: "mt", text: "Files" }), filesBox);
+      filesEditor(share, filesBox);
+    }
+    var editorRow = h("tr", { class: "editor-row" }, h("td", { colspan: "5" }, card));
     row.after(editorRow);
+  }
+
+  // Add files to, or remove files from, an existing share
+  // (PUT/DELETE /api/shares/:slug/files/*path).
+  function filesEditor(share, box) {
+    FL.api("GET", "/api/shares/" + encodeURIComponent(share.slug)).then(function (data) {
+      render(data.share);
+    }).catch(function (err) {
+      box.replaceChildren(h("p", { class: "notice error", text: err.message }));
+    });
+
+    function render(detail) {
+      var files = detail.files || [];
+      var kids = [];
+      if (files.length) {
+        kids.push(h("div", { class: "table-wrap" }, h("table", null, h("tbody", null, files.map(function (f) {
+          return h("tr", null,
+            h("td", null, h("a", { href: f.url, target: "_blank", rel: "noopener", class: "mono", text: f.path })),
+            h("td", { class: "small muted", text: FL.bytes(f.size) }),
+            h("td", { class: "row-actions" }, h("button", { type: "button", class: "small danger", text: "Remove", title: "Remove this file from the share", onclick: function () { removeFile(f); } })));
+        })))));
+      } else {
+        kids.push(h("p", { class: "small muted", text: "No files yet." }));
+      }
+      var picker = h("input", { type: "file", name: "addfiles", multiple: true });
+      var add = h("button", { type: "submit", class: "secondary", text: "Add Files" });
+      var status = h("p", { class: "small muted" });
+      kids.push(h("form", { class: "actions mt", onsubmit: function (e) { addFiles(e, picker, add, status); } }, picker, add), status);
+      box.replaceChildren.apply(box, kids);
+    }
+
+    async function addFiles(e, picker, button, status) {
+      e.preventDefault();
+      var files = Array.prototype.slice.call(picker.files);
+      if (!files.length) { FL.toast("Choose at least one file.", "error"); return; }
+      FL.busy(button, true);
+      try {
+        for (var i = 0; i < files.length; i++) {
+          var file = files[i];
+          var path = (file.webkitRelativePath || file.name).split("/").map(encodeURIComponent).join("/");
+          status.textContent = "Uploading " + (i + 1) + " of " + files.length + ": " + file.name;
+          var res = await fetch("/api/shares/" + encodeURIComponent(share.slug) + "/files/" + path, {
+            method: "PUT", credentials: "same-origin", body: file,
+            headers: { "Content-Type": file.type || "application/octet-stream", Accept: "application/json" }
+          });
+          if (!res.ok) {
+            var err = await res.json().catch(function () { return {}; });
+            throw new Error((err.error || "Upload failed.") + "  (" + file.name + ")");
+          }
+        }
+        FL.toast("Added " + files.length + " file" + (files.length === 1 ? "" : "s") + " to " + share.slug + ".");
+        refresh();
+      } catch (err) {
+        FL.fail(err);
+      } finally {
+        status.textContent = "";
+        FL.busy(button, false);
+      }
+    }
+
+    async function removeFile(f) {
+      if (!FL.confirm("Remove " + f.path + " from " + share.slug + "?  Its link stops working.")) return;
+      try {
+        var path = f.path.split("/").map(encodeURIComponent).join("/");
+        await FL.api("DELETE", "/api/shares/" + encodeURIComponent(share.slug) + "/files/" + path);
+        FL.toast("Removed " + f.path + ".");
+        refresh();
+      } catch (err) { FL.fail(err); }
+    }
+
+    function refresh() {
+      FL.api("GET", "/api/shares/" + encodeURIComponent(share.slug)).then(function (data) {
+        render(data.share);
+        loadShares(false).catch(FL.fail);
+      }).catch(FL.fail);
+    }
   }
 
   async function saveEditor(e, share, row, extendSelect, never, exact, button) {
@@ -804,21 +886,113 @@ export const DASHBOARD_JS = String.raw`
         loadBots();
       } catch (err) { FL.fail(err); }
     } }));
-    actions.append(h("button", { type: "button", class: "small secondary", text: "Rename", onclick: async function () {
-      var name = window.prompt("Display name", b.display_name);
-      if (!name) return;
-      try { await FL.api("PATCH", base, { display_name: name }); loadBots(); } catch (err) { FL.fail(err); }
-    } }));
+    actions.append(h("button", { type: "button", class: "small secondary", text: "Edit", title: "Name and limits", onclick: function () { openBotEditor(b, row); } }));
     actions.append(h("button", { type: "button", class: "small " + (active ? "danger" : "secondary"), text: active ? "Disable" : "Enable", onclick: async function () {
       if (active && !FL.confirm("Disable " + b.display_name + "?  It stops working everywhere until you enable it.")) return;
       try { await FL.api("PATCH", base, { status: active ? "disabled" : "active" }); loadBots(); } catch (err) { FL.fail(err); }
     } }));
-    return h("tr", null,
-      h("td", null, h("strong", { text: b.display_name }), h("div", { class: "small muted mono", text: b.seat })),
+    var limitNote = b.limit_mode === "manual"
+      ? h("div", { class: "small muted", text: "Manual maxes: " + botCapsText(b.limits || {}) })
+      : b.limit_mode === "account"
+        ? h("div", { class: "small muted", text: "Follows your account limits" })
+        : h("div", { class: "small muted", text: "Widest limits (fleet default)" });
+    var row = h("tr", null,
+      h("td", null, h("strong", { text: b.display_name }), h("div", { class: "small muted mono", text: b.seat }), limitNote),
       h("td", { class: "hide-sm" }, b.usage.shares + " · " + FL.bytes(b.usage.bytes)),
       h("td", null, String(b.token_count), b.token_last_used_at ? h("div", { class: "small muted", text: "used " + FL.relative(b.token_last_used_at) }) : null),
       h("td", null, h("span", { class: "pill" + (active ? " green" : " red"), text: b.status })),
       h("td", { class: "row-actions" }, rowMenu(actions)));
+    return row;
+  }
+
+  var BOT_CAP_FIELDS = [
+    ["max_file_mb", "Max file size (MB)"],
+    ["max_share_mb", "Max share size (MB)"],
+    ["max_share_files", "Max files per share"],
+    ["max_file_days", "Max file share lifetime (days)"],
+    ["max_link_days", "Max link lifetime (days)"],
+    ["max_renewals", "Max renewals"],
+    ["max_forever_mb", "Max never-expiring share size (MB)"]
+  ];
+
+  function botCapsText(limits) {
+    var parts = [];
+    BOT_CAP_FIELDS.forEach(function (pair) {
+      if (limits[pair[0]] != null) {
+        var val = pair[0].endsWith("_mb") ? FL.bytes(limits[pair[0]] * 1048576) : limits[pair[0]] + (pair[0].endsWith("_days") ? " days" : "");
+        parts.push(pair[1].replace(/ \(.*\)/, "").toLowerCase() + " " + val);
+      }
+    });
+    return parts.length ? parts.join(" · ") : "same as your account";
+  }
+
+  // One inline bot editor at a time, like the share editor.
+  function openBotEditor(b, row) {
+    document.querySelectorAll("tr.bot-editor-row").forEach(function (r) { r.remove(); });
+    var mode = b.limit_mode === "account" || b.limit_mode === "manual" ? b.limit_mode : "legacy";
+    var caps = b.limits || {};
+    var legacy = h("input", { type: "radio", name: "limit_mode", value: "legacy", checked: mode === "legacy" });
+    var account = h("input", { type: "radio", name: "limit_mode", value: "account", checked: mode === "account" });
+    var manual = h("input", { type: "radio", name: "limit_mode", value: "manual", checked: mode === "manual" });
+    var capInputs = BOT_CAP_FIELDS.map(function (pair) {
+      return field(pair[1], h("input", { type: "number", name: pair[0], min: "1", step: "1", value: caps[pair[0]] != null ? String(caps[pair[0]]) : "", placeholder: "Account max", disabled: mode !== "manual" }));
+    });
+    var capsBox = h("div", { class: "row" }, capInputs);
+    function syncCaps() {
+      var on = manual.checked;
+      capInputs.forEach(function (wrap) { wrap.querySelector("input").disabled = !on; });
+    }
+    legacy.addEventListener("change", syncCaps);
+    account.addEventListener("change", syncCaps);
+    manual.addEventListener("change", syncCaps);
+    var save = h("button", { type: "submit", text: "Save Changes" });
+    var form = h("form", { onsubmit: function (e) { saveBotEditor(e, b, editorRow, save); } },
+      h("div", { class: "row" }, field("Display name", h("input", { type: "text", name: "display_name", value: b.display_name, maxlength: "64" }))),
+      h("div", { class: "row" },
+        h("div", null, h("label", null, legacy, " Widest limits (fleet default)"), h("div", { class: "small muted", text: "The shipped behavior:  the bot keeps the fleet's admin-tier maximums.  Every existing bot works this way." })),
+        h("div", null, h("label", null, account, " Follow my account limits"), h("div", { class: "small muted", text: "The bot always works with your current allowances, adjusting automatically when they change.  Never wider than your own." })),
+        h("div", null, h("label", null, manual, " Manual maxes"), h("div", { class: "small muted", text: "Caps on your account allowances for this bot.  A cap only tightens;  it can never raise them." }))),
+      capsBox,
+      h("div", { class: "actions mt" },
+        save,
+        h("button", { type: "button", class: "secondary", text: "Cancel", onclick: function () { editorRow.remove(); } })));
+    var editorRow = h("tr", { class: "bot-editor-row" }, h("td", { colspan: "5" }, h("div", { class: "card" }, h("h3", { text: "Edit " + b.display_name }), form)));
+    row.after(editorRow);
+  }
+
+  async function saveBotEditor(e, b, editorRow, button) {
+    e.preventDefault();
+    var form = e.currentTarget, f = FL.form(form);
+    var body = {};
+    var name = String(f.display_name || "").trim();
+    if (!name) { FL.toast("A bot needs a display name.", "error"); return; }
+    if (name !== b.display_name) body.display_name = name;
+    var mode = f.limit_mode === "account" || f.limit_mode === "manual" ? f.limit_mode : "legacy";
+    if (mode !== (b.limit_mode === "account" || b.limit_mode === "manual" ? b.limit_mode : "legacy")) body.limit_mode = mode;
+    if (mode === "manual") {
+      var limits = {};
+      for (var i = 0; i < BOT_CAP_FIELDS.length; i++) {
+        var key = BOT_CAP_FIELDS[i][0];
+        var raw = String(f[key] || "").trim();
+        if (!raw) { limits[key] = null; continue; }
+        var n = Number(raw);
+        if (!Number.isInteger(n) || n <= 0) { FL.toast(BOT_CAP_FIELDS[i][1] + " needs a whole number above zero.", "error"); return; }
+        limits[key] = n;
+      }
+      body.limits = limits;
+    }
+    if (!Object.keys(body).length) { FL.toast("Nothing changed."); return; }
+    FL.busy(button, true);
+    try {
+      await FL.api("PATCH", "/api/bots/" + encodeURIComponent(b.id), body);
+      FL.toast("Saved " + name + ".");
+      editorRow.remove();
+      loadBots().catch(FL.fail);
+    } catch (err) {
+      FL.fail(err);
+    } finally {
+      FL.busy(button, false);
+    }
   }
 
   async function addBot(e) {

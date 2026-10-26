@@ -123,7 +123,7 @@ export async function lookupToken(env, secret) {
 }
 
 /** The standard person's limits:  what a token that follows an inactive or missing manager falls back to. */
-const STANDARD_LIMITS_USER = Object.freeze({ id: null, role: "user", kind: "person", storage_quota_bytes: null, token_quota: null });
+export const STANDARD_LIMITS_USER = Object.freeze({ id: null, role: "user", kind: "person", storage_quota_bytes: null, token_quota: null });
 
 /**
  * Whose limits a token works under.  A bot token with limits_from 'manager'
