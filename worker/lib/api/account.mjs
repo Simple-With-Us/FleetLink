@@ -9,13 +9,14 @@ import {
   registerOptions, registerVerify, removePasskey, renamePasskey
 } from "../passkeys.mjs";
 import { clearSessionCookieHeader, deleteSessionByToken, listSessions, revokeOtherSessions, revokeSession, SESSION_COOKIE } from "../sessions.mjs";
-import { addMember, createTeam, deleteTeam, getTeam, listTeams, removeMember, renameTeam, updateMember } from "../teams.mjs";
+import { addMember, createTeam, deleteTeam, getTeam, listTeams, membership, removeMember, renameTeam, updateMember } from "../teams.mjs";
 import { createToken, listTokens, revokeToken } from "../tokens.mjs";
 import { accountSummary, assertEmailFree, cleanDisplayName, cleanEmail, closeAccount, effectiveQuotas } from "../users.mjs";
 
 const UpdateMeBody = z.object({
   display_name: z.string().max(200).optional(),
-  email: z.string().max(254).nullable().optional()
+  email: z.string().max(254).nullable().optional(),
+  default_team_id: z.string().max(64).nullable().optional()
 }).strict();
 
 const DeleteMeBody = z.object({ confirm: z.literal("delete my account") }).strict();
@@ -76,6 +77,19 @@ export function accountRoutes(router) {
       await assertEmailFree(ctx.env.DB, email, principal.user.id);
       sets.push("email = ?");
       args.push(email);
+    }
+    if (input.default_team_id !== undefined) {
+      const trimmed = input.default_team_id ? String(input.default_team_id).trim() : "";
+      const defTeam = trimmed || null;
+      if (defTeam) {
+        const team = await first(ctx.env.DB, "SELECT id FROM teams WHERE id = ?", defTeam);
+        if (!team) throw badRequest("Team not found.");
+        if (!principal.isAdmin && !(await membership(ctx.env, defTeam, principal.user.id))) {
+          throw badRequest("You are not a member of that team.");
+        }
+      }
+      sets.push("default_team_id = ?");
+      args.push(defTeam);
     }
     if (sets.length) {
       try {

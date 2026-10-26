@@ -74,9 +74,20 @@ test("bots and the owner edit and overwrite each other's team work;  the owner m
   // Even a view-only team share:  bots are team admins.
   await callJson(env, "PATCH", "/api/shares/jay-brief", { auth: jay, json: { team_access: "view" } });
   assert.equal((await rpcTool(env, bot("GB-FIXER"), "fleetlink_add_file", { slug: "jay-brief", path: "more.md", text: "x" })).error, null);
-  // Jay's personal shares stay his.
+  // Jay's personal shares stay protected from team members, but his agents can view and edit them.
   await callJson(env, "POST", "/api/shares", { auth: jay, json: { slug: "jay-private" } });
-  assert.equal((await rpcTool(env, bot("CODEX"), "fleetlink_get_share", { slug: "jay-private" })).error, "Share not found.");
+  const jayPriv = await rpcTool(env, bot("CODEX"), "fleetlink_get_share", { slug: "jay-private" });
+  assert.equal(jayPriv.error, null);
+  assert.equal(jayPriv.data.share.can_edit, true);
+  assert.equal(jayPriv.data.share.can_manage, false);
+  assert.equal((await rpcTool(env, bot("CODEX"), "fleetlink_add_file", { slug: "jay-private", path: "agent.md", markdown: "from bot" })).error, null);
+  assert.equal(await (await call(env, "GET", "/jay-private/agent.md?raw=1")).text(), "from bot");
+  const eve = await signUp(env, "Eve Out", { email: "eveout@example.com" });
+  assert.equal((await callJson(env, "GET", "/api/shares/jay-private", { auth: eve })).status, 404);
+  assert.equal((await callJson(env, "GET", "/api/shares?scope=manager", { auth: eve })).status, 403);
+  const mgrList = await callJson(env, "GET", "/api/shares?scope=manager", bot("CODEX"));
+  assert.equal(mgrList.status, 200);
+  assert.ok(mgrList.data.shares.some((s) => s.slug === "jay-private"));
 
   // A bot's personal share is hidden from the other bots, but its manager sees and manages it.
   const secret = await rpcTool(env, bot("AG"), "fleetlink_create_share", { text: "draft", slug: "ag-draft", personal: true });

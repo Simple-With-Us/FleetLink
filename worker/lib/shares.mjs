@@ -198,10 +198,18 @@ export const CreateShareBody = z.object({
  * or names another team.  People's shares stay personal by default.
  */
 async function defaultTeam(env, principal, input) {
-  if (input.team_id !== undefined && input.team_id !== "") return input.team_id;
-  if (principal.user.kind !== "agent" || principal.token?.team_id) return null;
+  if (input.team_id === "" || input.team_id === null) return null;
+  if (input.team_id !== undefined) return input.team_id;
   if ([true, "true", "1"].includes(input.personal)) return null;
-  return (await membership(env, FLEET_TEAM_ID, principal.user.id)) ? FLEET_TEAM_ID : null;
+  if (principal.token?.team_id) return principal.token.team_id;
+  if (principal.user.kind === "agent") {
+    return (await membership(env, FLEET_TEAM_ID, principal.user.id)) ? FLEET_TEAM_ID : null;
+  }
+  if (principal.user.default_team_id) {
+    const isMember = await membership(env, principal.user.default_team_id, principal.user.id);
+    if (isMember) return principal.user.default_team_id;
+  }
+  return null;
 }
 
 export const TEAM_ACCESS = ["view", "edit"];
@@ -596,8 +604,14 @@ export async function listShares(env, principal, { scope = "mine", team_id: team
   } else if (scope === "bots") {
     clauses.push("u.manager_id = ?");
     args.push(principal.user.id);
+  } else if (scope === "manager") {
+    if (principal.user.kind !== "agent") throw forbidden("Agents only.");
+    const mgrId = principal.user.manager_id || (await fleetOwner(env))?.id;
+    if (!mgrId) throw badRequest("No manager found for this account.");
+    clauses.push("s.owner_id = ?");
+    args.push(mgrId);
   } else {
-    throw badRequest("scope is mine, bots, team, teams, or all.");
+    throw badRequest("scope is mine, bots, manager, team, teams, or all.");
   }
   const term = String(q || "").trim().toLowerCase().slice(0, 100);
   if (term) {
@@ -622,8 +636,9 @@ export async function listShares(env, principal, { scope = "mine", team_id: team
   const more = rows.length > pageSize;
   const page = rows.slice(0, pageSize);
   const roles = principal.isAdmin ? null : await teamRoles(env, principal.user.id);
+  const ownerId = principal.user.kind === "agent" ? (principal.user.manager_id || (await fleetOwner(env))?.id) : null;
   const manageable = (row) => principal.isAdmin || row.owner_id === principal.user.id || row.owner_manager_id === principal.user.id || ["owner", "admin"].includes(roles?.get(row.team_id));
-  const editable = (row) => manageable(row) || (row.team_access === "edit" && roles?.has(row.team_id));
+  const editable = (row) => manageable(row) || (row.team_access === "edit" && roles?.has(row.team_id)) || Boolean(ownerId && row.owner_id === ownerId);
   const last = page[page.length - 1];
   return {
     rows: page.map((row) => ({ row, canManage: manageable(row), canEdit: editable(row) })),

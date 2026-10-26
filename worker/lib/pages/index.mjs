@@ -105,6 +105,8 @@ function dashboard(ctx, principal) {
         </form>
         <div class="chip-row" id="share-chips">
           <button type="button" class="chip active" data-filter="all">All</button>
+          <button type="button" class="chip" data-filter="personal">Personal</button>
+          <button type="button" class="chip" data-filter="team">Team</button>
           <button type="button" class="chip" data-filter="files">Files</button>
           <button type="button" class="chip" data-filter="link">Links</button>
           <button type="button" class="chip" data-filter="forever">Forever</button>
@@ -216,11 +218,13 @@ function dashboard(ctx, principal) {
 
       <section id="panel-account" role="tabpanel" hidden>
         <form id="profile-form" class="card">
-          <h2>Profile</h2>
+          <h2>Profile &amp; Preferences</h2>
           <div class="row">
             <div><label for="pf-name">Display name</label><input id="pf-name" name="display_name" type="text" maxlength="64" required></div>
             <div><label for="pf-email">Email (optional)</label><input id="pf-email" name="email" type="email" maxlength="254"></div>
+            <div><label for="pf-default-team">Default new share destination</label><select id="pf-default-team" name="default_team_id" data-teams></select></div>
           </div>
+          <p class="small muted">Choose whether your new uploads land in your personal space or a team by default.</p>
           <div class="actions mt"><button type="submit">Save</button></div>
         </form>
         <div class="card">
