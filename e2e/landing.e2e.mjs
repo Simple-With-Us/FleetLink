@@ -53,3 +53,28 @@ test('landing branding, playback and safe policy fallbacks on signed-in/out mobi
   await missing.close();
  } finally {await browser.close();await server.close();}
 });
+
+test('standalone browser icon pixels stay correct independent of container encoding',async()=>{
+ const {createHash}=await import('node:crypto');
+ const browser=await chromium.launch();const page=await browser.newPage();
+ try {
+  // Pin decoded RGBA pixels from the independently inspected standalone art.
+  const cases=[
+   ['favicon-light-512.png',512,512,'1ce7489400b6aa3497120dce0aba7a7f3d9cdb1dfdf8c634e896679b4b5bc45b'],
+   ['favicon.ico',48,48,'9bf1ec20fcfad2893f5ed3c6640892955197fed877e5e7012249d11cf1b8634c'],
+   ['apple-touch-icon.png',180,180,'5500e939ae0feea8b127bb2cf3bf4d23dd78ca8b7396e5143820bc2bcc8a09ac']
+  ];
+  for(const [name,width,height,hash] of cases){
+   const mime=name.endsWith('.ico')?'image/x-icon':'image/png';
+   const src='data:'+mime+';base64,'+readFileSync(new URL('../assets/web/'+name,import.meta.url)).toString('base64');
+   const decoded=await page.evaluate(async src=>{
+    const image=new Image();image.src=src;await image.decode();
+    const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+    const context=canvas.getContext('2d');context.drawImage(image,0,0);
+    return {width:canvas.width,height:canvas.height,pixels:Array.from(context.getImageData(0,0,canvas.width,canvas.height).data)};
+   },src);
+   assert.equal(decoded.width,width,name);assert.equal(decoded.height,height,name);
+   assert.equal(createHash('sha256').update(Buffer.from(decoded.pixels)).digest('hex'),hash,name+' standalone pixels');
+  }
+ } finally {await browser.close();}
+});
