@@ -136,7 +136,7 @@ export function botRoutes(router) {
         // Merge into the stored caps:  a partial update must not silently
         // widen caps it never mentions back to the account max;  an explicit
         // null deletes that cap.
-        const caps = { ...(parseAgentLimits(bot.agent_limits) || {}) };
+        const caps = input.limits === null ? {} : { ...(parseAgentLimits(bot.agent_limits) || {}) };
         if (input.limits) for (const [key, value] of Object.entries(input.limits)) {
           if (value == null) delete caps[key]; else caps[key] = value;
         }

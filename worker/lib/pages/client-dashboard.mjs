@@ -974,7 +974,7 @@ export const DASHBOARD_JS = String.raw`
       for (var i = 0; i < BOT_CAP_FIELDS.length; i++) {
         var key = BOT_CAP_FIELDS[i][0];
         var raw = String(f[key] || "").trim();
-        if (!raw) continue;
+        if (!raw) { limits[key] = null; continue; }
         var n = Number(raw);
         if (!Number.isInteger(n) || n <= 0) { FL.toast(BOT_CAP_FIELDS[i][1] + " needs a whole number above zero.", "error"); return; }
         limits[key] = n;

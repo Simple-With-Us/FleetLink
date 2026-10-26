@@ -326,3 +326,11 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
   const eve = await signUp(env, "Eve", { email: "eve2@example.com" });
   assert.equal((await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: eve, json: { limit_mode: "manual" } })).status, 404);
 });
+
+ test("limits null clears all caps while omitted limits preserves them", async () => {
+ const {env,jay}=await fleet(); await callJson(env,"GET","/api/me",{auth:jay});
+ const set=(json)=>callJson(env,"PATCH","/api/bots/usr_agent_ma",{auth:jay,json});
+ await set({limit_mode:"manual",limits:{max_file_mb:2,max_file_days:3}});
+ assert.deepEqual((await set({display_name:"MA renamed"})).data.bot.limits,{max_file_mb:2,max_file_days:3});
+ assert.equal((await set({limits:null})).data.bot.limits,null);
+ });
