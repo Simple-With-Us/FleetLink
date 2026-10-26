@@ -73,6 +73,10 @@ public struct PortalShare: Identifiable, Codable, Hashable, Sendable {
         mode == "redirect"
     }
 
+    public var isFilesShare: Bool {
+        mode == "files"
+    }
+
     public var formattedBytes: String {
         if isRedirect { return "Short link" }
         if bytes < 1024 { return "\(bytes) B" }
@@ -125,6 +129,23 @@ public struct PortalShare: Identifiable, Codable, Hashable, Sendable {
         guard let exp = expiresDate else { return false }
         let remaining = exp.timeIntervalSinceNow
         return remaining > 0 && remaining < 86400 // under 24 hours
+    }
+}
+
+public struct PortalShareFile: Identifiable, Codable, Hashable, Sendable {
+    public var id: String { path }
+    public let path: String
+    public let size: Int64
+    public let content_type: String?
+    public let url: String?
+
+    public var fileName: String { path.split(separator: "/").last.map(String.init) ?? path }
+
+    public var formattedSize: String {
+        if size < 1024 { return "\(size) B" }
+        let kb = Double(size) / 1024
+        if kb < 1024 { return String(format: "%.1f KB", kb) }
+        return String(format: "%.1f MB", kb / 1024)
     }
 }
 
@@ -201,6 +222,13 @@ public enum PortalError: LocalizedError, Sendable {
 }
 
 /// A share as the account API returns it (`GET /api/shares`, `GET /api/shares/:slug`).
+private struct ApiShareDetailEnvelope: Decodable {
+    struct Detail: Decodable {
+        let files: [PortalShareFile]?
+    }
+    let share: Detail
+}
+
 private struct ApiShare: Decodable {
     struct Team: Decodable {
         let id: String
@@ -404,6 +432,7 @@ public final class PortalManager: ObservableObject {
         clearPassword: Bool = false,
         title: String? = nil,
         description: String? = nil,
+        url: String? = nil,
         host: String = "https://fleetlink.online",
         token: String = ""
     ) async -> Bool {
@@ -424,6 +453,7 @@ public final class PortalManager: ObservableObject {
         }
         if let title = title { payload["title"] = title }
         if let description = description { payload["description"] = description }
+        if let url = url { payload["url"] = url }
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
         request.httpBody = body
         do {
@@ -440,6 +470,67 @@ public final class PortalManager: ObservableObject {
             return true
         } catch {
             errorMessage = "Could not update link access.\u{00A0} Check the connection and try again."
+            return false
+        }
+    }
+
+    public func fetchShareFiles(slug: String, host: String = "https://fleetlink.online", token: String = "") async -> [PortalShareFile]? {
+        guard let url = URL(string: "\(normalizedHost(host))/api/shares/\(Self.pathSegment(slug))") else { return nil }
+        do {
+            let (data, http) = try await send(authorizedRequest(url: url, method: "GET", token: token))
+            guard (200...299).contains(http.statusCode) else { return nil }
+            let envelope = try JSONDecoder().decode(ApiShareDetailEnvelope.self, from: data)
+            return envelope.share.files ?? []
+        } catch { return nil }
+    }
+
+    public func removeShareFile(slug: String, path: String, host: String = "https://fleetlink.online", token: String = "") async -> Bool {
+        let encoded = path.split(separator: "/").map { Self.pathSegment(String($0)) }.joined(separator: "/")
+        guard let url = URL(string: "\(normalizedHost(host))/api/shares/\(Self.pathSegment(slug))/files/\(encoded)") else { return false }
+        do {
+            let (data, http) = try await send(authorizedRequest(url: url, method: "DELETE", token: token))
+            guard (200...299).contains(http.statusCode) else {
+                errorMessage = serverMessage(from: data, fallback: "Could not remove the file.")
+                return false
+            }
+            if let envelope = try? JSONDecoder().decode(ApiShareEnvelope.self, from: data) {
+                let updated = Self.portalShare(envelope.share)
+                shares = shares.map { $0.slug == slug ? updated : $0 }
+                computeAnalytics()
+            }
+            return true
+        } catch {
+            errorMessage = "Could not remove the file.\u{00A0} Check the connection and try again."
+            return false
+        }
+    }
+
+    public func addShareFile(slug: String, fileURL: URL, host: String = "https://fleetlink.online", token: String = "") async -> Bool {
+        let accessing = fileURL.startAccessingSecurityScopedResource()
+        defer { if accessing { fileURL.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: fileURL) else {
+            errorMessage = "Could not read that file."
+            return false
+        }
+        let name = fileURL.lastPathComponent
+        guard let url = URL(string: "\(normalizedHost(host))/api/shares/\(Self.pathSegment(slug))/files/\(Self.pathSegment(name))") else { return false }
+        var request = authorizedRequest(url: url, method: "PUT", token: token)
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.httpBody = data
+        do {
+            let (responseData, http) = try await send(request)
+            guard (200...299).contains(http.statusCode) else {
+                errorMessage = serverMessage(from: responseData, fallback: "Could not add the file.")
+                return false
+            }
+            if let envelope = try? JSONDecoder().decode(ApiShareEnvelope.self, from: responseData) {
+                let updated = Self.portalShare(envelope.share)
+                shares = shares.map { $0.slug == slug ? updated : $0 }
+                computeAnalytics()
+            }
+            return true
+        } catch {
+            errorMessage = "Could not add the file.\u{00A0} Check the connection and try again."
             return false
         }
     }

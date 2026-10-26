@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 public struct PortalView: View {
     @ObservedObject var portalManager: PortalManager
@@ -632,6 +633,7 @@ private struct ShareManageSheet: View {
 
     @State private var title: String
     @State private var description: String
+    @State private var destination: String
     @State private var isTeam: Bool
     @State private var selectedTeamId: String
     @State private var teamAccess: String
@@ -648,6 +650,7 @@ private struct ShareManageSheet: View {
         self.onDismiss = onDismiss
         _title = State(initialValue: share.title ?? "")
         _description = State(initialValue: share.description ?? "")
+        _destination = State(initialValue: share.target_url ?? "")
         _isTeam = State(initialValue: share.is_team ?? false)
         _selectedTeamId = State(initialValue: share.team_id ?? (portalManager.teams.first?.id ?? ""))
         _teamAccess = State(initialValue: share.team_access ?? "edit")
@@ -701,6 +704,22 @@ private struct ShareManageSheet: View {
                     }
                 }
 
+                if share.isRedirect {
+                    Section("Destination") {
+                        TextField("https://example.com/page", text: $destination)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Text("Where this short link sends people.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if share.isFilesShare {
+                    ShareFilesSection(share: share, portalManager: portalManager, serverHost: serverHost, token: token)
+                }
+
                 Section("Details") {
                     TextField("Title", text: $title)
                     TextField("Description", text: $description)
@@ -739,6 +758,8 @@ private struct ShareManageSheet: View {
             let teamId = isTeam ? selectedTeamId : nil
             let clearPassword = share.password_protected && !passwordProtected
             let newPassword = passwordProtected && !passwordInput.isEmpty ? passwordInput : nil
+            let trimmedDestination = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+            let newDestination = share.isRedirect && !trimmedDestination.isEmpty && trimmedDestination != (share.target_url ?? "") ? trimmedDestination : nil
             let ok = await portalManager.updateShareAccess(
                 slug: share.slug,
                 teamId: teamId,
@@ -747,6 +768,7 @@ private struct ShareManageSheet: View {
                 clearPassword: clearPassword,
                 title: title.isEmpty ? nil : title,
                 description: description.isEmpty ? nil : description,
+                url: newDestination,
                 host: serverHost,
                 token: token
             )
@@ -755,6 +777,110 @@ private struct ShareManageSheet: View {
                 onDismiss()
             } else {
                 errorMessage = portalManager.errorMessage ?? "Could not update settings.\u{00A0} Try again."
+            }
+        }
+    }
+}
+
+/// Files in an existing file share:  list, remove, and add via the share-files API.
+private struct ShareFilesSection: View {
+    let share: PortalShare
+    @ObservedObject var portalManager: PortalManager
+    let serverHost: String
+    let token: String
+
+    @State private var shareFiles: [PortalShareFile] = []
+    @State private var isLoading: Bool = true
+    @State private var showFilePicker: Bool = false
+    @State private var busyPath: String? = nil
+    @State private var errorText: String? = nil
+
+    var body: some View {
+        Section("Files") {
+            if let error = errorText {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+            }
+            if isLoading {
+                HStack {
+                    ProgressView()
+                    Text("Loading files\u{2026}")
+                        .foregroundColor(.secondary)
+                }
+            } else if shareFiles.isEmpty {
+                Text("No files in this share yet.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(shareFiles) { file in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(file.fileName)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Text(file.formattedSize)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        if busyPath == file.path {
+                            ProgressView()
+                        } else {
+                            Button(role: .destructive) {
+                                removeFile(file)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Remove \(file.fileName)")
+                        }
+                    }
+                }
+            }
+            Button {
+                showFilePicker = true
+            } label: {
+                Label("Add File", systemImage: "plus")
+            }
+            .disabled(busyPath != nil)
+        }
+        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let picked = urls.first {
+                addFile(picked)
+            }
+        }
+        .task {
+            shareFiles = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) ?? []
+            isLoading = false
+        }
+    }
+
+    private func removeFile(_ file: PortalShareFile) {
+        busyPath = file.path
+        errorText = nil
+        Task {
+            let ok = await portalManager.removeShareFile(slug: share.slug, path: file.path, host: serverHost, token: token)
+            busyPath = nil
+            if ok {
+                shareFiles.removeAll { $0.path == file.path }
+            } else {
+                errorText = portalManager.errorMessage ?? "Could not remove the file.\u{00A0} Try again."
+            }
+        }
+    }
+
+    private func addFile(_ url: URL) {
+        busyPath = url.lastPathComponent
+        errorText = nil
+        Task {
+            let ok = await portalManager.addShareFile(slug: share.slug, fileURL: url, host: serverHost, token: token)
+            busyPath = nil
+            if ok {
+                shareFiles = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) ?? shareFiles
+            } else {
+                errorText = portalManager.errorMessage ?? "Could not add the file.\u{00A0} Try again."
             }
         }
     }
