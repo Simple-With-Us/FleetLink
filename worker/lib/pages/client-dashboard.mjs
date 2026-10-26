@@ -893,7 +893,7 @@ export const DASHBOARD_JS = String.raw`
     } }));
     var limitNote = b.limit_mode === "manual" && b.limits
       ? h("div", { class: "small muted", text: "Manual maxes: " + botCapsText(b.limits) })
-      : h("div", { class: "small muted", text: "Follows your account limits" });
+      : h("div", { class: "small muted", text: "Maximum allowances (automatic)" });
     var row = h("tr", null,
       h("td", null, h("strong", { text: b.display_name }), h("div", { class: "small muted mono", text: b.seat }), limitNote),
       h("td", { class: "hide-sm" }, b.usage.shares + " · " + FL.bytes(b.usage.bytes)),
@@ -945,8 +945,8 @@ export const DASHBOARD_JS = String.raw`
     var form = h("form", { onsubmit: function (e) { saveBotEditor(e, b, editorRow, save); } },
       h("div", { class: "row" }, field("Display name", h("input", { type: "text", name: "display_name", value: b.display_name, maxlength: "64" }))),
       h("div", { class: "row" },
-        h("div", null, h("label", null, account, " Follow my account limits"), h("div", { class: "small muted", text: "Adjusts automatically when your allowances change." })),
-        h("div", null, h("label", null, manual, " Manual maxes"), h("div", { class: "small muted", text: "Each cap is the tighter of this and your account's own limit." }))),
+        h("div", null, h("label", null, account, " Maximum allowances (automatic)"), h("div", { class: "small muted", text: "The bot always works with the fleet's current maximum allowances; they adjust automatically when site settings change." })),
+        h("div", null, h("label", null, manual, " Manual maxes"), h("div", { class: "small muted", text: "A cap only tightens the maximums; it can never raise them." }))),
       capsBox,
       h("div", { class: "actions mt" },
         save,
