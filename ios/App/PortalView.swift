@@ -794,6 +794,7 @@ private struct ShareFilesSection: View {
     @State private var isLoading: Bool = true
     @State private var showFilePicker: Bool = false
     @State private var busyPaths: Set<String> = []
+    @State private var isAdding = false
     @State private var errorText: String? = nil
 
     var body: some View {
@@ -847,9 +848,12 @@ private struct ShareFilesSection: View {
             Button {
                 showFilePicker = true
             } label: {
-                Label("Add File", systemImage: "plus")
+                HStack {
+                    if isAdding { ProgressView() }
+                    Label(isAdding ? "Adding file..." : "Add File", systemImage: "plus")
+                }
             }
-            .disabled(!busyPaths.isEmpty)
+            .disabled(isAdding || !busyPaths.isEmpty)
         }
         .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let picked = urls.first {
@@ -859,6 +863,7 @@ private struct ShareFilesSection: View {
         .task {
             if let files = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) {
                 shareFiles = files
+                loadFailed = false
             } else {
                 loadFailed = true
             }
@@ -881,13 +886,17 @@ private struct ShareFilesSection: View {
     }
 
     private func addFile(_ url: URL) {
-        busyPaths.insert(url.lastPathComponent)
+        isAdding = true
         errorText = nil
         Task {
             let ok = await portalManager.addShareFile(slug: share.slug, fileURL: url, host: serverHost, token: token)
-            busyPaths.remove(url.lastPathComponent)
+            defer { isAdding = false }
             if ok, let files = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) {
                 shareFiles = files
+                loadFailed = false
+            } else if ok {
+                loadFailed = true
+                errorText = "File added, but the refreshed list could not be loaded. Close and reopen to try again."
             } else if !ok {
                 errorText = portalManager.errorMessage ?? "Could not add the file.\u{00A0} Try again."
             }
