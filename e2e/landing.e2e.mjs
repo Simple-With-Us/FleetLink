@@ -55,26 +55,37 @@ test('landing branding, playback and safe policy fallbacks on signed-in/out mobi
 });
 
 test('standalone browser icon pixels stay correct independent of container encoding',async()=>{
- const {createHash}=await import('node:crypto');
+ const inputs=[
+  ['favicon-light-512.png',readFileSync(new URL('../assets/web/favicon-light-512.png',import.meta.url)),512,1837989444],
+  ['apple-touch-icon.png',readFileSync(new URL('../assets/web/apple-touch-icon.png',import.meta.url)),180,4000362361]
+ ];
+ // Inspect every ICO directory entry explicitly, not a browser-selected frame.
+ const ico=readFileSync(new URL('../assets/web/favicon.ico',import.meta.url));
+ assert.equal(ico.readUInt16LE(0),0);assert.equal(ico.readUInt16LE(2),1);assert.equal(ico.readUInt16LE(4),3);
+ const hashes={16:2101515862,32:3509544480,48:978387178};const sizes=[];
+ for(let i=0;i<ico.readUInt16LE(4);i++){
+  const entry=6+i*16,size=ico[entry]||256;
+  assert.equal(ico[entry+1]||256,size);assert.ok(Object.hasOwn(hashes,size));sizes.push(size);
+  const offset=ico.readUInt32LE(entry+12),length=ico.readUInt32LE(entry+8);
+  assert.ok(offset>=54&&offset+length<=ico.length,'valid frame bounds');
+  const png=ico.subarray(offset,offset+length);
+  assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+  inputs.push(['favicon.ico '+size,png,size,hashes[size]]);
+ }
+ assert.deepEqual(sizes.sort((a,b)=>a-b),[16,32,48]);
  const browser=await chromium.launch();const page=await browser.newPage();
  try {
-  // Pin decoded RGBA pixels from the independently inspected standalone art.
-  const cases=[
-   ['favicon-light-512.png',512,512,'1ce7489400b6aa3497120dce0aba7a7f3d9cdb1dfdf8c634e896679b4b5bc45b'],
-   ['favicon.ico',48,48,'9bf1ec20fcfad2893f5ed3c6640892955197fed877e5e7012249d11cf1b8634c'],
-   ['apple-touch-icon.png',180,180,'5500e939ae0feea8b127bb2cf3bf4d23dd78ca8b7396e5143820bc2bcc8a09ac']
-  ];
-  for(const [name,width,height,hash] of cases){
-   const mime=name.endsWith('.ico')?'image/x-icon':'image/png';
-   const src='data:'+mime+';base64,'+readFileSync(new URL('../assets/web/'+name,import.meta.url)).toString('base64');
+  for(const [name,bytes,size,hash] of inputs){
    const decoded=await page.evaluate(async src=>{
     const image=new Image();image.src=src;await image.decode();
     const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
     const context=canvas.getContext('2d');context.drawImage(image,0,0);
-    return {width:canvas.width,height:canvas.height,pixels:Array.from(context.getImageData(0,0,canvas.width,canvas.height).data)};
-   },src);
-   assert.equal(decoded.width,width,name);assert.equal(decoded.height,height,name);
-   assert.equal(createHash('sha256').update(Buffer.from(decoded.pixels)).digest('hex'),hash,name+' standalone pixels');
+    const data=context.getImageData(0,0,canvas.width,canvas.height).data;
+    // Hash inside the page so only three numbers cross the browser boundary.
+    let hash=2166136261;for(const value of data) hash=Math.imul(hash^value,16777619)>>>0;
+    return {width:canvas.width,height:canvas.height,hash};
+   },'data:image/png;base64,'+bytes.toString('base64'));
+   assert.deepEqual(decoded,{width:size,height:size,hash},name+' standalone pixels');
   }
  } finally {await browser.close();}
 });
