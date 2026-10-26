@@ -841,6 +841,7 @@ private struct ShareFilesSection: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Remove \(file.fileName)")
+                            .disabled(isAdding || isLoading)
                         }
                     }
                 }
@@ -853,7 +854,7 @@ private struct ShareFilesSection: View {
                     Label(isAdding ? "Adding file..." : "Add File", systemImage: "plus")
                 }
             }
-            .disabled(isAdding || !busyPaths.isEmpty)
+            .disabled(isAdding || !busyPaths.isEmpty || isLoading)
         }
         .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let picked = urls.first {
@@ -883,6 +884,7 @@ private struct ShareFilesSection: View {
     }
 
     private func removeFile(_ file: PortalShareFile) {
+        guard !isAdding && !isLoading else { return }
         busyPaths.insert(file.path)
         errorText = nil
         Task {
@@ -897,6 +899,7 @@ private struct ShareFilesSection: View {
     }
 
     private func addFile(_ url: URL) {
+        guard !isLoading && !isAdding && busyPaths.isEmpty else { return }
         isAdding = true
         errorText = nil
         Task {
@@ -925,7 +928,7 @@ struct ShareManagementVisualFixture: View {
             share: PortalShare(slug: isLink ? "fixture-link" : "fixture-files", url: "https://example.invalid/fixture", mode: isLink ? "redirect" : "files", files: isLink ? 0 : 2, bytes: 2_301_234, password_protected: false, created_at: "2026-10-26T00:00:00Z", expires_at: "never", target_url: isLink ? "https://example.com/new-destination" : nil, title: "Visual fixture"),
             portalManager: manager, serverHost: "https://example.invalid", token: "", onDismiss: {}
         )
-        .safeAreaInset(edge: .top) { Text("CI FIXTURE - NOT LIVE DATA").font(.caption).padding(4).frame(maxWidth: .infinity).background(Color.yellow) }
+        .safeAreaInset(edge: .bottom) { Text("CI FIXTURE - NOT LIVE DATA").font(.caption).padding(4).frame(maxWidth: .infinity).background(Color.yellow) }
     }
 }
 #endif
