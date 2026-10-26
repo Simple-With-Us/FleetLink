@@ -861,6 +861,16 @@ private struct ShareFilesSection: View {
             }
         }
         .task {
+            #if FLEETLINK_VISUAL_FIXTURE
+            let state = ProcessInfo.processInfo.environment["FLEETLINK_FIXTURE"] ?? "files"
+            shareFiles = [
+                PortalShareFile(path: "quarterly-report-with-a-long-file-name.pdf", size: 2_300_000, content_type: "application/pdf", url: nil),
+                PortalShareFile(path: "notes/summary.md", size: 1234, content_type: "text/markdown", url: nil)
+            ]
+            isAdding = state == "uploading"
+            loadFailed = state == "error"
+            isLoading = false
+            #else
             if let files = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) {
                 shareFiles = files
                 loadFailed = false
@@ -868,6 +878,7 @@ private struct ShareFilesSection: View {
                 loadFailed = true
             }
             isLoading = false
+            #endif
         }
     }
 
@@ -903,3 +914,18 @@ private struct ShareFilesSection: View {
         }
     }
 }
+
+#if FLEETLINK_VISUAL_FIXTURE
+/// CI-only root: the actual management sheet with synthetic data, no account or network.
+struct ShareManagementVisualFixture: View {
+    @StateObject private var manager = PortalManager()
+    private var isLink: Bool { ProcessInfo.processInfo.environment["FLEETLINK_FIXTURE"] == "redirect" }
+    var body: some View {
+        ShareManageSheet(
+            share: PortalShare(slug: isLink ? "fixture-link" : "fixture-files", url: "https://example.invalid/fixture", mode: isLink ? "redirect" : "files", files: isLink ? 0 : 2, bytes: 2_301_234, password_protected: false, created_at: "2026-10-26T00:00:00Z", expires_at: "never", target_url: isLink ? "https://example.com/new-destination" : nil, title: "Visual fixture"),
+            portalManager: manager, serverHost: "https://example.invalid", token: "", onDismiss: {}
+        )
+        .safeAreaInset(edge: .top) { Text("CI FIXTURE - NOT LIVE DATA").font(.caption).padding(4).frame(maxWidth: .infinity).background(Color.yellow) }
+    }
+}
+#endif

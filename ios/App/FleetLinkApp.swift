@@ -3,7 +3,9 @@ import SwiftUI
 @main
 struct FleetLinkApp: App {
     init() {
+        #if !FLEETLINK_VISUAL_FIXTURE
         SentryTelemetry.start(surface: "ios-app")
+        #endif
     }
 
     @StateObject private var loader = ArtifactLoader()
@@ -14,6 +16,9 @@ struct FleetLinkApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if FLEETLINK_VISUAL_FIXTURE
+            ShareManagementVisualFixture()
+            #else
             TabView(selection: $selectedTab) {
                 // Tab 0: Portal & Analytics
                 PortalView(portalManager: portalManager) { targetURL in
@@ -105,6 +110,7 @@ struct FleetLinkApp: App {
                     await loader.load(url: url)
                 }
             }
+            #endif
         }
     }
 }
