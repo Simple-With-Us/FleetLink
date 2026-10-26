@@ -291,7 +291,9 @@ export const MIGRATIONS = [
   // next free number rather than reusing 3.
   { version: 5, name: "safety_valve", sql: SAFETY_VALVE },
   // Per-share daily traffic for the dashboard's analytics view.
-  { version: 6, name: "share_analytics", sql: SHARE_ANALYTICS }
+  { version: 6, name: "share_analytics", sql: SHARE_ANALYTICS },
+  // Default team for new shares created by a user (null for personal).
+  { version: 7, name: "user_default_team", sql: "ALTER TABLE users ADD COLUMN default_team_id TEXT REFERENCES teams(id) ON DELETE SET NULL;" }
 ];
 
 /**

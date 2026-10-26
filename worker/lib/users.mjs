@@ -17,6 +17,7 @@ export function publicUser(row) {
     kind: row.kind === "agent" ? "agent" : "person",
     agent_seat: row.agent_seat ?? null,
     manager_id: row.manager_id ?? null,
+    default_team_id: row.default_team_id ?? null,
     created_at: iso(row.created_at),
     last_seen_at: iso(row.last_seen_at)
   };

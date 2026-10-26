@@ -58,6 +58,11 @@ export const DASHBOARD_JS = String.raw`
     if (keep) scope.value = keep;
     document.querySelectorAll("select[data-teams]").forEach(function (s) { teamOptions(s, true); });
     document.querySelectorAll("select[data-teams-required]").forEach(function (s) { teamOptions(s, true, "No team"); });
+    if (state.me && state.me.user && state.me.user.default_team_id) {
+      var ft = document.getElementById("files-team"), lt = document.getElementById("link-team");
+      if (ft && !ft.value) ft.value = state.me.user.default_team_id;
+      if (lt && !lt.value) lt.value = state.me.user.default_team_id;
+    }
   }
 
   // Shares
@@ -73,7 +78,12 @@ export const DASHBOARD_JS = String.raw`
     var tags = [kind];
     if (share.has_password) tags.push(h("span", { class: "pill amber", text: "Password" }));
     if (share.team) tags.push(h("span", { class: "pill", title: share.team.access === "edit" ? "Team members can view and edit" : "Team members can view", text: (share.team.name || "Team") + (share.team.access === "edit" ? " · edit" : " · view") }));
-    else tags.push(h("span", { class: "pill gray", text: "Personal" }));
+    else {
+      tags.push(h("span", { class: "pill gray", text: "Personal" }));
+      if (state.me && (state.me.bots?.fleet_owner || (state.me.bots?.count > 0 && share.owner && share.owner.id === state.me.user.id))) {
+        tags.push(h("span", { class: "pill blue", title: "Editable by your fleet agents", text: "Agent-editable" }));
+      }
+    }
     var actions = h("div", { class: "actions" },
       h("button", { type: "button", class: "small secondary", text: "Copy", onclick: function () { FL.copy(share.url); FL.toast("Copied " + share.slug + " link to clipboard."); } }),
       h("a", { class: "button small secondary", href: share.url, target: "_blank", rel: "noopener", text: "Open" }));
@@ -244,6 +254,8 @@ export const DASHBOARD_JS = String.raw`
     var list = state.allShares.slice();
     if (state.filterChip === "files") list = list.filter(function (s) { return s.kind !== "link"; });
     else if (state.filterChip === "link") list = list.filter(function (s) { return s.kind === "link"; });
+    else if (state.filterChip === "personal") list = list.filter(function (s) { return !s.team; });
+    else if (state.filterChip === "team") list = list.filter(function (s) { return Boolean(s.team); });
     else if (state.filterChip === "forever") list = list.filter(function (s) { return s.expires_at === null; });
     else if (state.filterChip === "password") list = list.filter(function (s) { return Boolean(s.has_password); });
 
@@ -644,6 +656,10 @@ export const DASHBOARD_JS = String.raw`
     var profile = document.getElementById("profile-form");
     profile.display_name.value = me.user.display_name;
     profile.email.value = me.user.email || "";
+    if (profile.default_team_id) {
+      teamOptions(profile.default_team_id, true, "Personal (just me)");
+      profile.default_team_id.value = me.user.default_team_id || "";
+    }
     var keys = (await FL.api("GET", "/api/me/passkeys")).passkeys;
     var kb = document.getElementById("passkey-rows");
     kb.replaceChildren();
@@ -681,7 +697,11 @@ export const DASHBOARD_JS = String.raw`
     e.preventDefault();
     var f = FL.form(e.currentTarget);
     try {
-      state.me = await FL.api("PATCH", "/api/me", { display_name: f.display_name, email: f.email || null });
+      state.me = await FL.api("PATCH", "/api/me", {
+        display_name: f.display_name,
+        email: f.email || null,
+        default_team_id: f.default_team_id || null
+      });
       FL.toast("Saved.");
       loadMe();
     } catch (err) { FL.fail(err); }

@@ -155,7 +155,7 @@ th.sortable.sort-desc::after { content: " ▼"; opacity: 1; color: var(--brand);
 td .actions { gap: 0.35rem; }
 td .rowmenu { position: relative; }
 .rowmenu { display: inline-block; }
-.rowmenu > summary { list-style: none; cursor: pointer; user-select: none; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--muted); font-weight: 800; padding: 0.35rem 0.65rem; line-height: 1; letter-spacing: 0.06em; }
+.rowmenu > summary { list-style: none; cursor: pointer; user-select: none; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--muted); font-weight: 800; padding: 0.35rem 0.65rem; line-height: 1; letter-spacing: 0.06em; min-height: 38px; min-width: 38px; display: inline-flex; align-items: center; justify-content: center; }
 .rowmenu > summary::-webkit-details-marker { display: none; }
 .rowmenu > summary:hover, .rowmenu[open] > summary { background: var(--soft); color: var(--ink); }
 .rowmenu .actions { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; flex-direction: column; flex-wrap: nowrap; align-items: stretch; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); padding: 0.5rem; min-width: 150px; gap: 0.35rem; }
@@ -173,6 +173,7 @@ td .rowmenu { position: relative; }
 .pill.green { background: var(--ok-soft); color: var(--ok); }
 .pill.red { background: var(--bad-soft); color: var(--bad); }
 .pill.amber { background: #fff4dc; color: var(--gold-dark); }
+.pill.blue { background: #e0f2fe; color: #0284c7; }
 .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); margin-bottom: 1.25rem; flex-wrap: wrap; }
 .tabs button { background: none; border: none; color: var(--muted); border-bottom: 3px solid transparent; border-radius: 0; padding: 0.65rem 0.95rem; }
 .tabs button:hover { background: none; color: var(--ink); }
@@ -328,8 +329,9 @@ td .rowmenu { position: relative; }
   .top nav a, .top nav .link { padding: 0.4rem 0.55rem; }
   .top .bar { row-gap: 0.1rem; padding-bottom: 0.3rem; }
   .dash-head .usage { flex: 1 1 100%; }
-  .tabs { flex-wrap: nowrap; gap: 0; margin-left: -1.25rem; margin-right: -1.25rem; padding: 0 0.3rem; }
-  .tabs button { flex: 1 1 0; min-width: 0; padding: 0.55rem 0.1rem; font-size: 0.72rem; text-align: center; white-space: nowrap; }
+  .tabs { flex-wrap: nowrap; gap: 0.35rem; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; margin-left: -1rem; margin-right: -1rem; padding: 0 1rem; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: 0 0 auto; min-width: max-content; padding: 0.6rem 0.85rem; font-size: 0.84rem; white-space: nowrap; }
   th, td { padding: 0.5rem 0.3rem; }
   table { font-size: 0.86rem; }
   .table-wrap { padding: 0.25rem 0.5rem; }

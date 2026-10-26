@@ -1,4 +1,5 @@
 import { first } from "./db.mjs";
+import { fleetOwner } from "./fleet.mjs";
 import { forbidden, HttpError, notFound } from "./http.mjs";
 import { membership } from "./teams.mjs";
 
@@ -32,6 +33,12 @@ export async function shareAccess(env, principal, share) {
     if (member) {
       const manage = member.role === "owner" || member.role === "admin";
       return { view: true, edit: manage || share.team_access === "edit", manage, owner: false, role: `team_${member.role}` };
+    }
+  }
+  if (principal.user?.kind === "agent") {
+    const managerId = principal.user.manager_id || (await fleetOwner(env))?.id;
+    if (managerId && share.owner_id === managerId) {
+      return { view: true, edit: true, manage: false, owner: false, role: "agent" };
     }
   }
   return NONE;
