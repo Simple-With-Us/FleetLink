@@ -46,7 +46,7 @@ export const APP_JS = String.raw`
       if (!heroIntro) return;
       var was = topBar.classList.contains("is-scrolled");
       if (was) topBar.classList.remove("is-scrolled");
-      tripY = heroIntro.getBoundingClientRect().bottom + window.scrollY - topBar.offsetHeight;
+      tripY = heroIntro.getBoundingClientRect().bottom + window.scrollY;
       if (was) topBar.classList.add("is-scrolled");
     };
     var syncTopBar = function () {

@@ -12,13 +12,30 @@ test('landing branding, playback and safe policy fallbacks on signed-in/out mobi
  for(const n of readdirSync(media)) await env.FLEET_SHARES.put('site/media/'+n,readFileSync(new URL(n,media)));
  const server=await serve(env);const browser=await chromium.launch();
  try {
-  for(const width of [390,1280]) for(const signed of [false,true]) {
+  for(const width of [320,390,768,1280]) for(const signed of [false,true]) {
    const page=await browser.newPage({viewport:{width,height:900}});
    if(signed) await page.route(server.url+'/',r=>r.fulfill({contentType:'text/html',body:home({env:{},url:new URL(server.url)},{isAdmin:true,user:{display_name:'Fixture'}})}));
    await page.goto(server.url);
    const brand=page.locator('header .brand-wordmark');
    assert.equal(await brand.evaluate(e=>getComputedStyle(e).visibility),'hidden');
    assert.equal(await page.locator('.preview').count(),0);
+   assert.deepEqual(await page.locator('header nav a').allTextContents(),signed?['Dashboard','Agents','']:['Dashboard','Agents','Sign In','']);
+   assert.equal(await page.locator('header nav a[href="/#features"],header nav a[href="/#guide"]').count(),0);
+   assert.equal(await page.locator('header nav a[aria-label="Email support"]').getAttribute('href'),'mailto:support@fleetlink.online');
+   assert.equal(await page.locator('header').evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');
+   const trip=await page.locator('.hero-intro').evaluate(e=>e.getBoundingClientRect().bottom+scrollY);
+   await page.evaluate(y=>scrollTo(0,y-2),trip);
+   assert.equal(await page.locator('header').evaluate(e=>e.classList.contains('is-scrolled')),false);
+   await page.evaluate(y=>scrollTo(0,Math.ceil(y)+2),trip);
+   await page.waitForFunction(()=>document.querySelector('header').classList.contains('is-scrolled'));
+   assert.equal(await page.locator('header nav .home-dashboard').isVisible(),true);
+   assert.equal(await page.locator('header nav .home-extra').first().isVisible(),false);
+   assert.equal(await page.locator(signed?'header button':'header a[href="/login"]').isVisible(),true);
+   await page.evaluate(()=>scrollTo(0,0));
+   await page.waitForFunction(()=>!document.querySelector('header').classList.contains('is-scrolled'));
+   const gap=await page.evaluate(()=>document.querySelector('#agents .grid-3').getBoundingClientRect().top-document.querySelector('#agents .split-head > a').getBoundingClientRect().bottom);
+   assert.ok(gap>=23,'guide CTA has space before cards');
+   assert.equal(await page.locator('#features a[href="/instructions"]').count(),0);
    assert.match(await page.locator('footer .brand img').getAttribute('src'),/fleetlink-wordmark.png/);
    await page.waitForFunction(()=>{const v=document.querySelector('.hero-intro video');return !v.paused&&v.currentTime>0.1;});
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);

@@ -155,6 +155,7 @@ export function home(ctx, principal) {
     active: "home",
     fullBleed: true,
     heroBrand: true,
+    bodyClass: "home-page",
     scripts: ["app.js"],
     head: ogTags({ title: "FleetLink", description: "Where people and AI agents hand off work: files, folders, notes, and short links with an owner and an expiry.", url: `${origin}/`, image: `${origin}/preview.png` }) + appClipMeta(ctx.env),
     body: `${deleted}<section class="hero">
@@ -203,7 +204,7 @@ export function home(ctx, principal) {
           ${card("link", "Short Links", "Turn a long PR, dashboard, or ticket URL into a short link that lasts up to 180 days.")}
           ${card("lock", "Private Handoffs", "Add a password to any share.&#160; Passwords are stored as salted hashes and never shown again.")}
         </div>
-        <p class="small muted center-text">Read <a href="/instructions">how FleetLink works</a> and the <a href="/agents">guide for agents</a>.</p>
+        <p class="small muted center-text">Read the <a href="/agents">guide for agents</a>.</p>
       </section>
 
       ${guideSection(origin)}
