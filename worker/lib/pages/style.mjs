@@ -210,11 +210,12 @@ td .rowmenu { position: relative; }
 .auth-intro { display: block; width: 132px; height: 132px; margin: 0 auto; mix-blend-mode: multiply; }
 .auth-intro img { display: block; width: 100%; height: auto; }
 .hero-mark { width: 64px; height: 64px; border-radius: 16px; box-shadow: 0 6px 24px rgba(25, 167, 230, 0.35); margin-bottom: 1.25rem; }
-.preview { background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-lg); overflow: hidden; transform: perspective(1400px) rotateY(-4deg) rotateX(2deg); }
+.preview { background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-lg); overflow: hidden; transform: perspective(1400px) rotateY(-4deg) rotateX(2deg); position: relative; }
 .preview-bar { display: flex; align-items: center; gap: 0.4rem; padding: 0.65rem 0.9rem; background: #f3f6fb; border-bottom: 1px solid var(--line); }
 .preview-bar i { width: 10px; height: 10px; border-radius: 50%; background: #d3dbe7; display: inline-block; }
 .preview-bar span { margin-left: 0.6rem; font-size: 0.8rem; color: var(--muted); background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 0.1rem 0.6rem; }
-.preview-body { padding: 1.1rem 1.2rem 1.3rem; }
+.preview-body { padding: 1.1rem 1.2rem 1.3rem; filter: blur(3.5px); user-select: none; pointer-events: none; opacity: 0.82; transition: filter 0.3s ease, opacity 0.3s ease; }
+.preview:hover .preview-body { filter: blur(1.5px); opacity: 0.95; }
 .preview-body h3 { font-size: 1.15rem; margin-bottom: 0.2rem; }
 .preview-tabs { display: flex; gap: 1rem; border-bottom: 1px solid var(--line); margin: 0.8rem 0 0.4rem; font-size: 0.85rem; font-weight: 700; color: var(--muted); }
 .preview-tabs b { color: var(--brand); border-bottom: 2px solid var(--brand); padding-bottom: 0.35rem; }

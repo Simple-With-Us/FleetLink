@@ -17,6 +17,57 @@ public struct PortalShare: Identifiable, Codable, Hashable, Sendable {
     public let is_team: Bool?
     public let is_mine: Bool?
     public let target_url: String?
+    public let title: String?
+    public let description: String?
+    public let can_manage: Bool?
+    public let can_edit: Bool?
+    public let team_name: String?
+    public let team_access: String?
+    public let owner_name: String?
+
+    public init(
+        slug: String,
+        url: String,
+        mode: String,
+        files: Int,
+        bytes: Int64,
+        password_protected: Bool,
+        created_at: String,
+        expires_at: String,
+        renewals_used: Int? = nil,
+        team_id: String? = nil,
+        is_team: Bool? = nil,
+        is_mine: Bool? = nil,
+        target_url: String? = nil,
+        title: String? = nil,
+        description: String? = nil,
+        can_manage: Bool? = nil,
+        can_edit: Bool? = nil,
+        team_name: String? = nil,
+        team_access: String? = nil,
+        owner_name: String? = nil
+    ) {
+        self.slug = slug
+        self.url = url
+        self.mode = mode
+        self.files = files
+        self.bytes = bytes
+        self.password_protected = password_protected
+        self.created_at = created_at
+        self.expires_at = expires_at
+        self.renewals_used = renewals_used
+        self.team_id = team_id
+        self.is_team = is_team
+        self.is_mine = is_mine
+        self.target_url = target_url
+        self.title = title
+        self.description = description
+        self.can_manage = can_manage
+        self.can_edit = can_edit
+        self.team_name = team_name
+        self.team_access = team_access
+        self.owner_name = owner_name
+    }
 
     public var isRedirect: Bool {
         mode == "redirect"
@@ -151,21 +202,47 @@ public enum PortalError: LocalizedError, Sendable {
 
 /// A share as the account API returns it (`GET /api/shares`, `GET /api/shares/:slug`).
 private struct ApiShare: Decodable {
-    struct Team: Decodable { let id: String; let name: String? }
-    struct Owner: Decodable { let id: String; let display_name: String? }
+    struct Team: Decodable {
+        let id: String
+        let name: String?
+        let access: String?
+    }
+    struct Owner: Decodable {
+        let id: String
+        let display_name: String?
+    }
     let slug: String
     let url: String
     let kind: String
     let target_url: String?
+    let title: String?
+    let description: String?
     let has_password: Bool
     let file_count: Int
     let total_bytes: Int64
     let renewals: Int
     let created_at: String
     let expires_at: String?
-    let can_manage: Bool
-    let owner: Owner
+    let can_manage: Bool?
+    let can_edit: Bool?
+    let owner: Owner?
     let team: Team?
+}
+
+public struct PortalTeam: Identifiable, Codable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let my_role: String?
+
+    public init(id: String, name: String, my_role: String? = nil) {
+        self.id = id
+        self.name = name
+        self.my_role = my_role
+    }
+}
+
+private struct ApiTeamsResponse: Decodable {
+    let teams: [PortalTeam]
 }
 
 private struct ApiShareList: Decodable { let shares: [ApiShare] }
@@ -174,6 +251,7 @@ private struct ApiShareEnvelope: Decodable { let share: ApiShare }
 @MainActor
 public final class PortalManager: ObservableObject {
     @Published public private(set) var shares: [PortalShare] = []
+    @Published public private(set) var teams: [PortalTeam] = []
     @Published public private(set) var isLoading: Bool = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var analytics: PortalAnalytics = PortalAnalytics(
@@ -266,6 +344,114 @@ public final class PortalManager: ObservableObject {
             errorMessage = "Could not renew that link.\u{00A0} Check the connection and try again."
             return false
         }
+    }
+
+    public func renameShare(slug: String, newSlug: String, host: String = "https://fleetlink.online", token: String = "") async -> Bool {
+        guard let url = URL(string: "\(normalizedHost(host))/api/shares/\(Self.pathSegment(slug))") else { return false }
+        var request = authorizedRequest(url: url, method: "PATCH", token: token)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload = ["slug": newSlug.trimmingCharacters(in: .whitespacesAndNewlines)]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
+        request.httpBody = body
+        do {
+            let (data, http) = try await send(request)
+            guard (200...299).contains(http.statusCode) else {
+                errorMessage = serverMessage(from: data, fallback: "Could not rename link.")
+                return false
+            }
+            if let envelope = try? JSONDecoder().decode(ApiShareEnvelope.self, from: data) {
+                let updated = Self.portalShare(envelope.share)
+                shares = shares.map { $0.slug == slug ? updated : $0 }
+                computeAnalytics()
+            }
+            return true
+        } catch {
+            errorMessage = "Could not rename link.\u{00A0} Check the connection and try again."
+            return false
+        }
+    }
+
+    public func extendShare(slug: String, days: String, host: String = "https://fleetlink.online", token: String = "") async -> Bool {
+        guard let url = URL(string: "\(normalizedHost(host))/api/shares/\(Self.pathSegment(slug))/renew") else { return false }
+        var request = authorizedRequest(url: url, method: "POST", token: token)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload = ["days": days.trimmingCharacters(in: .whitespacesAndNewlines)]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
+        request.httpBody = body
+        do {
+            let (data, http) = try await send(request)
+            guard (200...299).contains(http.statusCode) else {
+                errorMessage = serverMessage(from: data, fallback: "Could not extend link.")
+                return false
+            }
+            if let envelope = try? JSONDecoder().decode(ApiShareEnvelope.self, from: data) {
+                let updated = Self.portalShare(envelope.share)
+                shares = shares.map { $0.slug == slug ? updated : $0 }
+                computeAnalytics()
+            }
+            return true
+        } catch {
+            errorMessage = "Could not extend link.\u{00A0} Check the connection and try again."
+            return false
+        }
+    }
+
+    public func updateShareAccess(
+        slug: String,
+        teamId: String?,
+        teamAccess: String? = "edit",
+        password: String? = nil,
+        clearPassword: Bool = false,
+        title: String? = nil,
+        description: String? = nil,
+        host: String = "https://fleetlink.online",
+        token: String = ""
+    ) async -> Bool {
+        guard let url = URL(string: "\(normalizedHost(host))/api/shares/\(Self.pathSegment(slug))") else { return false }
+        var request = authorizedRequest(url: url, method: "PATCH", token: token)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var payload: [String: Any] = [:]
+        if let teamId = teamId, !teamId.isEmpty {
+            payload["team_id"] = teamId
+            payload["team_access"] = teamAccess ?? "edit"
+        } else {
+            payload["team_id"] = NSNull()
+        }
+        if clearPassword {
+            payload["password"] = NSNull()
+        } else if let password = password, !password.isEmpty {
+            payload["password"] = password
+        }
+        if let title = title { payload["title"] = title }
+        if let description = description { payload["description"] = description }
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
+        request.httpBody = body
+        do {
+            let (data, http) = try await send(request)
+            guard (200...299).contains(http.statusCode) else {
+                errorMessage = serverMessage(from: data, fallback: "Could not update link access.")
+                return false
+            }
+            if let envelope = try? JSONDecoder().decode(ApiShareEnvelope.self, from: data) {
+                let updated = Self.portalShare(envelope.share)
+                shares = shares.map { $0.slug == slug ? updated : $0 }
+                computeAnalytics()
+            }
+            return true
+        } catch {
+            errorMessage = "Could not update link access.\u{00A0} Check the connection and try again."
+            return false
+        }
+    }
+
+    public func fetchTeams(host: String = "https://fleetlink.online", token: String = "") async {
+        guard !token.isEmpty, let url = URL(string: "\(normalizedHost(host))/api/teams") else { return }
+        do {
+            let (data, http) = try await send(authorizedRequest(url: url, method: "GET", token: token))
+            guard (200...299).contains(http.statusCode) else { return }
+            let res = try JSONDecoder().decode(ApiTeamsResponse.self, from: data)
+            teams = res.teams
+        } catch {}
     }
 
     public func createRedirect(
@@ -408,8 +594,15 @@ public final class PortalManager: ObservableObject {
             renewals_used: share.renewals,
             team_id: share.team?.id,
             is_team: share.team != nil,
-            is_mine: share.can_manage,
-            target_url: share.target_url
+            is_mine: share.can_manage ?? true,
+            target_url: share.target_url,
+            title: share.title,
+            description: share.description,
+            can_manage: share.can_manage ?? true,
+            can_edit: share.can_edit ?? true,
+            team_name: share.team?.name,
+            team_access: share.team?.access,
+            owner_name: share.owner?.display_name
         )
     }
 
