@@ -45,16 +45,25 @@ def png(image):
     return buf.getvalue()
 
 
+def browser_touch_icon():
+    # Apple touch icons must be opaque; iOS applies its own rounding.
+    source = Image.open(os.path.join(WEB, "favicon-light-512.png")).convert("RGBA")
+    canvas = Image.new("RGBA", source.size, "white")
+    canvas.alpha_composite(source)
+    return canvas.convert("RGB").resize((180, 180), Image.LANCZOS)
+
+
 def main():
     mark = crop_to_mark(Image.open(SOURCE).convert("RGB"))
     files = {
         "logo-64.png": png(rounded(mark.resize((64, 64), Image.LANCZOS))),
         "logo-128.png": png(rounded(mark.resize((128, 128), Image.LANCZOS))),
-        # iOS rounds the touch icon itself, so it stays square and opaque.
-        "apple-touch-icon.png": png(mark.resize((180, 180), Image.LANCZOS)),
+        # Browser icons use the existing standalone mark, never the boxed app icon.
+        "apple-touch-icon.png": png(browser_touch_icon()),
     }
     ico = io.BytesIO()
-    rounded(mark.resize((256, 256), Image.LANCZOS)).save(ico, "ICO", sizes=[(16, 16), (32, 32), (48, 48)])
+    browser_mark = Image.open(os.path.join(WEB, "favicon-light-512.png")).convert("RGBA")
+    browser_mark.save(ico, "ICO", sizes=[(16, 16), (32, 32), (48, 48)])
     files["favicon.ico"] = ico.getvalue()
 
     os.makedirs(WEB, exist_ok=True)
