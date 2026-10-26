@@ -133,8 +133,13 @@ export function botRoutes(router) {
     if (input.limit_mode !== undefined || input.limits !== undefined) {
       const mode = input.limit_mode ?? (["legacy", "account", "manual"].includes(bot.agent_limit_mode) ? bot.agent_limit_mode : "legacy");
       if (mode === "manual") {
-        const caps = {};
-        if (input.limits) for (const [key, value] of Object.entries(input.limits)) if (value != null) caps[key] = value;
+        // Merge into the stored caps:  a partial update must not silently
+        // widen caps it never mentions back to the account max;  an explicit
+        // null deletes that cap.
+        const caps = { ...(parseAgentLimits(bot.agent_limits) || {}) };
+        if (input.limits) for (const [key, value] of Object.entries(input.limits)) {
+          if (value == null) delete caps[key]; else caps[key] = value;
+        }
         changes.agent_limit_mode = "manual";
         changes.agent_limits = Object.keys(caps).length ? JSON.stringify(caps) : null;
       } else {

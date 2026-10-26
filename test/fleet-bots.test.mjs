@@ -270,6 +270,12 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
   assert.equal(patched.status, 200);
   assert.equal(patched.data.bot.limit_mode, "manual");
   assert.deepEqual(patched.data.bot.limits, { max_file_days: 2, max_file_mb: 1 });
+  // A partial update merges into the stored caps instead of dropping the rest;  an explicit null deletes one.
+  const merged = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "manual", limits: { max_link_days: 30 } } });
+  assert.deepEqual(merged.data.bot.limits, { max_file_days: 2, max_file_mb: 1, max_link_days: 30 });
+  const deleted = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limits: { max_file_mb: null, max_link_days: null } } });
+  assert.deepEqual(deleted.data.bot.limits, { max_file_days: 2 });
+  await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limits: { max_file_mb: 1 } } });
   const capped = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-capped", days: 5 });
   assert.equal(capped.error, "File shares last at most 2 days.");
   const within = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-within", days: 2 });
