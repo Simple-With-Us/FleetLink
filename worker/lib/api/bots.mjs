@@ -131,7 +131,7 @@ export function botRoutes(router) {
     if (input.display_name !== undefined) changes.display_name = cleanDisplayName(input.display_name);
     if (input.status !== undefined && input.status !== bot.status) changes.status = input.status;
     if (input.limit_mode !== undefined || input.limits !== undefined) {
-      const mode = input.limit_mode ?? (bot.agent_inherits_defaults === 1 ? "inherit" : bot.agent_limit_mode);
+      const mode = input.limit_mode ?? (bot.agent_inherits_defaults === 1 ? "inherit" : (["legacy", "account", "manual"].includes(bot.agent_limit_mode) ? bot.agent_limit_mode : "legacy"));
       changes.agent_inherits_defaults = mode === "inherit" ? 1 : 0;
       if (input.limits !== undefined && input.limits !== null && mode !== "manual") throw badRequest("limits requires manual mode.");
       if (mode === "manual") {

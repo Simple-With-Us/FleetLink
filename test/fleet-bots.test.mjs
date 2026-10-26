@@ -465,3 +465,17 @@ test('non-manual bot rejects caps rather than silently discarding them',async()=
  const {env,jay}=await fleet();await callJson(env,'GET','/api/me',{auth:jay});
  assert.equal((await callJson(env,'PATCH','/api/bots/usr_agent_ma',{auth:jay,json:{limit_mode:'account',limits:{max_file_mb:1}}})).status,400);
 });
+
+test('bot PATCH sanitizes an invalid stored mode before clearing limits',async()=>{
+ const {env,jay}=await fleet();
+ await callJson(env,'GET','/api/me',{auth:jay});
+ // Simulate a legacy/corrupted row outside the normal validated write path.
+ await env.DB.prepare('PRAGMA ignore_check_constraints = ON').run();
+ await env.DB.prepare("UPDATE users SET agent_limit_mode='invalid', agent_inherits_defaults=0 WHERE id='usr_agent_ma'").run();
+ await env.DB.prepare('PRAGMA ignore_check_constraints = OFF').run();
+ const result=await callJson(env,'PATCH','/api/bots/usr_agent_ma',{auth:jay,json:{limits:null}});
+ assert.equal(result.status,200);
+ assert.equal(result.data.bot.limit_mode,'legacy');
+ const row=await env.DB.prepare("SELECT agent_limit_mode FROM users WHERE id='usr_agent_ma'").first();
+ assert.equal(row.agent_limit_mode,'legacy');
+});
