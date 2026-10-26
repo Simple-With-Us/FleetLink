@@ -79,7 +79,8 @@ pre { background: var(--navy); color: #dbe7ff; padding: 0.9rem 1rem; border-radi
 .avatar { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--brand), var(--cyan)); color: #fff; font-weight: 800; font-size: 0.85rem; }
 form.inline { display: inline; margin: 0; }
 
-main { flex: 1 0 auto; }
+/* main is a flex item in body's column flex. .wrap's auto side margins disable cross-axis stretch, so width:auto falls back to fit-content and a horizontally scrolling child (the dashboard tab row) forces the whole page wider than a phone viewport. width:100% + min-width:0 pins it to the viewport and lets the child scroll internally. */
+main { flex: 1 0 auto; min-width: 0; width: 100%; box-sizing: border-box; }
 .wrap { max-width: 1120px; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
 
 /* Footer, shared by every page */
