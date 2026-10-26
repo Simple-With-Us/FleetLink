@@ -99,8 +99,9 @@ export function applyLimitsOverride(limits, override) {
   return out;
 }
 
-/** The tier a principal starts from:  admins and bots start wide;  a bot on manual caps still starts wide, then clamps (fullLimits gates the admin-only actions separately). */
+/** The tier a principal starts from.  A bot that follows its manager ('account' or 'manual' mode) starts from the manager's tier, which manual caps can only tighten.  Otherwise admins and bots start wide;  a bot on manual caps without a manager tier still starts wide, then clamps (fullLimits gates the admin-only actions separately). */
 function tierBase(principal) {
+  if (principal?.limitsUser) return principal.limitsUser.role === "admin";
   return fullLimits(principal) || (Boolean(principal?.limitsOverride) && principal?.user?.kind === "agent");
 }
 

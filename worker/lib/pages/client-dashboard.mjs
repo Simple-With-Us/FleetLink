@@ -891,9 +891,11 @@ export const DASHBOARD_JS = String.raw`
       if (active && !FL.confirm("Disable " + b.display_name + "?  It stops working everywhere until you enable it.")) return;
       try { await FL.api("PATCH", base, { status: active ? "disabled" : "active" }); loadBots(); } catch (err) { FL.fail(err); }
     } }));
-    var limitNote = b.limit_mode === "manual" && b.limits
-      ? h("div", { class: "small muted", text: "Manual maxes: " + botCapsText(b.limits) })
-      : h("div", { class: "small muted", text: "Maximum allowances (automatic)" });
+    var limitNote = b.limit_mode === "manual"
+      ? h("div", { class: "small muted", text: "Manual maxes: " + botCapsText(b.limits || {}) })
+      : b.limit_mode === "account"
+        ? h("div", { class: "small muted", text: "Follows your account limits" })
+        : h("div", { class: "small muted", text: "Widest limits (fleet default)" });
     var row = h("tr", null,
       h("td", null, h("strong", { text: b.display_name }), h("div", { class: "small muted mono", text: b.seat }), limitNote),
       h("td", { class: "hide-sm" }, b.usage.shares + " · " + FL.bytes(b.usage.bytes)),
@@ -927,8 +929,9 @@ export const DASHBOARD_JS = String.raw`
   // One inline bot editor at a time, like the share editor.
   function openBotEditor(b, row) {
     document.querySelectorAll("tr.bot-editor-row").forEach(function (r) { r.remove(); });
-    var mode = b.limit_mode === "manual" ? "manual" : "account";
+    var mode = b.limit_mode === "account" || b.limit_mode === "manual" ? b.limit_mode : "legacy";
     var caps = b.limits || {};
+    var legacy = h("input", { type: "radio", name: "limit_mode", value: "legacy", checked: mode === "legacy" });
     var account = h("input", { type: "radio", name: "limit_mode", value: "account", checked: mode === "account" });
     var manual = h("input", { type: "radio", name: "limit_mode", value: "manual", checked: mode === "manual" });
     var capInputs = BOT_CAP_FIELDS.map(function (pair) {
@@ -939,14 +942,16 @@ export const DASHBOARD_JS = String.raw`
       var on = manual.checked;
       capInputs.forEach(function (wrap) { wrap.querySelector("input").disabled = !on; });
     }
+    legacy.addEventListener("change", syncCaps);
     account.addEventListener("change", syncCaps);
     manual.addEventListener("change", syncCaps);
     var save = h("button", { type: "submit", text: "Save Changes" });
     var form = h("form", { onsubmit: function (e) { saveBotEditor(e, b, editorRow, save); } },
       h("div", { class: "row" }, field("Display name", h("input", { type: "text", name: "display_name", value: b.display_name, maxlength: "64" }))),
       h("div", { class: "row" },
-        h("div", null, h("label", null, account, " Maximum allowances (automatic)"), h("div", { class: "small muted", text: "The bot always works with the fleet's current maximum allowances; they adjust automatically when site settings change." })),
-        h("div", null, h("label", null, manual, " Manual maxes"), h("div", { class: "small muted", text: "A cap only tightens the maximums; it can never raise them." }))),
+        h("div", null, h("label", null, legacy, " Widest limits (fleet default)"), h("div", { class: "small muted", text: "The shipped behavior:  the bot keeps the fleet's admin-tier maximums.  Every existing bot works this way." })),
+        h("div", null, h("label", null, account, " Follow my account limits"), h("div", { class: "small muted", text: "The bot always works with your current allowances, adjusting automatically when they change.  Never wider than your own." })),
+        h("div", null, h("label", null, manual, " Manual maxes"), h("div", { class: "small muted", text: "Caps on your account allowances for this bot.  A cap only tightens;  it can never raise them." }))),
       capsBox,
       h("div", { class: "actions mt" },
         save,
@@ -962,8 +967,8 @@ export const DASHBOARD_JS = String.raw`
     var name = String(f.display_name || "").trim();
     if (!name) { FL.toast("A bot needs a display name.", "error"); return; }
     if (name !== b.display_name) body.display_name = name;
-    var mode = f.limit_mode === "manual" ? "manual" : "account";
-    if (mode !== (b.limit_mode === "manual" ? "manual" : "account")) body.limit_mode = mode;
+    var mode = f.limit_mode === "account" || f.limit_mode === "manual" ? f.limit_mode : "legacy";
+    if (mode !== (b.limit_mode === "account" || b.limit_mode === "manual" ? b.limit_mode : "legacy")) body.limit_mode = mode;
     if (mode === "manual") {
       var limits = {};
       for (var i = 0; i < BOT_CAP_FIELDS.length; i++) {

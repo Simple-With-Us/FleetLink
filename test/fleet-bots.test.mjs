@@ -257,13 +257,13 @@ test("fleet bot tokens under the fleet owner can post forever, renew forever, an
   assert.equal(renewedHttp.data.share.expires_at, null);
 });
 
-test("a bot's limits follow its manager's account by default, or clamp to manual maxes", async () => {
+test("a bot's limit modes: legacy keeps the widest tier, account follows the manager live, manual caps the manager's allowance", async () => {
   const { env, jay } = await fleet();
   await callJson(env, "GET", "/api/me", { auth: jay });
 
-  // Default: account mode, following the manager (an admin here).
+  // Existing bots default to legacy: the shipped widest tier, unchanged.
   const view = await callJson(env, "GET", "/api/bots", { auth: jay });
-  assert.ok(view.data.bots.every((b) => b.limit_mode === "account" && b.limits === null));
+  assert.ok(view.data.bots.every((b) => b.limit_mode === "legacy" && b.limits === null));
 
   // Manual maxes: stored, shown, and enforced through the Agent-Sync path.
   const patched = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "manual", limits: { max_file_days: 2, max_file_mb: 1 } } });
@@ -286,17 +286,35 @@ test("a bot's limits follow its manager's account by default, or clamp to manual
   const link = await callJson(env, "POST", "/api/links", { auth: { token: tok.data.token }, json: { url: "https://example.com", days: 30 } });
   assert.equal(link.status, 403);
 
-  // Caps never widen past the manager's own limits.
+  // A cap never widens past the manager's own allowance.  Jay, as fleet owner, is an
+  // admin, so MA's base is the admin tier and the 9999 MB cap cannot raise it.
   await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "manual", limits: { max_file_mb: 9999 } } });
-  const who2 = await rpcTool(env, bot("MA"), "fleetlink_whoami");
-  assert.equal(who2.data.limits.max_file_bytes, 300 * 1024 * 1024);
+  assert.equal((await rpcTool(env, bot("MA"), "fleetlink_whoami")).data.limits.max_file_bytes, 300 * 1024 * 1024);
 
-  // Switching back to account mode clears the caps.
-  const back = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "account" } });
-  assert.equal(back.data.bot.limit_mode, "account");
+  // Account mode tracks the manager live.  Pat is a regular person with their own bot:
+  const pat = await signUp(env, "Pat", { email: "pat@example.com" });
+  const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-acct" } })).data.bot;
+  const setMode = (mode) => callJson(env, "PATCH", `/api/bots/${patBot.id}`, { auth: pat, json: { limit_mode: mode } });
+  await setMode("account");
+  const whoPat = async () => (await rpcTool(env, bot("PAT-ACCT"), "fleetlink_whoami")).data.limits;
+  assert.deepEqual([(await whoPat()).max_file_bytes, (await whoPat()).follows], [100 * 1024 * 1024, "manager"]);
+  assert.equal((await rpcTool(env, bot("PAT-ACCT"), "fleetlink_create_share", { text: "x", slug: "pat-acct-f", days: "forever" })).error, "Only admins can make a share that never expires.");
+  // ...the manager becomes an admin and the bot widens on its next request, with no new token:
+  await callJson(env, "PATCH", `/api/admin/users/${pat.user.id}`, { auth: { operator: true }, json: { role: "admin" } });
+  assert.equal((await whoPat()).max_file_bytes, 300 * 1024 * 1024);
+  assert.equal((await rpcTool(env, bot("PAT-ACCT"), "fleetlink_create_share", { text: "x", slug: "pat-acct", days: "forever" })).error, null);
+  // ...and a disabled manager means the standard person's limits, never wider:
+  await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(pat.user.id).run();
+  assert.equal((await whoPat()).max_file_bytes, 100 * 1024 * 1024);
+  await env.DB.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(pat.user.id).run();
+
+  // Back to legacy:  the widest tier again, caps cleared.
+  const back = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "legacy" } });
+  assert.equal(back.data.bot.limit_mode, "legacy");
   assert.equal(back.data.bot.limits, null);
-  const forever2 = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-forever2", days: "forever" });
-  assert.equal(forever2.error, null);
+  const who3 = await rpcTool(env, bot("MA"), "fleetlink_whoami");
+  assert.equal(who3.data.limits.max_file_bytes, 300 * 1024 * 1024);
+  assert.equal(who3.data.limits.forever_allowed, true);
 
   // A stranger cannot set another account's bot limits.
   const eve = await signUp(env, "Eve", { email: "eve2@example.com" });

@@ -1,10 +1,11 @@
 import { AGENT_SECRET, ensureAgentUser, isAgentSecret } from "./agents.mjs";
 import { safeEqual } from "./bytes.mjs";
+import { first } from "./db.mjs";
 import { getUser } from "./users.mjs";
 import { cookie, forbidden, HttpError, unauthorized } from "./http.mjs";
 import { OPERATOR_USER_ID } from "./schema.mjs";
 import { lookupSession, SESSION_COOKIE, SESSION_TOKEN } from "./sessions.mjs";
-import { API_TOKEN, lookupToken, tokenLimitsUser } from "./tokens.mjs";
+import { API_TOKEN, lookupToken, STANDARD_LIMITS_USER, tokenLimitsUser } from "./tokens.mjs";
 
 /**
  * A principal is who a request acts as:
@@ -27,15 +28,24 @@ export function parseAgentLimits(raw) {
 }
 
 /**
- * The limit policy a bot works under (users.agent_limit_mode).  'account' is
- * the shipped behavior:  the bot's own, widest limits, which move automatically
- * with the account's settings.  'manual' clamps that tier with the bot's
- * stored caps, so a cap can only tighten, never widen.  Not a bot, or account
- * mode:  no resolution.
+ * The limit policy a bot works under (users.agent_limit_mode):
+ *   'legacy'  - the shipped behavior:  the bot's own, widest tier.  Existing
+ *               bots keep it; nothing about their limits changes.
+ *   'account' - the bot follows its manager's live allowance, so a change to
+ *               the manager reaches the bot on its next request and the bot is
+ *               never wider than its manager.  A missing or inactive manager
+ *               falls back to the standard person's limits, never wider.
+ *   'manual'  - the manager's live allowance clamped by the bot's stored caps;
+ *               a cap can only tighten, never widen.
+ * A bot without a mode, or not a bot at all:  no resolution.
  */
 export async function agentLimitsResolution(env, user) {
-  if (user?.kind !== "agent" || user.agent_limit_mode !== "manual") return {};
-  return { limitsOverride: parseAgentLimits(user.agent_limits) };
+  const mode = user?.kind === "agent" ? user.agent_limit_mode : null;
+  if (mode !== "account" && mode !== "manual") return {};
+  const manager = user.manager_id ? await first(env.DB, "SELECT * FROM users WHERE id = ? AND status = 'active' AND kind = 'person'", user.manager_id) : null;
+  const limitsUser = manager ?? STANDARD_LIMITS_USER;
+  if (mode === "manual") return { limitsUser, limitsOverride: parseAgentLimits(user.agent_limits) };
+  return { limitsUser };
 }
 
 export function operatorSecret(env) {

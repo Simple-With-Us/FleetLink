@@ -39,7 +39,7 @@ const BotLimitsBody = z.object({
 const UpdateBotBody = z.object({
   display_name: z.string().max(64).optional(),
   status: z.enum(["active", "disabled"]).optional(),
-  limit_mode: z.enum(["account", "manual"]).optional(),
+  limit_mode: z.enum(["legacy", "account", "manual"]).optional(),
   limits: BotLimitsBody.nullable().optional()
 }).strict();
 const AgentTokenBody = z.object({
@@ -77,7 +77,7 @@ async function botView(env, row, stats = null) {
     usage: { shares: Number(usage?.shares ?? 0), bytes: Number(usage?.bytes ?? 0) },
     token_count: Number(tokens?.n ?? 0),
     token_last_used_at: iso(tokens?.last_used ?? null),
-    limit_mode: row.agent_limit_mode === "manual" ? "manual" : "account",
+    limit_mode: row.agent_limit_mode === "manual" ? "manual" : row.agent_limit_mode === "account" ? "account" : "legacy",
     limits: row.agent_limit_mode === "manual" ? parseAgentLimits(row.agent_limits) : null
   };
 }
@@ -131,14 +131,14 @@ export function botRoutes(router) {
     if (input.display_name !== undefined) changes.display_name = cleanDisplayName(input.display_name);
     if (input.status !== undefined && input.status !== bot.status) changes.status = input.status;
     if (input.limit_mode !== undefined || input.limits !== undefined) {
-      const mode = input.limit_mode ?? (bot.agent_limit_mode === "manual" ? "manual" : "account");
+      const mode = input.limit_mode ?? (["legacy", "account", "manual"].includes(bot.agent_limit_mode) ? bot.agent_limit_mode : "legacy");
       if (mode === "manual") {
         const caps = {};
         if (input.limits) for (const [key, value] of Object.entries(input.limits)) if (value != null) caps[key] = value;
         changes.agent_limit_mode = "manual";
         changes.agent_limits = Object.keys(caps).length ? JSON.stringify(caps) : null;
       } else {
-        changes.agent_limit_mode = "account";
+        changes.agent_limit_mode = mode;
         changes.agent_limits = null;
       }
     }

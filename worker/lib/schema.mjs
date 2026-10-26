@@ -294,9 +294,10 @@ export const MIGRATIONS = [
   { version: 6, name: "share_analytics", sql: SHARE_ANALYTICS },
   // Default team for new shares created by a user (null for personal).
   { version: 7, name: "user_default_team", sql: "ALTER TABLE users ADD COLUMN default_team_id TEXT REFERENCES teams(id) ON DELETE SET NULL;" },
-  // Per-bot limit policy: 'account' works under the bot manager's live limits;
-  // 'manual' clamps them with the JSON caps in agent_limits (see bots.mjs).
-  { version: 8, name: "agent_limits", sql: "ALTER TABLE users ADD COLUMN agent_limit_mode TEXT NOT NULL DEFAULT 'account' CHECK (agent_limit_mode IN ('account', 'manual')); ALTER TABLE users ADD COLUMN agent_limits TEXT;" }
+  // Per-bot limit policy: 'legacy' keeps the shipped widest tier; 'account'
+  // follows the manager's live allowance; 'manual' clamps that allowance with
+  // the JSON caps in agent_limits (see bots.mjs).  Existing bots stay legacy.
+  { version: 8, name: "agent_limits", sql: "ALTER TABLE users ADD COLUMN agent_limit_mode TEXT NOT NULL DEFAULT 'legacy' CHECK (agent_limit_mode IN ('legacy', 'account', 'manual')); ALTER TABLE users ADD COLUMN agent_limits TEXT;" }
 ];
 
 /**
