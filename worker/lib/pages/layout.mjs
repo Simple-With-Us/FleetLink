@@ -53,20 +53,20 @@ export function page(env, { title, body, head = "", principal = null, active = n
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)} · FleetLink</title>
-<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon.ico?v=${ASSET_VERSION}" sizes="16x16 32x32 48x48">
 <link rel="icon" type="image/png" href="/assets/favicon-light-512.png?v=${ASSET_VERSION}">
 <link rel="icon" type="image/png" href="/assets/favicon-light-512.png?v=${ASSET_VERSION}" media="(prefers-color-scheme: light)">
 <link rel="icon" type="image/png" href="/assets/favicon-dark-512.png?v=${ASSET_VERSION}" media="(prefers-color-scheme: dark)">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=${ASSET_VERSION}">
 <meta name="theme-color" content="#0b1f3a">
 <link rel="stylesheet" href="/assets/app.css?v=${ASSET_VERSION}">
 ${head}
 </head>
 <body class="${escapeHtml(bodyClass)}">
 <a class="skip" href="#main">Skip to content</a>
-<header class="top${principal ? "" : " is-public"}${heroBrand ? " is-hero" : ""}"><div class="bar"><a class="brand" href="/">${heroBrand && BRAND_FILES["fleetlink-wordmark.png"] ? "" : `${logoImg(64)}<span class="brand-text">FleetLink</span>`}${BRAND_FILES["fleetlink-wordmark.png"] ? `<picture class="brand-wordmark-picture"><source type="image/webp" srcset="/assets/fleetlink-wordmark.webp?v=${ASSET_VERSION}"><img class="brand-wordmark" src="/assets/fleetlink-wordmark.png?v=${ASSET_VERSION}" alt="FleetLink"></picture>` : ""}</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
+<header class="top${principal ? "" : " is-public"}${heroBrand ? " is-hero" : ""}"><div class="bar"><a class="brand" href="/">${BRAND_FILES["fleetlink-wordmark.png"] ? `<picture class="brand-wordmark-picture"><source type="image/webp" srcset="/assets/fleetlink-wordmark.webp?v=${ASSET_VERSION}"><img class="brand-wordmark" src="/assets/fleetlink-wordmark.png?v=${ASSET_VERSION}" alt="FleetLink" width="160" height="34"></picture>` : `${logoImg(64)}<span class="brand-text">FleetLink</span>`}</a><nav aria-label="Main">${navLinks(principal, active)}</nav></div></header>
 <main id="main"${fullBleed ? "" : ' class="wrap"'}>${body}</main>
-<footer class="foot"><div class="bar"><a class="brand" href="/">${logoImg(64)}FleetLink</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : ""}<a href="/#features">Features</a><a href="/agents">Agents</a><a href="/#guide">Help</a><a class="mail-icon" href="mailto:support@fleetlink.online" aria-label="Email support" title="Email support"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></a></nav><nav aria-label="Legal" class="legal"><a href="/privacy">Privacy</a></nav></div></footer>
+<footer class="foot"><div class="bar"><a class="brand" href="/">${BRAND_FILES["fleetlink-wordmark.png"] ? `<img class="brand-wordmark" src="/assets/fleetlink-wordmark.png?v=${ASSET_VERSION}" alt="FleetLink" width="160" height="34">` : `${logoImg(64)}FleetLink`}</a><nav aria-label="Footer">${principal ? '<a href="/dashboard">Dashboard</a>' : ""}<a href="/#features">Features</a><a href="/agents">Agents</a><a href="/#guide">Help</a><a class="mail-icon" href="mailto:support@fleetlink.online" aria-label="Email support" title="Email support"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></a></nav><nav aria-label="Legal" class="legal"><a href="/privacy">Privacy</a></nav></div></footer>
 ${scriptTags}
 </body>
 </html>`;

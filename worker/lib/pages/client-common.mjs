@@ -7,14 +7,31 @@ export const APP_JS = String.raw`
   "use strict";
   var FL = window.FL = {};
 
-  // Logo animations play once.  With reduced motion they stay on their still, the final frame.
-  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    document.querySelectorAll("[data-intro]").forEach(function (p) {
-      var img = p.tagName === "PICTURE" && p.querySelector("img");
-      if (img && p.dataset.still) { var src = p.querySelector("source"); if (src) src.remove(); img.src = p.dataset.still; }
-      else if (p.tagName === "VIDEO") { p.removeAttribute("autoplay"); p.pause(); }
-    });
-  }
+  // Muted, inline playback may still be denied by low-power/data policies.
+  // Keep an animated image fallback, and show a still for reduced motion.
+  var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.querySelectorAll("[data-intro]").forEach(function (intro) {
+    var video = intro.querySelector("video"), picture = intro.querySelector("picture");
+    if (!video || !picture) return;
+    if (reducedMotion) {
+      picture.replaceChildren(FLStill(intro.dataset.still, video.getAttribute("aria-label")));
+      video.removeAttribute("autoplay");
+      video.pause();
+      return;
+    }
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    // The element must be visible for WebKit's autoplay visibility policy.
+    video.hidden = false;
+    picture.hidden = true;
+    function fallback() { video.hidden = true; picture.hidden = false; }
+    video.querySelectorAll("source").forEach(function (source) { source.addEventListener("error", fallback); });
+    video.addEventListener("error", fallback);
+    var play = video.play();
+    if (play && play.catch) play.catch(fallback);
+  });
+  function FLStill(src, alt) { var img = document.createElement("img"); img.src = src; img.alt = alt || "FleetLink"; return img; }
 
   // The public top bar shows no brand until the hero intro's end frame slides fully
   // under the bar; then the wordmark fades in.  Pages without a hero intro fall back

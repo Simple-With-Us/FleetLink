@@ -32,30 +32,10 @@ function code(text) {
   return `<pre><code>${escapeHtml(text)}</code></pre>`;
 }
 
-/** A logo animation that plays once and rests on its last frame.  An animated
- * image, not a <video>:  Safari's video-autoplay setting cannot block it.
- * Animated WebP (loop count 1) with a GIF fallback; the .jpg is the still for
- * prefers-reduced-motion. */
+/** Muted inline video plays once; the animated image remains a fallback when
+ * browser power/data policy refuses video playback.  Reduced motion uses a still. */
 export function introVideo(name, cls, label) {
-  return `<picture class="${cls}" data-intro data-still="/assets/media/${name}.jpg"><source type="image/webp" srcset="/assets/media/${name}.webp"><img src="/assets/media/${name}.gif" alt="${escapeHtml(label)}"></picture>`;
-}
-
-/** A static picture of the dashboard, built from the dashboard's own components. */
-function dashboardPreview(name) {
-  const row = (slug, detail, pills, expires) => `<div class="preview-row"><div><span class="mono">${slug}</span><small>${detail}</small></div><div>${pills}<span class="pill gray">${expires}</span></div></div>`;
-  return `<div class="preview" aria-hidden="true">
-    <div class="preview-bar"><i></i><i></i><i></i><span>fleetlink.online/dashboard</span></div>
-    <div class="preview-body">
-      <h3>Hello, ${escapeHtml(name)}</h3>
-      <p class="small muted">5 live shares, 41 MB of 2.0 GB used.</p>
-      <div class="meter"><span class="meter-sample"></span></div>
-      <div class="preview-tabs"><b>Shares</b><span>New Share</span><span>API Tokens</span><span>Teams</span></div>
-      ${row("pr-2214-review", "build-agent · test report + 14 screenshots", '<span class="pill">Mobile team</span>', "in 3 days")}
-      ${row("spec-sync-v3", "Spec draft · rendered Markdown", '<span class="pill amber">Password</span>', "in 7 days")}
-      ${row("release-4127", "release-agent · ios-build.zip · 36 MB", '<span class="pill">Mobile team</span>', "in 7 days")}
-      ${row("standup", "→ linear.app/…/cycle-42", '<span class="pill gray">Link</span>', "in 30 days")}
-    </div>
-  </div>`;
+  return `<div class="${cls}" data-intro data-still="/assets/media/${name}.jpg"><video muted playsinline preload="none" aria-label="${escapeHtml(label)}" hidden><source src="/assets/media/${name}.mp4" type="video/mp4"></video><picture><source type="image/webp" srcset="/assets/media/${name}.webp"><img src="/assets/media/${name}.gif" alt="${escapeHtml(label)}"></picture></div>`;
 }
 
 /** The handoff, drawn as three cards: an agent publishes, a link is posted, a person reviews. */
@@ -174,7 +154,7 @@ export function home(ctx, principal) {
     principal,
     active: "home",
     fullBleed: true,
-    heroBrand: !principal,
+    heroBrand: true,
     scripts: ["app.js"],
     head: ogTags({ title: "FleetLink", description: "Where people and AI agents hand off work: files, folders, notes, and short links with an owner and an expiry.", url: `${origin}/`, image: `${origin}/preview.png` }) + appClipMeta(ctx.env),
     body: `${deleted}<section class="hero">
@@ -187,7 +167,6 @@ export function home(ctx, principal) {
           <div class="actions">${cta}</div>
           <p class="fine">${fine}</p>
         </div>
-        ${dashboardPreview(name)}
       </div>
     </section>
     <div class="strip"><div class="bar">
