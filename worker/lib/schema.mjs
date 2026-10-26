@@ -297,7 +297,11 @@ export const MIGRATIONS = [
   // Per-bot limit policy: 'legacy' keeps the shipped widest tier; 'account'
   // follows the manager's live allowance; 'manual' clamps that allowance with
   // the JSON caps in agent_limits (see bots.mjs).  Existing bots stay legacy.
-  { version: 8, name: "agent_limits", sql: "ALTER TABLE users ADD COLUMN agent_limit_mode TEXT NOT NULL DEFAULT 'legacy' CHECK (agent_limit_mode IN ('legacy', 'account', 'manual')); ALTER TABLE users ADD COLUMN agent_limits TEXT;" }
+  { version: 8, name: "agent_limits", sql: "ALTER TABLE users ADD COLUMN agent_limit_mode TEXT NOT NULL DEFAULT 'legacy' CHECK (agent_limit_mode IN ('legacy', 'account', 'manual')); ALTER TABLE users ADD COLUMN agent_limits TEXT;" },
+  // A person's default limit policy for their bots:  bots on 'inherit' resolve
+  // this live on every request, so changing the default reaches them at once.
+  // Explicit per-bot modes always win;  existing bots stay 'legacy'.
+  { version: 9, name: "bot_default_limits", sql: "ALTER TABLE users ADD COLUMN bot_default_mode TEXT NOT NULL DEFAULT 'legacy' CHECK (bot_default_mode IN ('legacy', 'account', 'manual')); ALTER TABLE users ADD COLUMN bot_default_limits TEXT; ALTER TABLE users ADD COLUMN agent_inherits_defaults INTEGER NOT NULL DEFAULT 0 CHECK (agent_inherits_defaults IN (0, 1));" }
 ];
 
 /**

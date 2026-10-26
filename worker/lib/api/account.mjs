@@ -1,6 +1,8 @@
 /** Routes for a person's own account: passkeys, sessions, profile, tokens, and teams. */
 import { z } from "zod";
 import { audit } from "../audit.mjs";
+import { parseAgentLimits } from "../auth.mjs";
+import { BotLimitsBody } from "./bots.mjs";
 import { first, now, run } from "../db.mjs";
 import { ensureFleetOwner } from "../fleet.mjs";
 import { badRequest, cookie, json, parseWith, readBody, redirect, wantsJson } from "../http.mjs";
@@ -16,7 +18,9 @@ import { accountSummary, assertEmailFree, cleanDisplayName, cleanEmail, closeAcc
 const UpdateMeBody = z.object({
   display_name: z.string().max(200).optional(),
   email: z.string().max(254).nullable().optional(),
-  default_team_id: z.string().max(64).nullable().optional()
+  default_team_id: z.string().max(64).nullable().optional(),
+  bot_default_mode: z.enum(["legacy", "account", "manual"]).optional(),
+  bot_default_limits: BotLimitsBody.nullable().optional()
 }).strict();
 
 const DeleteMeBody = z.object({ confirm: z.literal("delete my account") }).strict();
@@ -27,6 +31,8 @@ async function principalSummary(ctx, principal) {
   if (principal.user.kind !== "agent") {
     const bots = await first(ctx.env.DB, "SELECT COUNT(*) AS n FROM users WHERE kind = 'agent' AND manager_id = ? AND status != 'deleted'", principal.user.id);
     summary.bots = { count: Number(bots?.n ?? 0), fleet_owner: ownerId === principal.user.id };
+    const mode = ["account", "manual"].includes(principal.user.bot_default_mode) ? principal.user.bot_default_mode : "legacy";
+    summary.bot_defaults = { mode, limits: mode === "manual" ? parseAgentLimits(principal.user.bot_default_limits) : null };
   }
   summary.auth = { kind: principal.kind };
   // A token that follows its manager reports the manager's current quotas.
@@ -90,6 +96,23 @@ export function accountRoutes(router) {
       }
       sets.push("default_team_id = ?");
       args.push(defTeam);
+    }
+    if (input.bot_default_mode !== undefined || input.bot_default_limits !== undefined) {
+      const mode = input.bot_default_mode ?? (["legacy", "account", "manual"].includes(principal.user.bot_default_mode) ? principal.user.bot_default_mode : "legacy");
+      if (input.bot_default_limits !== undefined && input.bot_default_limits !== null && mode !== "manual") throw badRequest("bot_default_limits requires manual mode.");
+      sets.push("bot_default_mode = ?");
+      args.push(mode);
+      if (mode === "manual") {
+        const caps = input.bot_default_limits === null ? {} : { ...(parseAgentLimits(principal.user.bot_default_limits) || {}) };
+        if (input.bot_default_limits) for (const [key, value] of Object.entries(input.bot_default_limits)) {
+          if (value == null) delete caps[key]; else caps[key] = value;
+        }
+        sets.push("bot_default_limits = ?");
+        args.push(Object.keys(caps).length ? JSON.stringify(caps) : null);
+      } else {
+        sets.push("bot_default_limits = ?");
+        args.push(null);
+      }
     }
     if (sets.length) {
       try {

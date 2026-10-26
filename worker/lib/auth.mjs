@@ -37,12 +37,28 @@ export function parseAgentLimits(raw) {
  *               falls back to the standard person's limits, never wider.
  *   'manual'  - the manager's live allowance clamped by the bot's stored caps;
  *               a cap can only tighten, never widen.
+ *   'inherit' - the manager's current account-wide default (bot_default_mode /
+ *               bot_default_limits), resolved live;  an explicit per-bot mode
+ *               always wins over it.
  * A bot without a mode, or not a bot at all:  no resolution.
  */
 export async function agentLimitsResolution(env, user) {
-  const mode = user?.kind === "agent" ? user.agent_limit_mode : null;
-  if (mode !== "account" && mode !== "manual") return {};
+  const mode = user?.kind === "agent" ? (user.agent_inherits_defaults === 1 ? "inherit" : user.agent_limit_mode) : null;
+  if (mode !== "account" && mode !== "manual" && mode !== "inherit") return {};
   const manager = user.manager_id ? await first(env.DB, "SELECT * FROM users WHERE id = ? AND status = 'active' AND kind = 'person'", user.manager_id) : null;
+  if (mode === "inherit") {
+    // The manager's current default policy, resolved on every request.  A
+    // default of 'legacy' is the widest tier, as an explicit policy choice.
+    // A missing or inactive manager fails CLOSED:  the standard person's
+    // limits, never wider - an opted-in bot must not fall back to the widest
+    // tier just because its manager is gone.
+    if (!manager) return { limitsUser: STANDARD_LIMITS_USER };
+    const inherited = manager.bot_default_mode === "account" || manager.bot_default_mode === "manual" ? manager.bot_default_mode : "legacy";
+    if (inherited === "legacy") return {};
+    const resolution = { limitsUser: manager };
+    if (inherited === "manual") resolution.limitsOverride = parseAgentLimits(manager.bot_default_limits);
+    return resolution;
+  }
   const limitsUser = manager ?? STANDARD_LIMITS_USER;
   if (mode === "manual") return { limitsUser, limitsOverride: parseAgentLimits(user.agent_limits) };
   return { limitsUser };

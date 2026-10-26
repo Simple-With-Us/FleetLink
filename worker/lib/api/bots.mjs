@@ -27,7 +27,7 @@ const CreateBotBody = z.object({
   display_name: z.string().max(64).optional()
 }).strict();
 /** A bot's manual caps: each is the tighter of this and the manager's own limit. */
-const BotLimitsBody = z.object({
+export const BotLimitsBody = z.object({
   max_file_mb: z.number().int().positive().max(1_000_000).nullable().optional(),
   max_share_mb: z.number().int().positive().max(1_000_000).nullable().optional(),
   max_share_files: z.number().int().positive().max(1_000_000).nullable().optional(),
@@ -39,7 +39,7 @@ const BotLimitsBody = z.object({
 const UpdateBotBody = z.object({
   display_name: z.string().max(64).optional(),
   status: z.enum(["active", "disabled"]).optional(),
-  limit_mode: z.enum(["legacy", "account", "manual"]).optional(),
+  limit_mode: z.enum(["legacy", "account", "manual", "inherit"]).optional(),
   limits: BotLimitsBody.nullable().optional()
 }).strict();
 const AgentTokenBody = z.object({
@@ -77,7 +77,7 @@ async function botView(env, row, stats = null) {
     usage: { shares: Number(usage?.shares ?? 0), bytes: Number(usage?.bytes ?? 0) },
     token_count: Number(tokens?.n ?? 0),
     token_last_used_at: iso(tokens?.last_used ?? null),
-    limit_mode: row.agent_limit_mode === "manual" ? "manual" : row.agent_limit_mode === "account" ? "account" : "legacy",
+    limit_mode: row.agent_inherits_defaults === 1 ? "inherit" : ["account", "manual"].includes(row.agent_limit_mode) ? row.agent_limit_mode : "legacy",
     limits: row.agent_limit_mode === "manual" ? parseAgentLimits(row.agent_limits) : null
   };
 }
@@ -109,8 +109,8 @@ export function botRoutes(router) {
     const ts = now();
     const created = await run(
       ctx.env.DB,
-      `INSERT OR IGNORE INTO users (id, display_name, role, status, is_system, kind, agent_seat, manager_id, created_at, updated_at)
-       VALUES (?, ?, 'user', 'active', 0, 'agent', ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO users (id, display_name, role, status, is_system, kind, agent_seat, manager_id, agent_inherits_defaults, created_at, updated_at)
+       VALUES (?, ?, 'user', 'active', 0, 'agent', ?, ?, 1, ?, ?)`,
       id, name, seat, principal.user.id, ts, ts
     );
     if (!created) throw conflict(`A bot with the seat ${seat} already exists.`);
@@ -131,7 +131,8 @@ export function botRoutes(router) {
     if (input.display_name !== undefined) changes.display_name = cleanDisplayName(input.display_name);
     if (input.status !== undefined && input.status !== bot.status) changes.status = input.status;
     if (input.limit_mode !== undefined || input.limits !== undefined) {
-      const mode = input.limit_mode ?? (["legacy", "account", "manual"].includes(bot.agent_limit_mode) ? bot.agent_limit_mode : "legacy");
+      const mode = input.limit_mode ?? (bot.agent_inherits_defaults === 1 ? "inherit" : (["legacy", "account", "manual"].includes(bot.agent_limit_mode) ? bot.agent_limit_mode : "legacy"));
+      changes.agent_inherits_defaults = mode === "inherit" ? 1 : 0;
       if (input.limits !== undefined && input.limits !== null && mode !== "manual") throw badRequest("limits requires manual mode.");
       if (mode === "manual") {
         // Merge into the stored caps:  a partial update must not silently
@@ -144,7 +145,7 @@ export function botRoutes(router) {
         changes.agent_limit_mode = "manual";
         changes.agent_limits = Object.keys(caps).length ? JSON.stringify(caps) : null;
       } else {
-        changes.agent_limit_mode = mode;
+        changes.agent_limit_mode = mode === "inherit" ? "legacy" : mode;
         changes.agent_limits = null;
       }
     }

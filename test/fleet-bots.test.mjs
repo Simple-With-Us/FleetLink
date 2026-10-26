@@ -327,6 +327,102 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
   assert.equal((await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: eve, json: { limit_mode: "manual" } })).status, 404);
 });
 
+test("an 'inherit' bot tracks its manager's account-wide default live, explicit modes win, and a missing manager fails closed", async () => {
+  const { env, jay } = await fleet();
+  await callJson(env, "GET", "/api/me", { auth: jay });
+
+  const pat = await signUp(env, "Pat", { email: "pat@example.com" });
+  const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-inh" } })).data.bot;
+  // The API surface for 'inherit' and account defaults lands with the UI stage;
+  // these tests set the columns directly to pin the resolution layer.
+  const setBotMode = (id, mode) => env.DB.prepare("UPDATE users SET agent_limit_mode = ?, agent_inherits_defaults = ? WHERE id = ?").bind(mode === "inherit" ? "legacy" : mode, mode === "inherit" ? 1 : 0, id).run();
+  const setDefault = (id, mode, caps = null) => env.DB.prepare("UPDATE users SET bot_default_mode = ?, bot_default_limits = ? WHERE id = ?").bind(mode, caps, id).run();
+  const whoPat = async () => (await rpcTool(env, bot("PAT-INH"), "fleetlink_whoami")).data.limits;
+
+  await setBotMode(patBot.id, "inherit");
+
+  // Manager default 'legacy' is an explicit policy choice:  the widest tier.
+  await setDefault(pat.user.id, "legacy");
+  assert.equal((await whoPat()).max_file_bytes, 300 * 1024 * 1024);
+
+  // Changing the default to 'account' reaches the bot on its next request.
+  await setDefault(pat.user.id, "account");
+  assert.deepEqual([(await whoPat()).max_file_bytes, (await whoPat()).follows], [100 * 1024 * 1024, "manager"]);
+  assert.equal((await rpcTool(env, bot("PAT-INH"), "fleetlink_create_share", { text: "x", slug: "inh-f", days: "forever" })).error, "Only admins can make a share that never expires.");
+
+  // Changing it to 'manual' clamps with the manager's stored default caps.
+  await setDefault(pat.user.id, "manual", JSON.stringify({ max_file_mb: 2 }));
+  assert.equal((await whoPat()).max_file_bytes, 2 * 1024 * 1024);
+  assert.equal((await whoPat()).forever_allowed, false);
+
+  // And back:  every mutation is picked up live, with no new token.
+  await setDefault(pat.user.id, "account");
+  assert.equal((await whoPat()).max_file_bytes, 100 * 1024 * 1024);
+
+  // A disabled manager fails CLOSED for an inherit bot:  standard limits, never widest.
+  await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(pat.user.id).run();
+  assert.equal((await whoPat()).max_file_bytes, 100 * 1024 * 1024);
+  await env.DB.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(pat.user.id).run();
+
+  // A missing manager also fails closed, for inherit AND for manual.
+  await env.DB.prepare("UPDATE users SET manager_id = NULL WHERE id = ?").bind(patBot.id).run();
+  assert.equal((await whoPat()).max_file_bytes, 100 * 1024 * 1024);
+  await setBotMode(patBot.id, "manual");
+  await env.DB.prepare("UPDATE users SET agent_limits = ? WHERE id = ?").bind(JSON.stringify({ max_file_mb: 500 }), patBot.id).run();
+  assert.equal((await whoPat()).max_file_bytes, 100 * 1024 * 1024); // standard base; the 500 MB cap cannot widen it
+
+  // Explicit per-bot modes and 'legacy' bots are untouched by the manager's default.
+  // Jay sets a tight default;  MA (legacy) and an explicit-account bot ignore it.
+  await setDefault(jay.user.id, "manual", JSON.stringify({ max_file_mb: 1 }));
+  const whoMA = await rpcTool(env, bot("MA"), "fleetlink_whoami");
+  assert.equal(whoMA.data.limits.max_file_bytes, 300 * 1024 * 1024); // legacy: unchanged widest
+  assert.equal(whoMA.data.limits.forever_allowed, true);
+});
+
+test("the account-wide bot default:  set on /api/me, exposed there, and new bots start on 'inherit'", async () => {
+  const { env, jay } = await fleet();
+  const me0 = await callJson(env, "GET", "/api/me", { auth: jay });
+  assert.deepEqual(me0.data.bot_defaults, { mode: "legacy", limits: null });
+
+  const set = await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_default_mode: "manual", bot_default_limits: { max_file_mb: 5 } } });
+  assert.equal(set.status, 200);
+  assert.deepEqual(set.data.bot_defaults, { mode: "manual", limits: { max_file_mb: 5 } });
+
+  // A bad mode is rejected;  leaving manual clears the stored caps.
+  assert.equal((await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_default_mode: "inherit" } })).status, 400);
+  const back = await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_default_mode: "account" } });
+  assert.deepEqual(back.data.bot_defaults, { mode: "account", limits: null });
+
+  // A bot added through the API starts on 'inherit';  the seeded fleet bots stay 'legacy'.
+  const made = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "fresh-inh" } });
+  assert.equal(made.data.bot.limit_mode, "inherit");
+  const list = await callJson(env, "GET", "/api/bots", { auth: jay });
+  assert.ok(list.data.bots.filter((b) => b.seat !== "FRESH-INH").every((b) => b.limit_mode === "legacy"));
+});
+
+test("migration order v8 -> v9 applies cleanly and pre-existing rows are unchanged", async () => {
+  const { env, jay } = await fleet();
+  await callJson(env, "GET", "/api/me", { auth: jay });
+
+  // v8 (agent limit mode/caps) and v9 (account-wide bot default) both applied, in order.
+  const versions = (await env.DB.prepare("SELECT version FROM schema_migrations WHERE version >= 8 ORDER BY version").all()).results.map((r) => r.version);
+  assert.deepEqual(versions.slice(0, 2), [8, 9]);
+
+  // Every pre-existing fleet bot keeps the explicit legacy policy;  no person
+  // gains a non-legacy default silently.
+  const bots = (await env.DB.prepare("SELECT agent_limit_mode FROM users WHERE kind = 'agent'").all()).results;
+  assert.ok(bots.length >= 37);
+  assert.ok(bots.every((r) => r.agent_limit_mode === "legacy"));
+  const people = (await env.DB.prepare("SELECT bot_default_mode FROM users WHERE kind = 'person'").all()).results;
+  assert.ok(people.every((r) => r.bot_default_mode === "legacy"));
+
+  // A row inserted the old way (no new columns named) still resolves as legacy,
+  // so data written before this stage behaves exactly as before it.
+  await env.DB.prepare("INSERT INTO users (id, display_name, role, status, is_system, kind, agent_seat, manager_id, created_at, updated_at) VALUES ('usr_agent_oldrow', 'OLDROW (bot)', 'user', 'active', 0, 'agent', 'OLDROW', ?, 1, 1)").bind(jay.user.id).run();
+  const who = await rpcTool(env, bot("OLDROW"), "fleetlink_whoami");
+  assert.equal(who.data.limits.max_file_bytes, 300 * 1024 * 1024);
+  assert.equal(who.data.limits.forever_allowed, true);
+});
  test("limits null clears all caps while omitted limits preserves them", async () => {
  const {env,jay}=await fleet(); await callJson(env,"GET","/api/me",{auth:jay});
  const set=(json)=>callJson(env,"PATCH","/api/bots/usr_agent_ma",{auth:jay,json});
@@ -335,7 +431,51 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
  assert.equal((await set({limits:null})).data.bot.limits,null);
  });
 
+test('default cap PATCH validates policy, merges partial caps, and supports clear-all',async()=>{
+ const {env,jay}=await fleet();
+ const patch=json=>callJson(env,'PATCH','/api/me',{auth:jay,json});
+ assert.equal((await patch({bot_default_limits:{max_file_mb:2}})).status,400);
+ await patch({bot_default_mode:'manual',bot_default_limits:{max_file_mb:2,max_file_days:3}});
+ assert.deepEqual((await patch({bot_default_limits:{max_file_mb:4}})).data.bot_defaults.limits,{max_file_mb:4,max_file_days:3});
+ assert.equal((await patch({bot_default_limits:null})).data.bot_defaults.limits,null);
+ await patch({bot_default_mode:'account'});
+ assert.equal((await patch({bot_default_mode:'account',bot_default_limits:{max_file_mb:2}})).status,400);
+});
+
+test('inherited default changes do not alter explicit account/manual or legacy; disabled manager stays restricted',async()=>{
+ const env=await makeEnv({AGENT_SYNC_SECRET:AGENT_SECRET});
+ const pat=await signUp(env,'Policy manager');
+ const create=async seat=>(await callJson(env,'POST','/api/bots',{auth:pat,json:{seat}})).data.bot;
+ const a=await create('explicit-acct'),m=await create('explicit-cap'),l=await create('explicit-old'),i=await create('inherited');
+ for(const [b,mode,limits] of [[a,'account',undefined],[m,'manual',{max_file_mb:4}],[l,'legacy',undefined]]) await callJson(env,'PATCH','/api/bots/'+b.id,{auth:pat,json:{limit_mode:mode,limits}});
+ const cap=async seat=>(await rpcTool(env,bot(seat),'fleetlink_whoami')).data.limits.max_file_bytes;
+ for(const mode of ['manual','account','legacy']) {
+  await callJson(env,'PATCH','/api/me',{auth:pat,json:{bot_default_mode:mode,...(mode==='manual'?{bot_default_limits:{max_file_mb:1}}:{})}});
+  assert.equal(await cap('EXPLICIT-ACCT'),100*1024*1024);
+  assert.equal(await cap('EXPLICIT-CAP'),4*1024*1024);
+  assert.equal(await cap('EXPLICIT-OLD'),300*1024*1024);
+  assert.equal(await cap('INHERITED'),(mode==='manual'?1:mode==='account'?100:300)*1024*1024);
+ }
+ await env.DB.prepare("UPDATE users SET status='disabled' WHERE id=?").bind(pat.user.id).run();
+ assert.equal(await cap('INHERITED'),100*1024*1024);
+ assert.equal(await cap('EXPLICIT-CAP'),4*1024*1024);
+});
+
 test('non-manual bot rejects caps rather than silently discarding them',async()=>{
  const {env,jay}=await fleet();await callJson(env,'GET','/api/me',{auth:jay});
  assert.equal((await callJson(env,'PATCH','/api/bots/usr_agent_ma',{auth:jay,json:{limit_mode:'account',limits:{max_file_mb:1}}})).status,400);
+});
+
+test('bot PATCH sanitizes an invalid stored mode before clearing limits',async()=>{
+ const {env,jay}=await fleet();
+ await callJson(env,'GET','/api/me',{auth:jay});
+ // Simulate a legacy/corrupted row outside the normal validated write path.
+ await env.DB.prepare('PRAGMA ignore_check_constraints = ON').run();
+ await env.DB.prepare("UPDATE users SET agent_limit_mode='invalid', agent_inherits_defaults=0 WHERE id='usr_agent_ma'").run();
+ await env.DB.prepare('PRAGMA ignore_check_constraints = OFF').run();
+ const result=await callJson(env,'PATCH','/api/bots/usr_agent_ma',{auth:jay,json:{limits:null}});
+ assert.equal(result.status,200);
+ assert.equal(result.data.bot.limit_mode,'legacy');
+ const row=await env.DB.prepare("SELECT agent_limit_mode FROM users WHERE id='usr_agent_ma'").first();
+ assert.equal(row.agent_limit_mode,'legacy');
 });

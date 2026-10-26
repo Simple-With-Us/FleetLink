@@ -58,8 +58,8 @@ export async function ensureAgentUser(env, rawSeat) {
   const owner = await fleetOwner(env);
   const created = await run(
     env.DB,
-    `INSERT OR IGNORE INTO users (id, display_name, role, status, is_system, kind, agent_seat, manager_id, created_at, updated_at)
-     VALUES (?, ?, 'user', 'active', 0, 'agent', ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO users (id, display_name, role, status, is_system, kind, agent_seat, manager_id, agent_inherits_defaults, created_at, updated_at)
+     VALUES (?, ?, 'user', 'active', 0, 'agent', ?, ?, 1, ?, ?)`,
     id, `${seat} (bot)`, seat, owner?.id ?? null, ts, ts
   );
   if (created) {
