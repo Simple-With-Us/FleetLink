@@ -293,7 +293,10 @@ export const MIGRATIONS = [
   // Per-share daily traffic for the dashboard's analytics view.
   { version: 6, name: "share_analytics", sql: SHARE_ANALYTICS },
   // Default team for new shares created by a user (null for personal).
-  { version: 7, name: "user_default_team", sql: "ALTER TABLE users ADD COLUMN default_team_id TEXT REFERENCES teams(id) ON DELETE SET NULL;" }
+  { version: 7, name: "user_default_team", sql: "ALTER TABLE users ADD COLUMN default_team_id TEXT REFERENCES teams(id) ON DELETE SET NULL;" },
+  // Per-bot limit policy: 'account' works under the bot manager's live limits;
+  // 'manual' clamps them with the JSON caps in agent_limits (see bots.mjs).
+  { version: 8, name: "agent_limits", sql: "ALTER TABLE users ADD COLUMN agent_limit_mode TEXT NOT NULL DEFAULT 'account' CHECK (agent_limit_mode IN ('account', 'manual')); ALTER TABLE users ADD COLUMN agent_limits TEXT;" }
 ];
 
 /**

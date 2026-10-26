@@ -17,6 +17,7 @@ import { all, first, now, run } from "../db.mjs";
 import { ensureFleetOwner, fleetOwner } from "../fleet.mjs";
 import { FLEET_TEAM_ID } from "../fleet-roster.mjs";
 import { badRequest, conflict, forbidden, iso, json, notFound, parseWith, readBody } from "../http.mjs";
+import { parseAgentLimits } from "../auth.mjs";
 import { agentUserId } from "../schema.mjs";
 import { createToken, listTokens, revokeToken } from "../tokens.mjs";
 import { cleanDisplayName, signOutEverywhere } from "../users.mjs";
@@ -25,9 +26,21 @@ const CreateBotBody = z.object({
   seat: z.string().trim().min(2).max(24),
   display_name: z.string().max(64).optional()
 }).strict();
+/** A bot's manual caps: each is the tighter of this and the manager's own limit. */
+const BotLimitsBody = z.object({
+  max_file_mb: z.number().int().positive().max(1_000_000).nullable().optional(),
+  max_share_mb: z.number().int().positive().max(1_000_000).nullable().optional(),
+  max_share_files: z.number().int().positive().max(1_000_000).nullable().optional(),
+  max_file_days: z.number().int().positive().max(36500).nullable().optional(),
+  max_link_days: z.number().int().positive().max(36500).nullable().optional(),
+  max_renewals: z.number().int().positive().max(1000).nullable().optional(),
+  max_forever_mb: z.number().int().positive().max(1_000_000).nullable().optional()
+}).strict();
 const UpdateBotBody = z.object({
   display_name: z.string().max(64).optional(),
-  status: z.enum(["active", "disabled"]).optional()
+  status: z.enum(["active", "disabled"]).optional(),
+  limit_mode: z.enum(["account", "manual"]).optional(),
+  limits: BotLimitsBody.nullable().optional()
 }).strict();
 const AgentTokenBody = z.object({
   name: z.string().trim().min(1).max(64).optional(),
@@ -63,7 +76,9 @@ async function botView(env, row, stats = null) {
     created_at: iso(row.created_at),
     usage: { shares: Number(usage?.shares ?? 0), bytes: Number(usage?.bytes ?? 0) },
     token_count: Number(tokens?.n ?? 0),
-    token_last_used_at: iso(tokens?.last_used ?? null)
+    token_last_used_at: iso(tokens?.last_used ?? null),
+    limit_mode: row.agent_limit_mode === "manual" ? "manual" : "account",
+    limits: row.agent_limit_mode === "manual" ? parseAgentLimits(row.agent_limits) : null
   };
 }
 
@@ -115,6 +130,18 @@ export function botRoutes(router) {
     const changes = {};
     if (input.display_name !== undefined) changes.display_name = cleanDisplayName(input.display_name);
     if (input.status !== undefined && input.status !== bot.status) changes.status = input.status;
+    if (input.limit_mode !== undefined || input.limits !== undefined) {
+      const mode = input.limit_mode ?? (bot.agent_limit_mode === "manual" ? "manual" : "account");
+      if (mode === "manual") {
+        const caps = {};
+        if (input.limits) for (const [key, value] of Object.entries(input.limits)) if (value != null) caps[key] = value;
+        changes.agent_limit_mode = "manual";
+        changes.agent_limits = Object.keys(caps).length ? JSON.stringify(caps) : null;
+      } else {
+        changes.agent_limit_mode = "account";
+        changes.agent_limits = null;
+      }
+    }
     if (Object.keys(changes).length) {
       const keys = Object.keys(changes);
       await run(ctx.env.DB, `UPDATE users SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = ? WHERE id = ?`, ...keys.map((k) => changes[k]), now(), bot.id);

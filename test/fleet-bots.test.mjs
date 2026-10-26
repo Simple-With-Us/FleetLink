@@ -256,3 +256,49 @@ test("fleet bot tokens under the fleet owner can post forever, renew forever, an
   assert.equal(renewedHttp.status, 200);
   assert.equal(renewedHttp.data.share.expires_at, null);
 });
+
+test("a bot's limits follow its manager's account by default, or clamp to manual maxes", async () => {
+  const { env, jay } = await fleet();
+  await callJson(env, "GET", "/api/me", { auth: jay });
+
+  // Default: account mode, following the manager (an admin here).
+  const view = await callJson(env, "GET", "/api/bots", { auth: jay });
+  assert.ok(view.data.bots.every((b) => b.limit_mode === "account" && b.limits === null));
+
+  // Manual maxes: stored, shown, and enforced through the Agent-Sync path.
+  const patched = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "manual", limits: { max_file_days: 2, max_file_mb: 1 } } });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.data.bot.limit_mode, "manual");
+  assert.deepEqual(patched.data.bot.limits, { max_file_days: 2, max_file_mb: 1 });
+  const capped = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-capped", days: 5 });
+  assert.equal(capped.error, "File shares last at most 2 days.");
+  const within = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-within", days: 2 });
+  assert.equal(within.error, null);
+  const forever = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-forever", days: "forever" });
+  assert.equal(forever.error, "Only admins can make a share that never expires.");
+  const who = await rpcTool(env, bot("MA"), "fleetlink_whoami");
+  assert.equal(who.data.limits.max_file_bytes, 1 * 1024 * 1024);
+  assert.equal(who.data.limits.forever_allowed, false);
+
+  // Manual caps also reach a bot's API tokens.
+  await callJson(env, "PATCH", "/api/bots/usr_agent_codex", { auth: jay, json: { limit_mode: "manual", limits: { max_link_days: 10 } } });
+  const tok = await callJson(env, "POST", "/api/bots/usr_agent_codex/tokens", { auth: jay, json: { name: "codex capped" } });
+  const link = await callJson(env, "POST", "/api/links", { auth: { token: tok.data.token }, json: { url: "https://example.com", days: 30 } });
+  assert.equal(link.status, 403);
+
+  // Caps never widen past the manager's own limits.
+  await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "manual", limits: { max_file_mb: 9999 } } });
+  const who2 = await rpcTool(env, bot("MA"), "fleetlink_whoami");
+  assert.equal(who2.data.limits.max_file_bytes, 300 * 1024 * 1024);
+
+  // Switching back to account mode clears the caps.
+  const back = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "account" } });
+  assert.equal(back.data.bot.limit_mode, "account");
+  assert.equal(back.data.bot.limits, null);
+  const forever2 = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-forever2", days: "forever" });
+  assert.equal(forever2.error, null);
+
+  // A stranger cannot set another account's bot limits.
+  const eve = await signUp(env, "Eve", { email: "eve2@example.com" });
+  assert.equal((await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: eve, json: { limit_mode: "manual" } })).status, 404);
+});

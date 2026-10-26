@@ -66,17 +66,49 @@ export function cleanPath(value) {
   return segments.join("/");
 }
 
-/** Site admins and bots work with the admin limits:  bigger files and shares, any lifetime, short names. */
+/** Site admins and bots work with the admin limits:  bigger files and shares, any lifetime, short names.  A bot on manual caps is never unlimited. */
 export function fullLimits(principal) {
+  if (principal?.limitsOverride) return false;
   if (principal?.limitsUser) return principal.limitsUser.role === "admin";
   return Boolean(principal?.isAdmin || principal?.user?.kind === "agent");
 }
 
+/**
+ * A bot's manual caps (its agent_limits) clamp the tier it would otherwise
+ * work under:  each set cap takes the tighter of the cap and the account's own
+ * limit, and a cap turns an unlimited (admin) value into the cap.  Defaults
+ * never stay above their max.
+ */
+export function applyLimitsOverride(limits, override) {
+  if (!override) return limits;
+  const out = { ...limits };
+  const clamp = (key, value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return;
+    out[key] = out[key] == null ? n : Math.min(out[key], n);
+  };
+  clamp("fileBytes", override.max_file_mb * MB);
+  clamp("shareBytes", override.max_share_mb * MB);
+  clamp("shareFiles", override.max_share_files);
+  clamp("fileDays", override.max_file_days);
+  clamp("linkDays", override.max_link_days);
+  clamp("renewals", override.max_renewals);
+  clamp("foreverMaxBytes", override.max_forever_mb * MB);
+  if (out.fileDefaultDays != null && out.fileDays != null) out.fileDefaultDays = Math.min(out.fileDefaultDays, out.fileDays);
+  if (out.linkDefaultDays != null && out.linkDays != null) out.linkDefaultDays = Math.min(out.linkDefaultDays, out.linkDays);
+  return out;
+}
+
+/** The tier a principal starts from:  admins and bots start wide;  a bot on manual caps still starts wide, then clamps (fullLimits gates the admin-only actions separately). */
+function tierBase(principal) {
+  return fullLimits(principal) || (Boolean(principal?.limitsOverride) && principal?.user?.kind === "agent");
+}
+
 export function tier(principal, settings) {
-  const isAdmin = fullLimits(principal);
-  if (!settings) return isAdmin ? LIMITS.admin : LIMITS.user;
+  const isAdmin = tierBase(principal);
+  if (!settings) return applyLimitsOverride(isAdmin ? LIMITS.admin : LIMITS.user, principal?.limitsOverride);
   if (isAdmin) {
-    return {
+    return applyLimitsOverride({
       fileBytes: (settings.admin_max_file_mb ?? 300) * MB,
       shareBytes: (settings.admin_max_share_mb ?? 1024) * MB,
       shareFiles: settings.admin_max_share_files ?? 2000,
@@ -86,9 +118,9 @@ export function tier(principal, settings) {
       linkDefaultDays: settings.admin_default_link_days ?? 30,
       renewals: null,
       foreverMaxBytes: (settings.admin_forever_max_mb ?? 500) * MB
-    };
+    }, principal?.limitsOverride);
   }
-  return {
+  return applyLimitsOverride({
     fileBytes: (settings.user_max_file_mb ?? 100) * MB,
     shareBytes: (settings.user_max_share_mb ?? 500) * MB,
     shareFiles: settings.user_max_share_files ?? 500,
@@ -98,7 +130,7 @@ export function tier(principal, settings) {
     linkDefaultDays: settings.user_default_link_days ?? 30,
     renewals: settings.user_max_renewals ?? 3,
     foreverMaxBytes: 0
-  };
+  }, principal?.limitsOverride);
 }
 
 /** Per-file cap after the principal's token narrows it. */
