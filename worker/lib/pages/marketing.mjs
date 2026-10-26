@@ -35,7 +35,7 @@ function code(text) {
 /** Muted inline video plays once; the animated image remains a fallback when
  * browser power/data policy refuses video playback.  Reduced motion uses a still. */
 export function introVideo(name, cls, label) {
-  return `<div class="${cls}" data-intro data-still="/assets/media/${name}.jpg"><video muted autoplay playsinline preload="auto" aria-label="${escapeHtml(label)}" hidden><source src="/assets/media/${name}.mp4" type="video/mp4"></video><picture><source type="image/webp" srcset="/assets/media/${name}.webp"><img src="/assets/media/${name}.gif" alt="${escapeHtml(label)}"></picture></div>`;
+  return `<div class="${cls}" data-intro data-still="/assets/media/${name}.jpg"><video muted playsinline preload="none" aria-label="${escapeHtml(label)}" hidden><source src="/assets/media/${name}.mp4" type="video/mp4"></video><picture><source type="image/webp" srcset="/assets/media/${name}.webp"><img src="/assets/media/${name}.gif" alt="${escapeHtml(label)}"></picture></div>`;
 }
 
 /** The handoff, drawn as three cards: an agent publishes, a link is posted, a person reviews. */

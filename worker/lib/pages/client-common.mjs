@@ -26,6 +26,7 @@ export const APP_JS = String.raw`
     video.hidden = false;
     picture.hidden = true;
     function fallback() { video.hidden = true; picture.hidden = false; }
+    video.querySelectorAll("source").forEach(function (source) { source.addEventListener("error", fallback); });
     video.addEventListener("error", fallback);
     var play = video.play();
     if (play && play.catch) play.catch(fallback);

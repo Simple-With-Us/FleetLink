@@ -32,7 +32,10 @@ test('landing branding, playback and safe policy fallbacks on signed-in/out mobi
    await page.close();
   }
   const reduced=await browser.newPage({reducedMotion:'reduce'});
+  const reducedRequests=[];
+  reduced.on('request',r=>{if(r.url().endsWith('.mp4')) reducedRequests.push(r.url());});
   await reduced.goto(server.url);
+  assert.equal(reducedRequests.length,0,'reduced motion does not download the video');
   assert.equal(await reduced.locator('.hero-intro video').isVisible(),false);
   assert.match(await reduced.locator('.hero-intro picture img').getAttribute('src'),/\.jpg$/);
   await reduced.close();
@@ -42,5 +45,11 @@ test('landing branding, playback and safe policy fallbacks on signed-in/out mobi
   await denied.waitForFunction(()=>document.querySelector('.hero-intro video').hidden);
   assert.equal(await denied.locator('.hero-intro picture').isVisible(),true);
   await denied.close();
+  const missing=await browser.newPage();
+  await missing.route('**/*.mp4',r=>r.abort());
+  await missing.goto(server.url);
+  await missing.waitForFunction(()=>document.querySelector('.hero-intro video').hidden);
+  assert.equal(await missing.locator('.hero-intro picture').isVisible(),true);
+  await missing.close();
  } finally {await browser.close();await server.close();}
 });
