@@ -211,7 +211,7 @@ export const DASHBOARD_JS = String.raw`
       if (editor && editor.classList.contains("editor-row")) editor.remove();
       loadShares(false).catch(FL.fail);
       loadMe().catch(FL.fail);
-      if (loaded.analytics) loadAnalytics().catch(FL.fail);
+      if (loaded.shares) loadAnalytics().catch(FL.fail);
     } catch (err) {
       FL.fail(err);
     } finally {
@@ -241,7 +241,7 @@ export const DASHBOARD_JS = String.raw`
         kids.push(h("div", { class: "table-wrap" }, h("table", null,
           h("thead", null, h("tr", null, h("th", { text: "Day" }), h("th", { text: "Views" }), h("th", { text: "Downloads" }), h("th", { text: "Bytes" }))),
           h("tbody", null, data.rows.slice().reverse().map(function (r) {
-            return h("tr", null, h("td", { class: "small", text: r.day }), h("td", { class: "small", text: String(r.views) }), h("td", { class: "small", text: String(r.downloads) }), h("td", { class: "small", text: FL.bytes(r.bytes) }));
+            return h("tr", null, h("td", { class: "small day", text: r.day }), h("td", { class: "small", text: String(r.views) }), h("td", { class: "small", text: String(r.downloads) }), h("td", { class: "small", text: FL.bytes(r.bytes) }));
           })))));
       } else {
         kids.push(h("p", { class: "small muted", text: "No traffic in the last 30 days." }));
@@ -440,7 +440,7 @@ export const DASHBOARD_JS = String.raw`
     series.replaceChildren();
     data.series.slice().reverse().forEach(function (r) {
       series.append(h("tr", null,
-        h("td", { class: "small mono", text: r.day }),
+        h("td", { class: "small mono day", text: r.day }),
         h("td", { class: "small", text: String(r.views) }),
         h("td", { class: "small", text: String(r.downloads) }),
         h("td", { class: "small", text: FL.bytes(r.bytes) })));
@@ -475,7 +475,7 @@ export const DASHBOARD_JS = String.raw`
           h("thead", null, h("tr", null, h("th", { text: "Day" }), h("th", { text: "Requests" }), h("th", { text: "Visitors" }), h("th", { text: "Bytes" }), h("th", { text: "Cache" }))),
           h("tbody", null, data.rows.slice().reverse().map(function (r) {
             return h("tr", null,
-              h("td", { class: "small mono", text: r.date || "" }),
+              h("td", { class: "small mono day", text: r.date || "" }),
               h("td", { class: "small", text: String(r.requests) }),
               h("td", { class: "small", text: String(r.uniques) }),
               h("td", { class: "small", text: FL.bytes(r.bytes) }),
@@ -884,7 +884,7 @@ export const DASHBOARD_JS = String.raw`
   var show = FL.tabs(root, function (name) {
     if (loaded[name]) return;
     loaded[name] = true;
-    if (name === "analytics") loadAnalytics().catch(FL.fail);
+    if (name === "shares") loadAnalytics().catch(FL.fail);
     if (name === "tokens") loadTokens().catch(FL.fail);
     if (name === "teams") loadTeamsPanel().catch(FL.fail);
     if (name === "bots") loadBots().catch(FL.fail);
