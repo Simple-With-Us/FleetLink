@@ -911,6 +911,7 @@ private struct ShareFilesSection: View {
             if ok, let files = await portalManager.fetchShareFiles(slug: share.slug, host: serverHost, token: token) {
                 shareFiles = files
                 loadFailed = false
+                errorText = nil
             } else if ok {
                 loadFailed = true
                 errorText = "File added, but the refreshed list could not be loaded. Close and reopen to try again."
