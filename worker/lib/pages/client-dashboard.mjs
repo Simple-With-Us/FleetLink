@@ -211,7 +211,7 @@ export const DASHBOARD_JS = String.raw`
       if (editor && editor.classList.contains("editor-row")) editor.remove();
       loadShares(false).catch(FL.fail);
       loadMe().catch(FL.fail);
-      if (loaded.analytics) loadAnalytics().catch(FL.fail);
+      if (loaded.shares) loadAnalytics().catch(FL.fail);
     } catch (err) {
       FL.fail(err);
     } finally {
@@ -884,7 +884,7 @@ export const DASHBOARD_JS = String.raw`
   var show = FL.tabs(root, function (name) {
     if (loaded[name]) return;
     loaded[name] = true;
-    if (name === "analytics") loadAnalytics().catch(FL.fail);
+    if (name === "shares") loadAnalytics().catch(FL.fail);
     if (name === "tokens") loadTokens().catch(FL.fail);
     if (name === "teams") loadTeamsPanel().catch(FL.fail);
     if (name === "bots") loadBots().catch(FL.fail);

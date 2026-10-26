@@ -89,7 +89,6 @@ function dashboard(ctx, principal) {
       </div>
       <div class="tabs" role="tablist" aria-label="Dashboard sections">
         <button type="button" role="tab" data-tab="shares">Shares</button>
-        <button type="button" role="tab" data-tab="analytics">Analytics</button>
         <button type="button" role="tab" data-tab="new">New Share</button>
         <button type="button" role="tab" data-tab="tokens">API Tokens</button>
         <button type="button" role="tab" data-tab="teams">Teams</button>
@@ -116,9 +115,8 @@ function dashboard(ctx, principal) {
         ${table("share-rows", [["Slug", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Expires", "sortable", "expires"], ["", ""]])}
         <p id="share-empty" class="empty" hidden>Nothing here yet.&#160; Use New Share to make a link.</p>
         <p><button type="button" id="share-more" class="secondary" hidden>Load More</button></p>
-      </section>
 
-      <section id="panel-analytics" role="tabpanel" hidden>
+      <div id="panel-analytics" class="analytics">
         <div class="dash-head">
           <div><p class="eyebrow">Traffic</p><h2>Views And Downloads</h2></div>
           <div class="actions">
@@ -145,6 +143,7 @@ function dashboard(ctx, principal) {
           </div>
           <div id="cf-body"><p class="small muted">Loading…</p></div>
         </div>` : ""}
+      </div>
       </section>
 
       <section id="panel-new" role="tabpanel" hidden>
