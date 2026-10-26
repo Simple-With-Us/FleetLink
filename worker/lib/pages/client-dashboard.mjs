@@ -87,11 +87,13 @@ export const DASHBOARD_JS = String.raw`
     var actions = h("div", { class: "actions" },
       h("button", { type: "button", class: "small secondary", text: "Copy", onclick: function () { FL.copy(share.url); FL.toast("Copied " + share.slug + " link to clipboard."); } }),
       h("a", { class: "button small secondary", href: share.url, target: "_blank", rel: "noopener", text: "Open" }));
+    if (share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Rename", title: "Rename link name (slug)", onclick: function () { quickRename(share); } }));
+    if (share.can_edit || share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Extend", title: "Extend expiration", onclick: function () { quickExtend(share); } }));
     var sharing = sharingControl(share);
     if (sharing) actions.append(sharing);
     if (share.can_edit || share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Edit", onclick: function () { openEditor(share, row); } }));
     actions.append(h("button", { type: "button", class: "small secondary", text: "Stats", onclick: function () { openStats(share, row); } }));
-    if (share.can_manage) actions.append(h("button", { type: "button", class: "small danger", text: "Delete", onclick: function () { remove(share); } }));
+    if (share.can_manage) actions.append(h("button", { type: "button", class: "small danger", text: "Delete", title: "Delete share early", onclick: function () { remove(share); } }));
     var row = h("tr", null,
       h("td", null, h("a", { href: share.url, target: "_blank", rel: "noopener", class: "mono slug-a", text: share.slug }, FL.openIcon()), share.title ? h("div", { class: "small muted", text: share.title }) : null, share.kind === "link" ? h("div", { class: "small muted", text: "→ " + share.target_url }) : null),
       h("td", null, tags),
@@ -369,11 +371,35 @@ export const DASHBOARD_JS = String.raw`
     renderShares();
   }
 
+  async function quickRename(share) {
+    var next = window.prompt("Rename " + share.slug + " to a new name:", share.slug);
+    if (next == null) return;
+    next = next.trim().toLowerCase();
+    if (!next || next === share.slug) return;
+    try {
+      var res = await FL.api("PATCH", "/api/shares/" + encodeURIComponent(share.slug), { slug: next });
+      FL.toast("Renamed to " + res.slug + ".");
+      loadShares(false).catch(FL.fail);
+    } catch (err) { FL.fail(err); }
+  }
+
+  async function quickExtend(share) {
+    var choice = window.prompt("Extend " + share.slug + " by how many days?\u00a0 Enter a number (e.g. 3, 7, 30, 90, 180" + (isAdmin ? ", or forever" : "") + "):", "7");
+    if (choice == null) return;
+    choice = choice.trim();
+    if (!choice) return;
+    try {
+      var res = await FL.api("POST", "/api/shares/" + encodeURIComponent(share.slug) + "/renew", { days: choice });
+      FL.toast("Extended " + share.slug + " until " + FL.when(res.share.expires_at) + ".");
+      loadShares(false).catch(FL.fail);
+    } catch (err) { FL.fail(err); }
+  }
+
   async function remove(share) {
-    if (!FL.confirm("Delete " + share.slug + " and all of its files?  The link stops working right away.")) return;
+    if (!FL.confirm("Delete " + share.slug + " early and remove all files?\u00a0 The link stops working immediately.")) return;
     try {
       await FL.api("DELETE", "/api/shares/" + encodeURIComponent(share.slug));
-      FL.toast("Deleted " + share.slug + ".");
+      FL.toast("Deleted " + share.slug + " early.");
       loadShares(false);
       loadMe();
     } catch (err) { FL.fail(err); }

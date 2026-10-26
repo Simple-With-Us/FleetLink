@@ -14,6 +14,13 @@ public struct PortalView: View {
     @State private var isRenewing: [String: Bool] = [:]
     @State private var copiedSlug: String? = nil
     @State private var sortMode: ShareSort = .newest
+    @State private var shareToRename: PortalShare? = nil
+    @State private var renameSlugInput: String = ""
+    @State private var showRenameAlert: Bool = false
+    @State private var shareToExtend: PortalShare? = nil
+    @State private var showExtendDialog: Bool = false
+    @State private var shareToManage: PortalShare? = nil
+    @State private var showManageSheet: Bool = false
 
     enum ShareFilter: String, CaseIterable, Identifiable {
         case all = "All"
@@ -210,6 +217,19 @@ public struct PortalView: View {
                                     }
                                 },
                                 onRenew: { renewShare(share) },
+                                onRename: {
+                                    shareToRename = share
+                                    renameSlugInput = share.slug
+                                    showRenameAlert = true
+                                },
+                                onExtend: {
+                                    shareToExtend = share
+                                    showExtendDialog = true
+                                },
+                                onManageAccess: {
+                                    shareToManage = share
+                                    showManageSheet = true
+                                },
                                 onDelete: {
                                     shareToDelete = share
                                     showDeleteConfirmation = true
@@ -269,12 +289,55 @@ public struct PortalView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { share in
-                Text("Delete \(share.slug)?  This cannot be undone.")
+                Text("Delete \(share.slug)?\u{00A0} This cannot be undone.")
+            }
+            .alert("Rename Link", isPresented: $showRenameAlert) {
+                TextField("New name", text: $renameSlugInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                Button("Rename") {
+                    if let share = shareToRename, !renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let target = renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        Task {
+                            _ = await portalManager.renameShare(slug: share.slug, newSlug: target, host: serverHost, token: session.apiToken)
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Enter a new link name (slug).\u{00A0} Links using the old name will stop working.")
+            }
+            .confirmationDialog(
+                "Extend Expiration",
+                isPresented: $showExtendDialog,
+                titleVisibility: .visible,
+                presenting: shareToExtend
+            ) { share in
+                Button("Extend by 3 days") { extendShare(share, days: "3") }
+                Button("Extend by 7 days") { extendShare(share, days: "7") }
+                Button("Extend by 30 days") { extendShare(share, days: "30") }
+                Button("Extend by 90 days") { extendShare(share, days: "90") }
+                Button("Extend by 180 days") { extendShare(share, days: "180") }
+                Button("Cancel", role: .cancel) {}
+            } message: { share in
+                Text("Extend \(share.slug) from today.\u{00A0} Choose a duration.")
+            }
+            .sheet(isPresented: $showManageSheet) {
+                if let share = shareToManage {
+                    ShareManageSheet(
+                        share: share,
+                        portalManager: portalManager,
+                        serverHost: serverHost,
+                        token: session.apiToken,
+                        onDismiss: { showManageSheet = false }
+                    )
+                }
             }
             .task {
                 if portalManager.shares.isEmpty {
                     await portalManager.fetchShares(host: serverHost, token: session.apiToken)
                 }
+                await portalManager.fetchTeams(host: serverHost, token: session.apiToken)
             }
             .onChange(of: session.user) { _, _ in
                 Task { await portalManager.fetchShares(host: serverHost, token: session.apiToken) }
@@ -311,6 +374,14 @@ public struct PortalView: View {
         isRenewing[share.slug] = true
         Task {
             _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: session.apiToken)
+            isRenewing[share.slug] = false
+        }
+    }
+
+    private func extendShare(_ share: PortalShare, days: String) {
+        isRenewing[share.slug] = true
+        Task {
+            _ = await portalManager.extendShare(slug: share.slug, days: days, host: serverHost, token: session.apiToken)
             isRenewing[share.slug] = false
         }
     }
@@ -354,6 +425,9 @@ private struct ShareRowView: View {
     let onCopy: () -> Void
     let onView: () -> Void
     let onRenew: () -> Void
+    let onRename: () -> Void
+    let onExtend: () -> Void
+    let onManageAccess: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -388,6 +462,24 @@ private struct ShareRowView: View {
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                                 .accessibilityLabel("Password protected")
+                        }
+
+                        if let teamName = share.team_name, !teamName.isEmpty {
+                            Text(teamName + (share.team_access == "edit" ? " · edit" : " · view"))
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.purple.opacity(0.15))
+                                .foregroundColor(.purple)
+                                .cornerRadius(6)
+                        } else if share.is_team == false || share.team_id == nil {
+                            Text("Personal")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.gray.opacity(0.15))
+                                .foregroundColor(.secondary)
+                                .cornerRadius(6)
                         }
                     }
 
@@ -454,15 +546,27 @@ private struct ShareRowView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("View \(share.slug)")
 
-                Button(action: onRenew) {
+                Menu {
+                    Button(action: onRename) {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    Button(action: onExtend) {
+                        Label("Extend Expiry…", systemImage: "clock.arrow.circlepath")
+                    }
+                    Button(action: onManageAccess) {
+                        Label("Share & Access…", systemImage: "person.2")
+                    }
+                    Button(action: onRenew) {
+                        Label("Quick Renew (Default)", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    Divider()
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete Early", systemImage: "trash")
+                    }
+                } label: {
                     HStack(spacing: 4) {
-                        if isRenewing {
-                            ProgressView()
-                                .scaleEffect(0.6)
-                        } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                        }
-                        Text("Renew")
+                        Image(systemName: "ellipsis")
+                        Text("More")
                     }
                     .font(.caption.bold())
                     .padding(.horizontal, 8)
@@ -471,8 +575,7 @@ private struct ShareRowView: View {
                     .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
-                .disabled(isRenewing)
-                .accessibilityLabel("Renew \(share.slug)")
+                .accessibilityLabel("More options for \(share.slug)")
 
                 Spacer()
 
@@ -490,5 +593,152 @@ private struct ShareRowView: View {
             .padding(.top, 2)
         }
         .padding(.vertical, 4)
+        .contextMenu {
+            Button(action: onCopy) { Label("Copy Link", systemImage: "doc.on.doc") }
+            Button(action: onView) { Label("View", systemImage: "arrow.up.right.square") }
+            Divider()
+            Button(action: onRename) { Label("Rename", systemImage: "pencil") }
+            Button(action: onExtend) { Label("Extend Expiry…", systemImage: "clock.arrow.circlepath") }
+            Button(action: onManageAccess) { Label("Share & Access…", systemImage: "person.2") }
+            Divider()
+            Button(role: .destructive, action: onDelete) { Label("Delete Early", systemImage: "trash") }
+        }
+    }
+}
+
+private struct ShareManageSheet: View {
+    let share: PortalShare
+    @ObservedObject var portalManager: PortalManager
+    let serverHost: String
+    let token: String
+    let onDismiss: () -> Void
+
+    @State private var title: String
+    @State private var description: String
+    @State private var isTeam: Bool
+    @State private var selectedTeamId: String
+    @State private var teamAccess: String
+    @State private var passwordProtected: Bool
+    @State private var passwordInput: String = ""
+    @State private var isSaving: Bool = false
+    @State private var errorMessage: String? = nil
+
+    init(share: PortalShare, portalManager: PortalManager, serverHost: String, token: String, onDismiss: @escaping () -> Void) {
+        self.share = share
+        self.portalManager = portalManager
+        self.serverHost = serverHost
+        self.token = token
+        self.onDismiss = onDismiss
+        _title = State(initialValue: share.title ?? "")
+        _description = State(initialValue: share.description ?? "")
+        _isTeam = State(initialValue: share.is_team ?? false)
+        _selectedTeamId = State(initialValue: share.team_id ?? (portalManager.teams.first?.id ?? ""))
+        _teamAccess = State(initialValue: share.team_access ?? "edit")
+        _passwordProtected = State(initialValue: share.password_protected)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let error = errorMessage {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundColor(.red)
+                    }
+                }
+
+                Section("Access & Sharing") {
+                    Picker("Destination", selection: $isTeam) {
+                        Text("Personal").tag(false)
+                        Text("Team").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+
+                    if isTeam {
+                        if portalManager.teams.isEmpty {
+                            Text("No teams available.\u{00A0} Create or join a team on the web dashboard.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Picker("Team", selection: $selectedTeamId) {
+                                ForEach(portalManager.teams) { team in
+                                    Text(team.name).tag(team.id)
+                                }
+                            }
+                            Picker("Team Permissions", selection: $teamAccess) {
+                                Text("Can edit").tag("edit")
+                                Text("View only").tag("view")
+                            }
+                        }
+                    } else {
+                        Text("Personal shares stay private to you and your fleet agents.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Section("Protection") {
+                    Toggle("Password Protected", isOn: $passwordProtected)
+                    if passwordProtected {
+                        SecureField(share.password_protected ? "New password (leave blank to keep)" : "Set a password", text: $passwordInput)
+                    }
+                }
+
+                Section("Details") {
+                    TextField("Title", text: $title)
+                    TextField("Description", text: $description)
+                }
+
+                Section {
+                    Button(action: saveChanges) {
+                        HStack {
+                            Spacer()
+                            if isSaving {
+                                ProgressView()
+                                    .padding(.trailing, 4)
+                            }
+                            Text("Save Changes")
+                                .bold()
+                            Spacer()
+                        }
+                    }
+                    .disabled(isSaving)
+                }
+            }
+            .navigationTitle("Manage \(share.slug)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done", action: onDismiss)
+                }
+            }
+        }
+    }
+
+    private func saveChanges() {
+        isSaving = true
+        errorMessage = nil
+        Task {
+            let teamId = isTeam ? selectedTeamId : nil
+            let clearPassword = share.password_protected && !passwordProtected
+            let newPassword = passwordProtected && !passwordInput.isEmpty ? passwordInput : nil
+            let ok = await portalManager.updateShareAccess(
+                slug: share.slug,
+                teamId: teamId,
+                teamAccess: teamAccess,
+                password: newPassword,
+                clearPassword: clearPassword,
+                title: title.isEmpty ? nil : title,
+                description: description.isEmpty ? nil : description,
+                host: serverHost,
+                token: token
+            )
+            isSaving = false
+            if ok {
+                onDismiss()
+            } else {
+                errorMessage = portalManager.errorMessage ?? "Could not update settings.\u{00A0} Try again."
+            }
+        }
     }
 }
