@@ -295,7 +295,7 @@ for (const [path, type] of [["/favicon.ico", "image/x-icon"], ["/apple-touch-ico
   assert.equal(wordmark.status, 200);
   assert.equal(wordmark.headers.get("content-type"), "image/png");
   assert.ok(home.includes('<header class="top is-public is-hero">'), "signed-out hero header carries is-public and is-hero for the collapsed-bar state");
-  assert.ok(home.includes('<a class="button secondary" href="/login">Sign In</a>'), "nav Sign In is a boxed secondary button");
+  assert.ok(home.includes('<a href="/login">Sign In</a>'), "landing Sign In is a plain hero navigation link");
   assert.match(home, /<div class="hero-intro" data-intro[^>]*><video muted playsinline/);
   assert.ok(!home.includes('class="preview"'), "dashboard mockup removed");
 });

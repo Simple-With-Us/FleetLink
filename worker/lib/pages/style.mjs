@@ -358,5 +358,30 @@ td .rowmenu { position: relative; }
   .top nav a, .top nav .link { padding: 0.35rem 0.42rem; font-size: 0.84rem; min-height: 34px; }
   .top nav a.button { padding: 0.3rem 0.6rem; min-height: 34px; }
 }
+
+/* Landing navigation: controls sit on the hero, then a compact white bar
+   appears only after the intro has left the viewport. Other pages retain
+   their account/admin navigation. */
+.home-page .top.is-hero { position: absolute; width: 100%; background: transparent; border-color: transparent; backdrop-filter: none; }
+.home-page .hero .bar { padding-top: 8rem; }
+.home-page .top.is-hero .bar { flex-wrap: nowrap; padding-bottom: 0; }
+.home-page .top.is-hero .brand { order: 0; display: none; position: static; transform: none; width: auto; flex: 0 0 auto; }
+.home-page .top.is-hero nav { order: 1; display: flex; flex-wrap: nowrap; gap: .5rem; margin-left: auto; }
+.home-page .top.is-hero nav a, .home-page .top.is-hero nav .link { color: var(--navy); white-space: nowrap; }
+.home-page .top.is-hero.is-scrolled { position: fixed; background: #fff; border-color: var(--line); }
+.home-page .top.is-hero.is-scrolled .brand { display: inline-flex; }
+.home-page .top.is-hero.is-scrolled nav a.home-dashboard { display: inline-flex; }
+.home-page .top.is-hero.is-scrolled nav a[href="/login"] { display: inline-flex; }
+.home-page .top.is-hero.is-scrolled nav .home-extra { display: none; }
+.home-page #agents .split-head { margin-bottom: 1.5rem; }
+@media (max-width: 640px) {
+  .home-page .hero .bar { padding-top: 6.5rem; }
+  .home-page .top.is-hero nav { gap: .15rem; }
+  .home-page .top.is-hero .brand-wordmark { max-width: 120px; height: auto; }
+}
+@media (max-width: 360px) {
+  .home-page .top.is-hero .brand-wordmark { max-width: 100px; }
+  .home-page .top.is-hero nav a, .home-page .top.is-hero nav .link { padding-inline: .3rem; }
+}
 `;
 
