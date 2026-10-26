@@ -82,171 +82,10 @@ public struct PortalView: View {
     public var body: some View {
         NavigationStack {
             List {
-                if let message = portalManager.errorMessage, !message.isEmpty {
-                    Section {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
-                            Text(message)
-                                .font(.subheadline)
-                                .foregroundColor(.orange)
-                        }
-                    }
-                }
-
-                // Analytics Dashboard Section
-                Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("At a glance")
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
-                            .accessibilityAddTraits(.isHeader)
-
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                            StatCard(
-                                title: "Links",
-                                value: "\(portalManager.analytics.totalShares)",
-                                systemImage: "link.circle.fill",
-                                color: .blue
-                            )
-
-                            StatCard(
-                                title: "Storage",
-                                value: portalManager.analytics.formattedTotalBytes,
-                                systemImage: "internaldrive.fill",
-                                color: .purple
-                            )
-
-                            StatCard(
-                                title: "Short links",
-                                value: "\(portalManager.analytics.totalRedirects)",
-                                systemImage: "arrow.triangle.turn.up.right.circle.fill",
-                                color: .green
-                            )
-
-                            StatCard(
-                                title: "Files",
-                                value: "\(portalManager.analytics.totalFileShares)",
-                                systemImage: "doc.fill",
-                                color: .orange
-                            )
-                        }
-
-                        if portalManager.analytics.expiringSoonCount > 0 {
-                            HStack {
-                                Image(systemName: "exclamationmark.clock.fill")
-                                    .foregroundColor(.orange)
-                                    .accessibilityHidden(true)
-                                Text("\(portalManager.analytics.expiringSoonCount) \(portalManager.analytics.expiringSoonCount == 1 ? "link expires" : "links expire") within 24 hours")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.top, 4)
-                        }
-                    }
-                    .padding(.vertical, 6)
-                }
-
-                // Filter Chips
-                Section {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(ShareFilter.allCases) { filter in
-                                Button {
-                                    filterMode = filter
-                                } label: {
-                                    Text(filter.rawValue)
-                                        .font(.subheadline.bold())
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(filterMode == filter ? Color.accentColor : Color(UIColor.secondarySystemFill))
-                                        .foregroundColor(filterMode == filter ? .white : .primary)
-                                        .cornerRadius(16)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityAddTraits(filterMode == filter ? .isSelected : [])
-                                .accessibilityLabel(filter.rawValue)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-
-                // Slugs List
-                if let error = portalManager.errorMessage {
-                    Section {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                            .accessibilityLabel("Error.\u{00A0} \(error)")
-                    }
-                }
-
-                Section {
-                    if portalManager.isLoading && portalManager.shares.isEmpty {
-                        HStack {
-                            Spacer()
-                            ProgressView("Loading your links…")
-                            Spacer()
-                        }
-                        .padding()
-                    } else if filteredShares.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "tray")
-                                .font(.largeTitle)
-                                .foregroundColor(.secondary)
-                            Text(emptyTitle)
-                                .font(.headline)
-                            Text(emptyDetail)
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
-                    } else {
-                        ForEach(filteredShares) { share in
-                            ShareRowView(
-                                share: share,
-                                copiedSlug: copiedSlug,
-                                isRenewing: isRenewing[share.slug] ?? false,
-                                onCopy: { copyShareLink(share) },
-                                onView: {
-                                    if let url = URL(string: share.url) {
-                                        onSelectArtifact(url)
-                                    }
-                                },
-                                onRenew: { renewShare(share) },
-                                onRename: {
-                                    shareToRename = share
-                                    renameSlugInput = share.slug
-                                    showRenameAlert = true
-                                },
-                                onExtend: {
-                                    shareToExtend = share
-                                    showExtendDialog = true
-                                },
-                                onManageAccess: {
-                                    shareToManage = share
-                                    showManageSheet = true
-                                },
-                                onDelete: {
-                                    shareToDelete = share
-                                    showDeleteConfirmation = true
-                                }
-                            )
-                        }
-                    }
-                } header: {
-                    HStack {
-                        Text("Links (\(filteredShares.count))")
-                        Spacer()
-                        if portalManager.isLoading {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        }
-                    }
-                }
+                errorMessageBanner
+                analyticsSection
+                filterChipsSection
+                sharesListSection
             }
             .searchable(text: $searchText, prompt: "Search by name or address")
             .refreshable {
@@ -254,27 +93,7 @@ public struct PortalView: View {
             }
             .navigationTitle("Links")
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Picker("Sort", selection: $sortMode) {
-                            ForEach(ShareSort.allCases) { mode in
-                                Text(mode.rawValue).tag(mode)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
-                    }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        Task {
-                            await portalManager.fetchShares(host: serverHost, token: session.apiToken)
-                        }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .accessibilityLabel("Refresh links")
-                }
+                toolbarContent
             }
             .confirmationDialog(
                 "Delete this link?",
@@ -292,18 +111,7 @@ public struct PortalView: View {
                 Text("Delete \(share.slug)?\u{00A0} This cannot be undone.")
             }
             .alert("Rename Link", isPresented: $showRenameAlert) {
-                TextField("New name", text: $renameSlugInput)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled(true)
-                Button("Rename") {
-                    if let share = shareToRename, !renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        let target = renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                        Task {
-                            _ = await portalManager.renameShare(slug: share.slug, newSlug: target, host: serverHost, token: session.apiToken)
-                        }
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
+                renameAlertContent
             } message: {
                 Text("Enter a new link name (slug).\u{00A0} Links using the old name will stop working.")
             }
@@ -343,6 +151,215 @@ public struct PortalView: View {
                 Task { await portalManager.fetchShares(host: serverHost, token: session.apiToken) }
             }
         }
+    }
+
+    // MARK: - Subviews
+
+    @ViewBuilder
+    private var errorMessageBanner: some View {
+        if let message = portalManager.errorMessage, !message.isEmpty {
+            Section {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundColor(.orange)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var analyticsSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("At a glance")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    StatCard(
+                        title: "Links",
+                        value: "\(portalManager.analytics.totalShares)",
+                        systemImage: "link.circle.fill",
+                        color: .blue
+                    )
+
+                    StatCard(
+                        title: "Storage",
+                        value: portalManager.analytics.formattedTotalBytes,
+                        systemImage: "internaldrive.fill",
+                        color: .purple
+                    )
+
+                    StatCard(
+                        title: "Short links",
+                        value: "\(portalManager.analytics.totalRedirects)",
+                        systemImage: "arrow.triangle.turn.up.right.circle.fill",
+                        color: .green
+                    )
+
+                    StatCard(
+                        title: "Files",
+                        value: "\(portalManager.analytics.totalFileShares)",
+                        systemImage: "doc.fill",
+                        color: .orange
+                    )
+                }
+
+                if portalManager.analytics.expiringSoonCount > 0 {
+                    HStack {
+                        Image(systemName: "exclamationmark.clock.fill")
+                            .foregroundColor(.orange)
+                            .accessibilityHidden(true)
+                        Text("\(portalManager.analytics.expiringSoonCount) \(portalManager.analytics.expiringSoonCount == 1 ? "link expires" : "links expire") within 24 hours")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.top, 4)
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    @ViewBuilder
+    private var filterChipsSection: some View {
+        Section {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(ShareFilter.allCases) { (filter: ShareFilter) in
+                        Button {
+                            filterMode = filter
+                        } label: {
+                            Text(filter.rawValue)
+                                .font(.subheadline.bold())
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(filterMode == filter ? Color.accentColor : Color(UIColor.secondarySystemFill))
+                                .foregroundColor(filterMode == filter ? .white : .primary)
+                                .cornerRadius(16)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(filterMode == filter ? .isSelected : [])
+                        .accessibilityLabel(filter.rawValue)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sharesListSection: some View {
+        Section {
+            if portalManager.isLoading && portalManager.shares.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView("Loading your links…")
+                    Spacer()
+                }
+                .padding()
+            } else if filteredShares.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "tray")
+                        .font(.largeTitle)
+                        .foregroundColor(.secondary)
+                    Text(emptyTitle)
+                        .font(.headline)
+                    Text(emptyDetail)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+            } else {
+                ForEach(filteredShares) { (share: PortalShare) in
+                    ShareRowView(
+                        share: share,
+                        copiedSlug: copiedSlug,
+                        isRenewing: isRenewing[share.slug] ?? false,
+                        onCopy: { copyShareLink(share) },
+                        onView: {
+                            if let url = URL(string: share.url) {
+                                onSelectArtifact(url)
+                            }
+                        },
+                        onRenew: { renewShare(share) },
+                        onRename: {
+                            shareToRename = share
+                            renameSlugInput = share.slug
+                            showRenameAlert = true
+                        },
+                        onExtend: {
+                            shareToExtend = share
+                            showExtendDialog = true
+                        },
+                        onManageAccess: {
+                            shareToManage = share
+                            showManageSheet = true
+                        },
+                        onDelete: {
+                            shareToDelete = share
+                            showDeleteConfirmation = true
+                        }
+                    )
+                }
+            }
+        } header: {
+            HStack {
+                Text("Links (\(filteredShares.count))")
+                Spacer()
+                if portalManager.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Menu {
+                Picker("Sort", selection: $sortMode) {
+                    ForEach(ShareSort.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+            }
+        }
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                Task {
+                    await portalManager.fetchShares(host: serverHost, token: session.apiToken)
+                }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .accessibilityLabel("Refresh links")
+        }
+    }
+
+    @ViewBuilder
+    private var renameAlertContent: some View {
+        TextField("New name", text: $renameSlugInput)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled(true)
+        Button("Rename") {
+            if let share = shareToRename, !renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let target = renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                Task {
+                    _ = await portalManager.renameShare(slug: share.slug, newSlug: target, host: serverHost, token: session.apiToken)
+                }
+            }
+        }
+        Button("Cancel", role: .cancel) {}
     }
 
     private func copyShareLink(_ share: PortalShare) {
