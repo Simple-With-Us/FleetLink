@@ -334,3 +334,8 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
  assert.deepEqual((await set({display_name:"MA renamed"})).data.bot.limits,{max_file_mb:2,max_file_days:3});
  assert.equal((await set({limits:null})).data.bot.limits,null);
  });
+
+test('non-manual bot rejects caps rather than silently discarding them',async()=>{
+ const {env,jay}=await fleet();await callJson(env,'GET','/api/me',{auth:jay});
+ assert.equal((await callJson(env,'PATCH','/api/bots/usr_agent_ma',{auth:jay,json:{limit_mode:'account',limits:{max_file_mb:1}}})).status,400);
+});

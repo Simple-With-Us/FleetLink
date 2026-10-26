@@ -132,6 +132,7 @@ export function botRoutes(router) {
     if (input.status !== undefined && input.status !== bot.status) changes.status = input.status;
     if (input.limit_mode !== undefined || input.limits !== undefined) {
       const mode = input.limit_mode ?? (["legacy", "account", "manual"].includes(bot.agent_limit_mode) ? bot.agent_limit_mode : "legacy");
+      if (input.limits !== undefined && input.limits !== null && mode !== "manual") throw badRequest("limits requires manual mode.");
       if (mode === "manual") {
         // Merge into the stored caps:  a partial update must not silently
         // widen caps it never mentions back to the account max;  an explicit
