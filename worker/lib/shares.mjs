@@ -198,7 +198,8 @@ export const CreateShareBody = z.object({
  * or names another team.  People's shares stay personal by default.
  */
 async function defaultTeam(env, principal, input) {
-  if (input.team_id !== undefined && input.team_id !== "") return input.team_id;
+  if (input.team_id === "" || input.team_id === null) return null;
+  if (input.team_id !== undefined) return input.team_id;
   if ([true, "true", "1"].includes(input.personal)) return null;
   if (principal.token?.team_id) return principal.token.team_id;
   if (principal.user.kind === "agent") {
@@ -604,6 +605,7 @@ export async function listShares(env, principal, { scope = "mine", team_id: team
     clauses.push("u.manager_id = ?");
     args.push(principal.user.id);
   } else if (scope === "manager") {
+    if (principal.user.kind !== "agent") throw forbidden("Agents only.");
     const mgrId = principal.user.manager_id || (await fleetOwner(env))?.id;
     if (!mgrId) throw badRequest("No manager found for this account.");
     clauses.push("s.owner_id = ?");

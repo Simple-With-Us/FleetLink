@@ -261,9 +261,13 @@ test("profile edits and account deletion", async () => {
   const sh = await callJson(env, "POST", "/api/shares", { auth: ada, json: { slug: "ada-def-share" } });
   assert.equal(sh.data.share.team.id, team.data.team.id);
 
-  // An explicit personal share stays personal
+  // An explicit personal share stays personal (via personal: true or team_id: "" / null)
   const shPers = await callJson(env, "POST", "/api/shares", { auth: ada, json: { slug: "ada-pers-share", personal: true } });
   assert.equal(shPers.data.share.team, null);
+  const shEmpty = await callJson(env, "POST", "/api/shares", { auth: ada, json: { slug: "ada-empty-team", team_id: "" } });
+  assert.equal(shEmpty.data.share.team, null);
+  const shNull = await callJson(env, "POST", "/api/shares", { auth: ada, json: { slug: "ada-null-team", team_id: null } });
+  assert.equal(shNull.data.share.team, null);
 
   // Setting to an invalid or unjoined team fails
   assert.equal((await callJson(env, "PATCH", "/api/me", { auth: ada, json: { default_team_id: "team_invalid" } })).status, 400);

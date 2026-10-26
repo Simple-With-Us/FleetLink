@@ -79,8 +79,11 @@ export function accountRoutes(router) {
       args.push(email);
     }
     if (input.default_team_id !== undefined) {
-      const defTeam = input.default_team_id ? String(input.default_team_id).trim() : null;
+      const trimmed = input.default_team_id ? String(input.default_team_id).trim() : "";
+      const defTeam = trimmed || null;
       if (defTeam) {
+        const team = await first(ctx.env.DB, "SELECT id FROM teams WHERE id = ?", defTeam);
+        if (!team) throw badRequest("Team not found.");
         if (!principal.isAdmin && !(await membership(ctx.env, defTeam, principal.user.id))) {
           throw badRequest("You are not a member of that team.");
         }

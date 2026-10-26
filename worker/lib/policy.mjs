@@ -28,17 +28,23 @@ export async function shareAccess(env, principal, share) {
   if (share.owner_id === principal.user.id) return { view: true, edit: true, manage: true, owner: true, role: "owner" };
   const owner = await first(env.DB, "SELECT manager_id FROM users WHERE id = ?", share.owner_id);
   if (owner?.manager_id && owner.manager_id === principal.user.id) return { view: true, edit: true, manage: true, owner: true, role: "manager" };
+  if (principal.user?.kind === "agent") {
+    const managerId = principal.user.manager_id || (await fleetOwner(env))?.id;
+    if (managerId && share.owner_id === managerId) {
+      if (share.team_id) {
+        const member = await membership(env, share.team_id, principal.user.id);
+        if (member && (member.role === "owner" || member.role === "admin")) {
+          return { view: true, edit: true, manage: true, owner: false, role: `team_${member.role}` };
+        }
+      }
+      return { view: true, edit: true, manage: false, owner: false, role: "agent" };
+    }
+  }
   if (share.team_id) {
     const member = await membership(env, share.team_id, principal.user.id);
     if (member) {
       const manage = member.role === "owner" || member.role === "admin";
       return { view: true, edit: manage || share.team_access === "edit", manage, owner: false, role: `team_${member.role}` };
-    }
-  }
-  if (principal.user?.kind === "agent") {
-    const managerId = principal.user.manager_id || (await fleetOwner(env))?.id;
-    if (managerId && share.owner_id === managerId) {
-      return { view: true, edit: true, manage: false, owner: false, role: "agent" };
     }
   }
   return NONE;

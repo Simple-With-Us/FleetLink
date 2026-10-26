@@ -84,6 +84,10 @@ test("bots and the owner edit and overwrite each other's team work;  the owner m
   assert.equal(await (await call(env, "GET", "/jay-private/agent.md?raw=1")).text(), "from bot");
   const eve = await signUp(env, "Eve Out", { email: "eveout@example.com" });
   assert.equal((await callJson(env, "GET", "/api/shares/jay-private", { auth: eve })).status, 404);
+  assert.equal((await callJson(env, "GET", "/api/shares?scope=manager", { auth: eve })).status, 403);
+  const mgrList = await callJson(env, "GET", "/api/shares?scope=manager", bot("CODEX"));
+  assert.equal(mgrList.status, 200);
+  assert.ok(mgrList.data.shares.some((s) => s.slug === "jay-private"));
 
   // A bot's personal share is hidden from the other bots, but its manager sees and manages it.
   const secret = await rpcTool(env, bot("AG"), "fleetlink_create_share", { text: "draft", slug: "ag-draft", personal: true });
