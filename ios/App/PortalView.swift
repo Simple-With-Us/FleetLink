@@ -899,7 +899,10 @@ private struct ShareFilesSection: View {
     }
 
     private func addFile(_ url: URL) {
-        guard !isLoading && !isAdding && busyPaths.isEmpty else { return }
+        guard !isLoading && !isAdding && busyPaths.isEmpty else {
+            errorText = "Wait for the current file operation to finish, then choose the file again."
+            return
+        }
         isAdding = true
         errorText = nil
         Task {
