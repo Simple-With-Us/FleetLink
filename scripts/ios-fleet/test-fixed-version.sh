@@ -22,6 +22,11 @@ case "$1" in
 esac
 NODE
 chmod +x "$STUB/node"
+# An exported function beats any PATH lookup, so the ship script's own PATH
+# export (Homebrew and /usr/local first) cannot put a real node ahead of the stub.
+node() { "$STUB/node" "$@"; }
+export -f node
+export STUB
 pass=0; fail=0
 run() { : >"$STUB_MARKER"; HOME="$WORK/home" PATH="$STUB:$PATH" bash "$HERE/ship-testflight.sh" fleetlink --dry-run "$@" 2>&1; }
 check() { # check <label> <expected-rc-zero|nonzero> <pattern> <output> <rc>
