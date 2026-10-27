@@ -180,3 +180,29 @@ test("next: asks for the right train and platform", () => {
   assert.match(seen, /filter\[preReleaseVersion\.version\]=0\.1\.0/);
   assert.match(seen, /filter\[preReleaseVersion\.platform\]=IOS/);
 });
+
+// ---- malformed answers (Kody 4383916249) and platform enum (4383917723) -----
+test("malformed list answers stop the run (exit 3)", () => {
+  for (const bad of ["oops", { a: 1 }, null, [1], [[]], [null]]) {
+    const r1 = run(["released-store-version", BUNDLE, "IOS"], { routes: [appsOk, { prefix: "/v1/apps/111/appStoreVersions", body: { data: bad } }] });
+    assert.equal(r1.rc, 3, JSON.stringify(bad));
+    const r2 = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [appsOk, { prefix: "/v1/builds?filter[app]=111", body: { data: bad } }] });
+    assert.equal(r2.rc, 3, JSON.stringify(bad));
+  }
+});
+test("released: a version record with no readable versionString stops the run (exit 3)", () => {
+  for (const rec of [{ attributes: { appVersionState: "READY_FOR_SALE" } }, { attributes: null }, {}, { attributes: { versionString: 5, appVersionState: "READY_FOR_SALE" } }]) {
+    const r = run(["released-store-version", BUNDLE, "IOS"], { routes: [appsOk, store(rec)] });
+    assert.equal(r.rc, 3, JSON.stringify(rec));
+  }
+});
+test("platform MACOS is sent to ASC as MAC_OS", () => {
+  for (const [args, tail] of [[["released-store-version", BUNDLE, "macos"], "filter[platform]=MAC_OS"], [["next-dotted-build", BUNDLE, "0.1.0", "MACOS"], "filter[preReleaseVersion.platform]=MAC_OS"]]) {
+    const sc = join(dir, "m.json"), log = join(dir, "m.log");
+    writeFileSync(sc, JSON.stringify({ routes: [appsOk, store(), builds()] })); writeFileSync(log, "");
+    spawnSync(process.execPath, ["--import", stub, join(HERE, "asc-api.mjs"), ...args], {
+      encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, ASC_KEY_ID: "ABC123DEFG", ASC_ISSUER_ID: "00000000-0000-0000-0000-000000000000", ASC_KEY_P8: pk8, STUB_SCENARIO: sc, STUB_LOG: log },
+    });
+    assert.ok(execFileSync("cat", [log], { encoding: "utf8" }).includes(tail), tail);
+  }
+});

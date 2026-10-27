@@ -732,6 +732,23 @@ async function setWhatToTest({ api, buildId, appId, marketing }) {
     : `release-notes: POST failed HTTP ${res.status}`);
 }
 
+// ASC's platform enum is IOS, MAC_OS, TV_OS or VISION_OS; MACOS is not one.
+function ascPlatformEnum(v) {
+  const p = String(v || "IOS").toUpperCase();
+  return p === "MACOS" ? "MAC_OS" : p;
+}
+
+// A list answer read by the fixed-version methods must be { data: [...] } of
+// objects; anything else stops the run (exit 3) instead of being walked as rows.
+function ascListData(res, label) {
+  const d = res && res.parsed && res.parsed.data;
+  if (!Array.isArray(d) || d.some((r) => r === null || typeof r !== "object" || Array.isArray(r))) {
+    console.error(`${label}: App Store Connect answered with a list that is not an array of objects; not guessing`);
+    process.exit(3);
+  }
+  return d;
+}
+
 async function main() {
   const cred = resolveCredential();
   if (cred.error) {
@@ -926,7 +943,7 @@ async function main() {
   // or nothing when the app has none.  READ ONLY.
   if (method === "released-store-version") {
     const bundleId = path;
-    const platform = String(body || "IOS").toUpperCase();
+    const platform = ascPlatformEnum(body);
     if (!bundleId) {
       console.error("Usage: node asc-api.mjs released-store-version <bundleId> [platform=IOS]");
       process.exit(2);
@@ -944,7 +961,7 @@ async function main() {
         console.error(`released-store-version: appStoreVersions query failed (HTTP ${storeRes.status})`);
         process.exit(2);
       }
-      storeData.push(...(storeRes.parsed.data || []));
+      storeData.push(...ascListData(storeRes, "released-store-version"));
       storeUrl = storeRes.parsed.links?.next || "";
     }
     if (storeUrl) {
@@ -977,8 +994,11 @@ async function main() {
     };
     let best = "";
     for (const v of storeData) {
-      const a = v?.attributes || {};
-      if (!a.versionString) continue;
+      const a = v.attributes;
+      if (a === null || typeof a !== "object" || typeof a.versionString !== "string" || !a.versionString) {
+        console.error("released-store-version: an App Store version record has no readable versionString; not guessing");
+        process.exit(3);
+      }
       const st = [a.appVersionState, a.appStoreState].filter(Boolean);
       if (!st.some((x) => RELEASED.has(x))) {
         if (st.length === 0 || !st.every((x) => NOT_RELEASED.has(x))) {
@@ -1009,7 +1029,7 @@ async function main() {
   if (method === "next-dotted-build") {
     const bundleId = path;
     const version = body;
-    const platform = String(arg4 || "IOS").toUpperCase();
+    const platform = ascPlatformEnum(arg4);
     const vm = /^(\d+)\.(\d+)\.(\d+)$/.exec(version || "");
     if (!bundleId || !vm) {
       console.error("Usage: node asc-api.mjs next-dotted-build <bundleId> <M.m.p> [platform=IOS]");
@@ -1033,7 +1053,7 @@ async function main() {
         console.error(`next-dotted-build: train builds query failed (HTTP ${res.status})`);
         process.exit(2);
       }
-      for (const b of res.parsed.data || []) {
+      for (const b of ascListData(res, "next-dotted-build")) {
         const bv = b?.attributes?.version;
         const bm = typeof bv === "string" && bv.startsWith(prefix) ? /^\d+$/.exec(bv.slice(prefix.length)) : null;
         if (!bm) {

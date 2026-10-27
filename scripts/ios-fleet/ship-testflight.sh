@@ -371,12 +371,16 @@ asc_client() {
 # Fixed-version helpers.  Both print one value on stdout and return 1 when App
 # Store Connect cannot be read or the train holds something unexpected.
 asc_released_store_version() {
-  local plat out rc
+  local plat out rc errf
   plat="$(printf '%s' "${1:-}" | tr a-z A-Z)"
+  errf="$(mktemp)"
   set +e
-  out=$(asc_client released-store-version "$BUNDLE_ID" "$plat" "${APPLE_ID_HINT:-}" 2>/dev/null)
+  out=$(asc_client released-store-version "$BUNDLE_ID" "$plat" "${APPLE_ID_HINT:-}" 2>"$errf")
   rc=$?
   set -e
+  # Keep the reason in the log, so an API error and a refused state read apart.
+  grep '^released-store-version:' "$errf" | while IFS= read -r _l; do logerr "$_l"; done || true
+  rm -f "$errf"
   [[ $rc -eq 0 ]] || return 1
   printf '%s' "$out"
 }
@@ -921,7 +925,6 @@ DEFAULT_MARKETING="$(json_get "$APP_KEY" marketingVersionDefault)"
 # key: fixedMarketingVersion ("0.1.0").  Absent key keeps the commit-count
 # behaviour.  Not used on macOS (builds must grow across all trains).
 FIXED_MARKETING="$(json_get "$APP_KEY" fixedMarketingVersion)"
-FIXED_MODE=0
 APPLE_ID_HINT="$(json_get "$APP_KEY" appleId)"
 
 if [[ -z "$PLATFORM" ]]; then
@@ -1022,13 +1025,14 @@ elif [[ -n "$FIXED_MARKETING" && ( -z "$FORCE_VERSION" || "$FORCE_VERSION" == "$
   # Fixed marketing version: it does not count up per ship; only the dotted
   # build does (0.1.0 (0.1.0), 0.1.1, ...).  A released App Store version closes
   # its train, so a fixed version at or below one is refused, never bumped.
-  FIXED_MODE=1
   [[ "$FIXED_MARKETING" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     || die "fixedMarketingVersion '${FIXED_MARKETING}' for ${APP_KEY} in apps.json is not M.m.p (three dot-separated integers).  Nothing was shipped."
   if [[ "$(printf '%s' "${PLATFORM:-}" | tr a-z A-Z)" == "MACOS" || "$(printf '%s' "${PLATFORM:-}" | tr a-z A-Z)" == "MAC_OS" ]]; then
     die "fixedMarketingVersion is not supported on macOS:  Mac builds must grow across every train, so a dotted build under a fixed version cannot be ordered safely.  Nothing was shipped."
   fi
   MARKETING="$FIXED_MARKETING"
+  # The project-agreement check below compares against this train, not 1.0.
+  MARKETING_PREFIX="$(version_prefix "$FIXED_MARKETING")"
   log "version: fixed marketing version ${FIXED_MARKETING} from apps.json; it does not count up per ship"
   _rel="$(asc_released_store_version "$PLATFORM")" \
     || die "cannot read the released App Store version for ${BUNDLE_ID}, so fixedMarketingVersion ${FIXED_MARKETING} cannot be checked against a closed train.  Nothing was shipped or bumped."
