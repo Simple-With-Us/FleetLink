@@ -10,6 +10,7 @@
       "projectRel": "ios/FleetLink.xcodeproj",
       "xcodegenDir": "ios",
       "marketingVersionDefault": "1.0.0",
+      "fixedMarketingVersion": "0.1.0",
       "sentryPlistKey": "SentryDSN",
       "extraBundleIds": [
         "online.fleetlink.ios.Clip"

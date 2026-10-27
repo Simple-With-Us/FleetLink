@@ -367,6 +367,34 @@ load_secrets() {
 asc_client() {
   node "${FLEET_DIR}/asc-api.mjs" "$@"
 }
+
+# Fixed-version helpers.  Both print one value on stdout and return 1 when App
+# Store Connect cannot be read or the train holds something unexpected.
+asc_released_store_version() {
+  local plat out rc errf
+  plat="$(printf '%s' "${1:-}" | tr a-z A-Z)"
+  errf="$(mktemp)"
+  set +e
+  out=$(asc_client released-store-version "$BUNDLE_ID" "$plat" "${APPLE_ID_HINT:-}" 2>"$errf")
+  rc=$?
+  set -e
+  # Keep the reason in the log, so an API error and a refused state read apart.
+  grep '^released-store-version:' "$errf" | while IFS= read -r _l; do logerr "$_l"; done || true
+  rm -f "$errf"
+  [[ $rc -eq 0 ]] || return 1
+  printf '%s' "$out"
+}
+
+asc_next_dotted_build() {
+  local version="$1" plat out rc
+  plat="$(printf '%s' "${2:-}" | tr a-z A-Z)"
+  set +e
+  out=$(asc_client next-dotted-build "$BUNDLE_ID" "$version" "$plat" "${APPLE_ID_HINT:-}")
+  rc=$?
+  set -e
+  [[ $rc -eq 0 && "$out" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s' "$out"
+}
 # --- ASC credentials end ----------------------------------------------------
 
 # Map ship APP_KEY to Sentry project slug in org simple-with-us.
@@ -891,6 +919,13 @@ PROJECT_REL="$(json_get "$APP_KEY" projectRel)"
 PROJECT_REL_ALT="$(json_get "$APP_KEY" projectRelAlt)"
 XCODEGEN_DIR="$(json_get "$APP_KEY" xcodegenDir)"
 DEFAULT_MARKETING="$(json_get "$APP_KEY" marketingVersionDefault)"
+# Optional fixed-version policy (owner, 2026-10-26): the marketing version does
+# not count up per TestFlight ship; the build is a dotted M.m.<n> (see
+# asc-api.mjs next-dotted-build) that goes up inside the fixed train.  apps.json
+# key: fixedMarketingVersion ("0.1.0").  Absent key keeps the commit-count
+# behaviour.  Not used on macOS (builds must grow across all trains).
+FIXED_MARKETING="$(json_get "$APP_KEY" fixedMarketingVersion)"
+APPLE_ID_HINT="$(json_get "$APP_KEY" appleId)"
 
 if [[ -z "$PLATFORM" ]]; then
   if [[ "$APP_KEY" == *-mac || "$SCHEME" == *[Mm]ac* ]]; then
@@ -986,6 +1021,37 @@ if [[ -n "$UPLOAD_ONLY_IPA" ]]; then
   MARKETING="(from IPA)"
   BUILD_NUM="(from IPA)"
   log "version: taken from the existing IPA (--upload-only); sequence neither consulted nor consumed"
+elif [[ -n "$FIXED_MARKETING" && ( -z "$FORCE_VERSION" || "$FORCE_VERSION" == "$FIXED_MARKETING" ) ]]; then
+  # Fixed marketing version: it does not count up per ship; only the dotted
+  # build does (0.1.0 (0.1.0), 0.1.1, ...).  A released App Store version closes
+  # its train, so a fixed version at or below one is refused, never bumped.
+  [[ "$FIXED_MARKETING" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    || die "fixedMarketingVersion '${FIXED_MARKETING}' for ${APP_KEY} in apps.json is not M.m.p (three dot-separated integers).  Nothing was shipped."
+  if [[ "$(printf '%s' "${PLATFORM:-}" | tr a-z A-Z)" == "MACOS" || "$(printf '%s' "${PLATFORM:-}" | tr a-z A-Z)" == "MAC_OS" ]]; then
+    die "fixedMarketingVersion is not supported on macOS:  Mac builds must grow across every train, so a dotted build under a fixed version cannot be ordered safely.  Nothing was shipped."
+  fi
+  MARKETING="$FIXED_MARKETING"
+  # The project-agreement check below compares against this train, not 1.0.
+  MARKETING_PREFIX="$(version_prefix "$FIXED_MARKETING")"
+  log "version: fixed marketing version ${FIXED_MARKETING} from apps.json; it does not count up per ship"
+  _rel="$(asc_released_store_version "$PLATFORM")" \
+    || die "cannot read the released App Store version for ${BUNDLE_ID}, so fixedMarketingVersion ${FIXED_MARKETING} cannot be checked against a closed train.  Nothing was shipped or bumped."
+  if [[ -n "$_rel" ]]; then
+    python3 -c 'import sys
+a=[int(x) for x in sys.argv[1].split(".")]; b=[int(x) for x in sys.argv[2].split(".")]
+n=max(len(a),len(b)); a+= [0]*(n-len(a)); b+=[0]*(n-len(b))
+sys.exit(0 if a>b else 1)' "$FIXED_MARKETING" "$_rel" \
+      || die "fixedMarketingVersion ${FIXED_MARKETING} is at or below the released App Store version ${_rel}.  Apple requires each new version to be greater than the last released one.  Nothing was bumped.  Pick a version above ${_rel} in apps.json."
+  fi
+  if [[ -n "$FORCE_BUILD" ]]; then
+    [[ "$FORCE_BUILD" =~ ^${MARKETING%.*}\.[0-9]+$ ]] \
+      || die "--build ${FORCE_BUILD} is not ${MARKETING%.*}.<n>:  in fixed-version mode the train holds only dotted builds of that shape, and a different one would block every later ship.  Pass --build ${MARKETING%.*}.<n> or leave --build off.  Nothing was shipped."
+    BUILD_NUM="$FORCE_BUILD"
+  else
+    BUILD_NUM="$(asc_next_dotted_build "$MARKETING" "$PLATFORM")" \
+      || die "cannot work out the next dotted build for ${MARKETING}: App Store Connect could not be read, or the train holds a build that is not ${MARKETING%.*}.<n>.  Nothing was shipped or guessed."
+  fi
+  log "build: dotted build ${BUILD_NUM} for fixed version ${MARKETING}"
 elif [[ -n "$FORCE_BUILD" || -n "$FORCE_VERSION" ]]; then
   # Explicit operator override: honour exactly what was asked.  A bare --version
   # still gets an auto build number from the repo commit count, so an operator

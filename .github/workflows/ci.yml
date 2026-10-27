@@ -43,7 +43,8 @@ jobs:
         run: |
           for f in scripts/ios-ship-testflight.sh scripts/ios-install-appstore-profiles.sh \
                    scripts/ios-prepare-signing.sh scripts/ios-scheduled-ship-gate.sh \
-                   scripts/ios-fleet-pin.sh scripts/ios-fleet/ship-testflight.sh; do
+                   scripts/ios-fleet-pin.sh scripts/ios-fleet/ship-testflight.sh \
+                   scripts/ios-fleet/test-fixed-version.sh; do
             bash -n "$f"
           done
       - name: Scheduled ship gate decisions
@@ -54,6 +55,8 @@ jobs:
         run: node --test scripts/ios-fleet/*.test.mjs
       - name: App Store Connect credential precedence
         run: bash scripts/ios-fleet/test-asc-credentials.sh
+      - name: Fixed-version ship selection
+        run: bash scripts/ios-fleet/test-fixed-version.sh
   test:
     runs-on: ubuntu-latest
     steps:
