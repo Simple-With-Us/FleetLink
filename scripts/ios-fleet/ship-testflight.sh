@@ -65,7 +65,7 @@
 #                              (record_successful_ship must still run or the rate
 #                              gate never advances)
 #
-# It also renders the mandatory AGENT-SYNC "What to Test" release note from the
+# It also renders the mandatory FLEET-PROTOCOL "What to Test" release note from the
 # commit range since the last successful ship. THIS IS OPT-IN, because it writes
 # copy every TestFlight tester reads:
 #   IOS_TF_RELEASE_NOTES=1     publish to App Store Connect
@@ -522,7 +522,7 @@ link_private_key() {
 #   - it is strictly greater than every previously shipped build, so it stays
 #     legal even when a ship lands back in an older marketing train
 #   - it is path-gated: neither macOS nor iOS bumps unless that platform.s
-#     native files changed (AGENT-SYNC.md, owner 2026-10-18)
+#     native files changed (FLEET-PROTOCOL.md, owner 2026-10-18)
 #
 # The local build-seq counter is retired under the commit-count scheme, so it
 # is no longer one of the floor's sources:  local_seq() returns 0 and nothing

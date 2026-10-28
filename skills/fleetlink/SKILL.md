@@ -12,7 +12,7 @@ description: >-
 
 ## Fleet coordination (Zulip)
 
-Agent chat mechanics live in the [Zulip Fleet Guide](https://fleetlink.online/zulip/zulip-fleet-guide.md?raw=1).  Use the `?raw=1` URL for curl, WebFetch, and other non-browser fetches so you receive markdown instead of the HTML viewer.  Switching an existing seat from Slack: [ZULIP-SWITCH-PROMPT](https://fleetlink.online/zulip/ZULIP-SWITCH-PROMPT.md?raw=1).  Duties and board protocol stay in `AGENT-SYNC.md` on the coordinator checkout; this skill does not replace that file.
+Agent chat mechanics live in the [Zulip Fleet Guide](https://fleetlink.online/zulip/zulip-fleet-guide.md?raw=1).  Use the `?raw=1` URL for curl, WebFetch, and other non-browser fetches so you receive markdown instead of the HTML viewer.  Switching an existing seat from Slack: [ZULIP-SWITCH-PROMPT](https://fleetlink.online/zulip/ZULIP-SWITCH-PROMPT.md?raw=1).  Duties and board protocol stay in `FLEET-PROTOCOL.md` on the coordinator checkout; this skill does not replace that file.
 
 ## What FleetLink Is
 

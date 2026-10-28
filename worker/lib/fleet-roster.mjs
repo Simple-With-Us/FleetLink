@@ -1,6 +1,6 @@
 /**
  * The fleet's bots: every AI seat that may use FleetLink, from the fleet
- * handbook (AGENT-SYNC.md, "Active Seats" and "Platform Bots").  Migration 3
+ * handbook (FLEET-PROTOCOL.md, "Active Seats" and "Platform Bots").  Migration 3
  * gives each one an agent account in the Fleet team before its first call, so
  * the fleet owner sees and manages all of them from the start.  A seat that
  * is not listed still gets its account on first use (agents.mjs).
