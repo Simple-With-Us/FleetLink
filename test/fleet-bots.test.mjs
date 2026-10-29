@@ -479,3 +479,31 @@ test('bot PATCH sanitizes an invalid stored mode before clearing limits',async()
  const row=await env.DB.prepare("SELECT agent_limit_mode FROM users WHERE id='usr_agent_ma'").first();
  assert.equal(row.agent_limit_mode,'legacy');
 });
+
+test("adding a bot with first_token mints the token atomically, following the manager default", async () => {
+  const { env, jay } = await fleet();
+
+  // Legacy default: the token keeps the bot's own widest limits.
+  const legacy = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-LEGACY", first_token: true } });
+  assert.equal(legacy.status, 201);
+  assert.match(legacy.data.made.token, /^fla_/);
+  assert.equal(legacy.data.token_follows, false);
+  const legacyTokens = await callJson(env, "GET", `/api/bots/${legacy.data.bot.id}/tokens`, { auth: jay });
+  assert.equal(legacyTokens.data.tokens.length, 1);
+  assert.deepEqual([legacyTokens.data.tokens[0].name, legacyTokens.data.tokens[0].limits_from], ["FT-LEGACY token", "own"]);
+
+  // Account default: the token follows the manager's limits as they change.
+  await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_default_mode: "account" } });
+  const acct = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-ACCT", first_token: true } });
+  assert.equal(acct.status, 201);
+  assert.equal(acct.data.token_follows, true);
+  const acctTokens = await callJson(env, "GET", `/api/bots/${acct.data.bot.id}/tokens`, { auth: jay });
+  assert.equal(acctTokens.data.tokens[0].limits_from, "manager");
+
+  // Without the flag nothing is minted, exactly as before.
+  const plain = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-PLAIN" } });
+  assert.equal(plain.status, 201);
+  assert.equal(plain.data.made, undefined);
+  const plainTokens = await callJson(env, "GET", `/api/bots/${plain.data.bot.id}/tokens`, { auth: jay });
+  assert.equal(plainTokens.data.tokens.length, 0);
+});

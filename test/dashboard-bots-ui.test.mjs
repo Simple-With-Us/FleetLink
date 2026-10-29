@@ -32,24 +32,19 @@ function fnBody(source, name) {
   assert.fail(`${name} has balanced braces`);
 }
 
-test("Add Bot mints the first token right after creating the bot", () => {
+test("Add Bot creates the bot and its first token as one server action", () => {
   const addBot = fnBody(DASH, "addBot");
-  const create = addBot.indexOf('FL.api("POST", "/api/bots"');
-  const mint = addBot.indexOf('+ "/tokens"');
-  assert.notEqual(create, -1, "addBot creates the bot");
-  assert.notEqual(mint, -1, "addBot mints a token");
-  assert.ok(create < mint, "the mint follows the creation");
-  assert.match(addBot, /limits_from: "own"/, "the first token keeps the bot's own limits");
-  assert.match(addBot, /showBotSecret\(bot, made, false\)/, "the first token is shown once at the top");
+  assert.equal(addBot.split('FL.api("POST", "/api/bots"').length - 1, 1, "a single creation request");
+  assert.equal(addBot.includes('+ "/tokens"'), false, "no separate client-side mint");
+  assert.match(addBot, /first_token: true/, "the server mints the first token with the bot");
+  assert.match(addBot, /showBotSecret\(created\.bot, created\.made, !!created\.token_follows\)/, "the shown token and its limits note come from the server response");
 });
 
-test("a failed first mint keeps nothing, retries nothing, and says so", () => {
+test("a failed add keeps nothing, claims nothing, and never touches the secret box", () => {
   const addBot = fnBody(DASH, "addBot");
-  assert.equal(addBot.split('+ "/tokens"').length - 1, 1, "exactly one mint attempt, no retry");
-  assert.match(addBot, /catch \(tokenErr\)/, "the mint has its own failure path");
-  assert.match(addBot, /notice error/, "the failure is shown as an error notice");
-  assert.match(addBot, /No token was kept/, "the notice states nothing was kept");
-  assert.match(addBot, /use New Token on the bot's row/, "the notice names the recovery action");
+  assert.equal(addBot.includes('getElementById("bot-secret")'), false, "the failure path cannot wipe a shown token");
+  assert.match(addBot, /Check the list before trying again/, "a lost response is reconciled against the list, not asserted away");
+  assert.match(addBot, /finally[\s\S]*?loadBots\(\)/, "the list refreshes after either outcome");
 });
 
 test("a shown bot secret is always replaced, never accumulated", () => {
@@ -87,4 +82,13 @@ test("an open row menu is positioned against the viewport, not the clipping scro
   assert.match(DASH, /actions\.style\.position = "fixed"/, "the open menu escapes the table scroll box");
   assert.match(DASH, /actions\.style\.position = ""/, "the menu returns to the row when it closes");
   assert.match(DASH, /window\.addEventListener\("scroll"/, "scrolling closes an open menu");
+});
+
+test("the server mints the first token atomically and rolls the bot back on failure", () => {
+  const api = readFileSync(new URL("../worker/lib/api/bots.mjs", import.meta.url), "utf8");
+  assert.match(api, /first_token: z\.boolean\(\)\.optional\(\)/, "creation accepts the first-token request");
+  assert.match(api, /bot_default_mode === "account" \|\| .* === "manual"/, "the token's limits follow the manager's default policy");
+  assert.match(api, /DELETE FROM users WHERE id = \? AND kind = 'agent'/, "a failed mint removes the bot it came with");
+  assert.match(api, /bot\.create\.abort/, "the rollback is audited");
+  assert.match(api, /token_follows: follows/, "the response says what the token follows");
 });

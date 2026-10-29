@@ -24,7 +24,8 @@ import { cleanDisplayName, signOutEverywhere } from "../users.mjs";
 
 const CreateBotBody = z.object({
   seat: z.string().trim().min(2).max(24),
-  display_name: z.string().max(64).optional()
+  display_name: z.string().max(64).optional(),
+  first_token: z.boolean().optional()
 }).strict();
 /** A bot's manual caps: each is the tighter of this and the manager's own limit. */
 export const BotLimitsBody = z.object({
@@ -120,7 +121,27 @@ export function botRoutes(router) {
       await run(ctx.env.DB, "INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, 'admin', ?)", FLEET_TEAM_ID, id, ts);
     }
     await audit(ctx.env, principal.user.id, "bot.create", id, { seat });
-    return json({ bot: await botView(ctx.env, await first(ctx.env.DB, "SELECT * FROM users WHERE id = ?", id)) }, 201);
+    const row = await first(ctx.env.DB, "SELECT * FROM users WHERE id = ?", id);
+    let made = null;
+    // The manager's default policy decides what the first token follows:  an
+    // inherit-mode bot resolves 'account' and 'manual' defaults to the
+    // manager's tier on every request (auth.mjs agentLimitsResolution), so
+    // only the widest 'legacy' default leaves a token on the bot's own limits.
+    const follows = principal.user.bot_default_mode === "account" || principal.user.bot_default_mode === "manual";
+    if (input.first_token) {
+      try {
+        made = await createToken(ctx.env, row, await ctx.settings(), { name: `${seat} token`, limits_from: follows ? "manager" : "own" });
+        await audit(ctx.env, principal.user.id, "bot.token.create", id, { token_id: made.api_token.id });
+      } catch (err) {
+        // A bot and its first token are one action:  when the mint fails the
+        // bot it came with goes too, so a failed add keeps nothing.
+        await run(ctx.env.DB, "DELETE FROM team_members WHERE team_id = ? AND user_id = ?", FLEET_TEAM_ID, id);
+        await run(ctx.env.DB, "DELETE FROM users WHERE id = ? AND kind = 'agent'", id);
+        await audit(ctx.env, principal.user.id, "bot.create.abort", id, { seat });
+        throw err;
+      }
+    }
+    return json({ bot: await botView(ctx.env, row), ...(made ? { made, token_follows: follows } : {}) }, 201);
   });
 
   router.on("PATCH", "/api/bots/:id", async (ctx) => {

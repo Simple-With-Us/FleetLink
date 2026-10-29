@@ -1092,29 +1092,23 @@ export const DASHBOARD_JS = String.raw`
   async function addBot(e) {
     e.preventDefault();
     var form = e.currentTarget, f = FL.form(form);
-    var body = { seat: f.seat };
+    var body = { seat: f.seat, first_token: true };
     if (f.display_name && f.display_name.trim()) body.display_name = f.display_name.trim();
     var addButton = form.querySelector('button[type="submit"]');
     FL.busy(addButton, true);
     try {
       var created = await FL.api("POST", "/api/bots", body);
-      var bot = created.bot;
       form.reset();
-      // A new bot gets its first token at once, shown once at the top of the tab.
-      try {
-        var made = await FL.api("POST", "/api/bots/" + encodeURIComponent(bot.id) + "/tokens", { name: bot.seat + " token", limits_from: "own" });
-        showBotSecret(bot, made, false);
-        FL.toast("Bot added - its first token is shown once at the top of this tab.");
-      } catch (tokenErr) {
-        document.getElementById("bot-secret").replaceChildren(h("div", { class: "notice error" },
-          h("p", { class: "small", text: bot.display_name + " was added, but its first token could not be created: " + (tokenErr && tokenErr.message ? tokenErr.message : "unknown error") + "  No token was kept; use New Token on the bot's row to make one." })));
-        FL.toast("Bot added, but its first token was not created.", "error");
-      }
-      loadBots().catch(FL.fail);
+      // The server made the bot and its first token as one action.
+      showBotSecret(created.bot, created.made, !!created.token_follows);
+      FL.toast("Bot added - its first token is shown once at the top of this tab.");
     } catch (err) {
-      FL.fail(err);
+      // A failed add keeps nothing on the server, but a lost response can
+      // leave both behind, so never claim either way:  the list says what exists.
+      FL.toast("Adding the bot failed: " + (err && err.message ? err.message : "unknown error") + "\u00a0 Check the list before trying again.", "error");
     } finally {
       FL.busy(addButton, false);
+      loadBots().catch(FL.fail);
     }
   }
   document.getElementById("bot-form").addEventListener("submit", addBot);
