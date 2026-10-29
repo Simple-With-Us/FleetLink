@@ -863,6 +863,12 @@ export const DASHBOARD_JS = String.raw`
     renderBotDefaults();
   }
 
+  // The one place a bot token is ever shown:  once, at the top of the tab.
+  function showBotSecret(b, made, follow) {
+    document.getElementById("bot-secret").replaceChildren(h("div", { class: "notice ok" },
+      h("p", { class: "small", text: "Shown once.  It acts as " + b.display_name + (follow ? ", with your limits as they change." : ", with the bot's own limits.") }), FL.secretBox(b.seat + " token", made.token)));
+  }
+
   function botRow(b) {
     var active = b.status === "active";
     var base = "/api/bots/" + encodeURIComponent(b.id);
@@ -873,8 +879,7 @@ export const DASHBOARD_JS = String.raw`
       var follow = FL.confirm("Should this token follow your limits as they change?\n\nOK:  it always has your current file size, lifetime, and storage limits.\nCancel:  it keeps the bot's own, widest limits.");
       try {
         var made = await FL.api("POST", base + "/tokens", { name: name, limits_from: follow ? "manager" : "own" });
-        document.getElementById("bot-secret").replaceChildren(h("div", { class: "notice ok" },
-          h("p", { class: "small", text: "Shown once.  It acts as " + b.display_name + (follow ? ", with your limits as they change." : ", with the bot's own limits.") }), FL.secretBox(b.seat + " token", made.token)));
+        showBotSecret(b, made, follow);
         loadBots();
       } catch (err) { FL.fail(err); }
     } }));
@@ -904,7 +909,7 @@ export const DASHBOARD_JS = String.raw`
       h("td", { class: "hide-sm" }, b.usage.shares + " · " + FL.bytes(b.usage.bytes)),
       h("td", null, String(b.token_count), b.token_last_used_at ? h("div", { class: "small muted", text: "used " + FL.relative(b.token_last_used_at) }) : null),
       h("td", null, h("span", { class: "pill" + (active ? " green" : " red"), text: b.status })),
-      h("td", { class: "row-actions" }, rowMenu(actions)));
+      h("td", { class: "row-actions" }, h("button", { type: "button", class: "small secondary", text: "Rename", title: "Rename " + b.display_name, onclick: function () { openBotEditor(b, row); } }), rowMenu(actions)));
     return row;
   }
 
@@ -1045,6 +1050,8 @@ export const DASHBOARD_JS = String.raw`
         h("button", { type: "button", class: "secondary", text: "Cancel", onclick: function () { editorRow.remove(); } })));
     var editorRow = h("tr", { class: "bot-editor-row" }, h("td", { colspan: "5" }, h("div", { class: "card" }, h("h3", { text: "Edit " + b.display_name }), form)));
     row.after(editorRow);
+    var nameInput = editorRow.querySelector('input[name="display_name"]');
+    if (nameInput) { nameInput.focus(); nameInput.select(); }
   }
 
   async function saveBotEditor(e, b, editorRow, button) {
@@ -1087,7 +1094,28 @@ export const DASHBOARD_JS = String.raw`
     var form = e.currentTarget, f = FL.form(form);
     var body = { seat: f.seat };
     if (f.display_name && f.display_name.trim()) body.display_name = f.display_name.trim();
-    try { await FL.api("POST", "/api/bots", body); form.reset(); FL.toast("Bot added."); loadBots(); } catch (err) { FL.fail(err); }
+    var addButton = form.querySelector('button[type="submit"]');
+    FL.busy(addButton, true);
+    try {
+      var created = await FL.api("POST", "/api/bots", body);
+      var bot = created.bot;
+      form.reset();
+      // A new bot gets its first token at once, shown once at the top of the tab.
+      try {
+        var made = await FL.api("POST", "/api/bots/" + encodeURIComponent(bot.id) + "/tokens", { name: bot.seat + " token", limits_from: "own" });
+        showBotSecret(bot, made, false);
+        FL.toast("Bot added - its first token is shown once at the top of this tab.");
+      } catch (tokenErr) {
+        document.getElementById("bot-secret").replaceChildren(h("div", { class: "notice error" },
+          h("p", { class: "small", text: bot.display_name + " was added, but its first token could not be created: " + (tokenErr && tokenErr.message ? tokenErr.message : "unknown error") + "  No token was kept; use New Token on the bot's row to make one." })));
+        FL.toast("Bot added, but its first token was not created.", "error");
+      }
+      loadBots().catch(FL.fail);
+    } catch (err) {
+      FL.fail(err);
+    } finally {
+      FL.busy(addButton, false);
+    }
   }
   document.getElementById("bot-form").addEventListener("submit", addBot);
 
