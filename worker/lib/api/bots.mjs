@@ -134,7 +134,9 @@ export function botRoutes(router) {
         await audit(ctx.env, principal.user.id, "bot.token.create", id, { token_id: made.api_token.id });
       } catch (err) {
         // A bot and its first token are one action:  whatever the mint wrote
-        // goes too, so a rejected add keeps nothing live.  These deletes can
+        // goes too.  This is best-effort compensation, not a transaction:
+        // a rejected add keeps nothing live unless the cleanup itself fails,
+        // which is surfaced on its own below.  These deletes can
         // only match rows from this request - the bot was inserted above, and
         // a conflict on an existing seat never reaches here.
         try {
@@ -143,7 +145,10 @@ export function botRoutes(router) {
           await run(ctx.env.DB, "DELETE FROM users WHERE id = ? AND kind = 'agent'", id);
           await audit(ctx.env, principal.user.id, "bot.create.abort", id, { seat });
         } catch (cleanupErr) {
-          throw new HttpError(500, `Adding the bot failed (${err.message}) and removing it failed too (${cleanupErr.message}); the seat ${seat} may need manual removal.`);
+          // Only the seat names the residue;  raw database and token details
+          // never leave the server in a client-facing error.
+          await audit(ctx.env, principal.user.id, "bot.create.abort_failed", id, { seat });
+          throw new HttpError(500, `Adding the bot failed and cleaning it up failed too; the seat ${seat} may need manual removal.`);
         }
         throw err;
       }

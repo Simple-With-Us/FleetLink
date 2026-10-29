@@ -508,17 +508,15 @@ test("adding a bot with first_token mints the token atomically, following the ma
   assert.equal(plainTokens.data.tokens.length, 0);
 });
 
-test("a failed first-token mint keeps nothing: no bot, no token, no team seat", async () => {
-  const { env, jay } = await fleet();
-
-  // Make the token INSERT fail while every other statement behaves normally.
-  const bomb = () => Promise.reject(new Error("injected api_tokens failure"));
+/** Route the worker with a database that fails statements matching any needle. */
+function envWithFailing(env, ...needles) {
+  const bomb = () => Promise.reject(new Error("injected failure"));
   const db = new Proxy(env.DB, {
     get(target, prop) {
       if (prop !== "prepare") return Reflect.get(target, prop);
       return (sql, ...args) => {
         const stmt = target.prepare(sql, ...args);
-        if (!String(sql).includes("INSERT INTO api_tokens")) return stmt;
+        if (!needles.some((needle) => String(sql).includes(needle))) return stmt;
         return new Proxy(stmt, {
           get(st, p) {
             if (p === "bind") return () => new Proxy(st, {
@@ -530,20 +528,51 @@ test("a failed first-token mint keeps nothing: no bot, no token, no team seat", 
       };
     }
   });
-  const badEnv = new Proxy(env, { get(t, p) { return p === "DB" ? db : t[p]; } });
+  return new Proxy(env, { get(t, p) { return p === "DB" ? db : t[p]; } });
+}
 
-  const res = await callJson(badEnv, "POST", "/api/bots", { auth: jay, json: { seat: "FT-ROLLBACK", first_token: true } });
+async function rollbackResidue(env, id) {
+  return {
+    bot: await env.DB.prepare(`SELECT id FROM users WHERE id = '${id}'`).first(),
+    seat: await env.DB.prepare(`SELECT user_id FROM team_members WHERE team_id = 'team_fleet' AND user_id = '${id}'`).first(),
+    tokens: (await env.DB.prepare(`SELECT id FROM api_tokens WHERE user_id = '${id}'`).all()).results.length,
+    audits: (await env.DB.prepare(`SELECT action FROM audit_events WHERE target = '${id}' ORDER BY rowid`).all()).results.map((r) => r.action)
+  };
+}
+
+test("a mint that fails before writing keeps nothing, and the seat stays reusable", async () => {
+  const { env, jay } = await fleet();
+  const res = await callJson(envWithFailing(env, "INSERT INTO api_tokens"), "POST", "/api/bots", { auth: jay, json: { seat: "FT-ROLLBACK", first_token: true } });
   assert.equal(res.status, 500);
+  assert.deepEqual(await rollbackResidue(env, "usr_agent_ft_rollback"), { bot: null, seat: null, tokens: 0, audits: ["bot.create", "bot.create.abort"] });
 
-  // Nothing from the failed add survives:  no bot, no token, no Fleet seat.
-  assert.equal(await env.DB.prepare("SELECT id FROM users WHERE id = 'usr_agent_ft_rollback'").first(), null);
-  assert.equal(await env.DB.prepare("SELECT user_id FROM team_members WHERE team_id = 'team_fleet' AND user_id = 'usr_agent_ft_rollback'").first(), null);
-  assert.equal((await env.DB.prepare("SELECT id FROM api_tokens WHERE user_id = 'usr_agent_ft_rollback'").all()).results.length, 0);
-  const audits = (await env.DB.prepare("SELECT action FROM audit_events WHERE target = 'usr_agent_ft_rollback' ORDER BY rowid").all()).results.map((r) => r.action);
-  assert.deepEqual(audits, ["bot.create", "bot.create.abort"]);
-
-  // The seat is free to use again.
   const retry = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-ROLLBACK", first_token: true } });
   assert.equal(retry.status, 201);
   assert.match(retry.data.made.token, /^fla_/);
+});
+
+test("a mint that fails after writing the token removes it with the bot", async () => {
+  const { env, jay } = await fleet();
+  // createToken reads the row back after inserting it;  failing that read is
+  // a failure after the token write committed.
+  const res = await callJson(envWithFailing(env, "SELECT t.*, tm.name AS team_name FROM api_tokens"), "POST", "/api/bots", { auth: jay, json: { seat: "FT-AFTER", first_token: true } });
+  assert.equal(res.status, 500);
+  assert.deepEqual(await rollbackResidue(env, "usr_agent_ft_after"), { bot: null, seat: null, tokens: 0, audits: ["bot.create", "bot.create.abort"] });
+});
+
+test("a failing cleanup reports a sanitized error and leaves the residue named", async () => {
+  const { env, jay } = await fleet();
+  // Fail the mint after its token write and the first compensating delete:
+  // the route must report a generic error instead of masking or leaking.
+  const res = await callJson(envWithFailing(env, "SELECT t.*, tm.name AS team_name FROM api_tokens", "DELETE FROM api_tokens"), "POST", "/api/bots", { auth: jay, json: { seat: "FT-RESIDUE", first_token: true } });
+  assert.equal(res.status, 500);
+  // The client learns the state and the seat, never raw database details.
+  assert.match(res.data.error, /cleaning it up failed too; the seat FT-RESIDUE may need manual removal/);
+  assert.equal(res.data.error.includes("injected"), false);
+  // The compensation stopped at the failing delete:  the token went in, the
+  // bot and its Fleet seat remain, and the failed abort is audited.
+  const residue = await rollbackResidue(env, "usr_agent_ft_residue");
+  assert.equal(residue.tokens, 1);
+  assert.ok(residue.bot && residue.seat);
+  assert.deepEqual(residue.audits, ["bot.create", "bot.create.abort_failed"]);
 });
