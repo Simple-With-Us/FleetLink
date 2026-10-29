@@ -17,15 +17,20 @@ import argparse
 import base64
 import getpass
 import hashlib
+import http.client
 import json
 import mimetypes
 import os
+import re
 import stat
 import subprocess
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import time
+from datetime import datetime
+from pathlib import Path
 
 VERSION = "2.0.0"
 DEFAULT_DOMAIN = "https://fleetlink.online"
@@ -55,6 +60,395 @@ TEXT_TYPES = {
 
 class CliError(Exception):
     pass
+
+
+# BEGIN shared private-file fleet bearer client
+# Functional body is byte-identical to AFC fleet_bearer.py, from ENDPOINT onward.
+# Imports are at module top because this file is also the standalone CLI.
+ENDPOINT = "https://agents.simplewithus.com/mcp"
+MAX_BYTES = 4_000_000
+TOKEN = re.compile(r"(?:sbt_([a-z][a-z0-9-]{1,19})|gbb_([a-z][a-z0-9]{1,19}))_([A-Za-z0-9_-]{43})")
+
+
+class FleetError(Exception):
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(message)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def private_bearer(path):
+    """Open once, without symlink following; never disclose content in errors."""
+    try:
+        if not isinstance(path, (str, os.PathLike)) or not str(path).strip():
+            raise ValueError
+        path = Path(path).expanduser().absolute()
+        # Walk with directory descriptors, not lstat-then-open: replacement of
+        # an ancestor must not redirect the credential read through a symlink.
+        directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for component in path.parts[1:-1]:
+                child = os.open(
+                    component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+                )
+                os.close(directory)
+                directory = child
+                info = os.fstat(directory)
+                root_sticky = info.st_uid in (0, os.getuid()) and bool(info.st_mode & stat.S_ISVTX)
+                if (info.st_mode & 0o022 and not root_sticky) or info.st_uid not in (
+                    0,
+                    os.getuid(),
+                ):
+                    raise ValueError
+            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            with os.fdopen(fd, "rb") as handle:
+                info = os.fstat(handle.fileno())
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) not in (0o400, 0o600)
+                    or info.st_nlink != 1
+                    or info.st_size > 256
+                ):
+                    raise ValueError
+                raw = handle.read(257)
+        finally:
+            os.close(directory)
+        value = raw.decode("ascii")
+        value = value.removesuffix("\n")
+        match = TOKEN.fullmatch(value)
+        if not match:
+            raise ValueError
+        seat = match[1].upper() if match[1] else "GB-" + match[2].upper()
+        return seat, value
+    except (OSError, ValueError, UnicodeError, TypeError):
+        raise FleetError(
+            "not_configured",
+            "fleet bearer file is missing, unsafe or malformed; no fallback was used",
+        ) from None
+
+
+def bounded_json(raw):
+    # Refuse deep nesting before the JSON parser can consume recursion or memory.
+    depth = 0
+    quoted = escaped = False
+    for char in raw:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char in "[{":
+            depth += 1
+            if depth > 64:
+                raise ValueError
+        elif char in "]}":
+            depth -= 1
+    return json.loads(raw)
+
+
+def contains_bearer(value, token):
+    """Scan decoded strings and keys too, not only their JSON byte spelling."""
+    stack = [value]
+    visited = 0
+    while stack:
+        item = stack.pop()
+        visited += 1
+        if visited > 100_000:
+            raise ValueError
+        if isinstance(item, str) and token in item:
+            return True
+        if isinstance(item, dict):
+            stack.extend(item.keys())
+            stack.extend(item.values())
+        elif isinstance(item, (list, tuple)):
+            stack.extend(item)
+    return False
+
+
+class Client:
+    def __init__(self, path, expected_seat=None, identity_env=None):
+        self.path = path
+        self.seat, _ = private_bearer(path)
+        identity_env = os.environ if identity_env is None else identity_env
+        # Non-secret launcher hints can restrict, never select another bearer.
+        for name in ("AGENT_LAUNCH_SEAT", "AGENT_SEAT", "AGENT_TAG"):
+            value = str(identity_env.get(name, "")).strip().upper()
+            if value and value != self.seat:
+                raise FleetError(
+                    "not_authorized", "fleet bearer conflicts with the current bot identity"
+                )
+        if identity_env.get("AGENT_LAUNCHER") and not identity_env.get("AGENT_LAUNCH_SEAT"):
+            raise FleetError("not_authorized", "launcher did not bind a bot identity")
+        if expected_seat is not None and self.seat != expected_seat:
+            raise FleetError("not_authorized", "fleet bearer does not name the requested bot")
+        self.verified = False
+        self._verified_token = None
+
+    def rpc(self, method, params, write=False):
+        seat, token = private_bearer(self.path)
+        if seat != self.seat:
+            raise FleetError("not_authorized", "fleet bearer identity changed; nothing was sent")
+        unknown = "; outcome unknown, check before repeating the write" if write else ""
+        body = json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, allow_nan=False
+        ).encode()
+        if len(body) > MAX_BYTES or contains_bearer(params, token):
+            raise FleetError(
+                "invalid_argument",
+                "request too large or contains the fleet bearer; nothing was sent",
+            )
+        request = urllib.request.Request(
+            ENDPOINT,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": "2025-06-18",
+            },
+        )
+        try:
+            # No environment proxy, cookies, redirects or retry.
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+            with opener.open(request, timeout=40) as response:
+                raw = response.read(MAX_BYTES + 1)
+                ctype = response.headers.get("Content-Type", "").split(";", 1)[0].strip()
+            if len(raw) > MAX_BYTES or token.encode() in raw:
+                raise ValueError
+            text = raw.decode("utf-8")
+            if ctype == "text/event-stream":
+                candidates = [
+                    "\n".join(
+                        line[5:].lstrip(" ")
+                        for line in event.splitlines()
+                        if line.startswith("data:")
+                    )
+                    for event in text.replace("\r\n", "\n").split("\n\n")
+                ]
+            elif ctype == "application/json":
+                candidates = [text]
+            else:
+                raise ValueError
+            replies = [bounded_json(part) for part in candidates if part.strip()]
+            replies = [
+                r
+                for r in replies
+                if isinstance(r, dict)
+                and r.get("jsonrpc") == "2.0"
+                and type(r.get("id")) is int
+                and r["id"] == 1
+            ]
+            if len(replies) != 1:
+                raise ValueError
+            reply = replies[0]
+            if contains_bearer(reply, token):
+                raise ValueError
+            if "error" in reply or not isinstance(reply.get("result"), dict):
+                raise ValueError
+            result = reply["result"]
+            if not isinstance(result.get("isError", False), bool):
+                raise TypeError
+            if "content" in result and (
+                not isinstance(result["content"], list)
+                or any(not isinstance(p, dict) for p in result["content"])
+            ):
+                raise ValueError
+            if result.get("isError"):
+                sc = result.get("structuredContent")
+                code = sc.get("code") if isinstance(sc, dict) else None
+                if not isinstance(code, str) or not re.fullmatch(r"[a-z_]{1,40}", code):
+                    code = "upstream_error"
+                raise FleetError(code, "gateway refused the call (" + code + ")" + unknown)
+            return result
+        except urllib.error.HTTPError as exc:
+            code = "not_authorized" if exc.code in (401, 403) else "unavailable"
+            raise FleetError(
+                code,
+                "gateway HTTP "
+                + str(exc.code)
+                + (unknown if exc.code >= 500 or exc.code == 408 else ""),
+            ) from None
+        except FleetError:
+            raise
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            RecursionError,
+            http.client.HTTPException,
+            urllib.error.URLError,
+        ):
+            raise FleetError(
+                "outcome_unknown" if write else "unavailable",
+                "gateway transport or response failed" + unknown,
+            ) from None
+
+    def call(self, name, arguments, write=False):
+        _, token = private_bearer(self.path)
+        if not self.verified or token != self._verified_token:
+            who = self.rpc("tools/call", {"name": "whoami", "arguments": {}}).get(
+                "structuredContent"
+            )
+            if (
+                not isinstance(who, dict)
+                or who.get("authenticated_seat") != self.seat
+                or who.get("seat") != self.seat
+            ):
+                raise FleetError(
+                    "not_authorized", "gateway identity did not match this bot; nothing was sent"
+                )
+            self.verified = True
+            self._verified_token = token
+        return self.rpc("tools/call", {"name": name, "arguments": arguments}, write)
+
+# END shared private-file fleet bearer client
+
+class FleetApi:
+    """REST-shaped local adapter. The gateway authenticates; FleetLink authorizes."""
+    def __init__(self, args):
+        if args.token or args.operator or args.domain or os.environ.get("FLEETLINK_DOMAIN"):
+            raise CliError("Fleet bearer mode cannot mix a provider token, operator credential or alternate domain.")
+        self.client = Client(args.fleet_bearer_file)
+
+    def tool(self, name, arguments):
+        if not isinstance(name, str) or not name.startswith("fleetlink_"):
+            raise CliError("Only FleetLink tools are available in fleet bearer mode.")
+        result = self.client.call(name, arguments, write=name not in {"fleetlink_whoami", "fleetlink_get_share", "fleetlink_list_shares", "fleetlink_list_teams", "fleetlink_read_file"})
+        # The summary omits file bytes and complete share/account metadata. Read the
+        # exact single-line JSON inside the gateway's nonce-paired data fence.
+        for part in result.get("content", []):
+            text = part.get("text", "")
+            if not isinstance(text, str):
+                continue
+            match = re.search(r"(?m)^BEGIN_UNTRUSTED_FLEETLINK nonce=([A-Za-z0-9_-]+)\n([^\n]*)\nEND_UNTRUSTED_FLEETLINK nonce=\1$", text)
+            if match:
+                data = bounded_json(match[2])
+                if isinstance(data, dict):
+                    return data
+        raise CliError("Gateway returned no complete FleetLink result; a write may have landed. Check before repeating.")
+
+    def request(self, method, path, body=None, data=None, headers=None, length=None):
+        if path == "/mcp":
+            if body["method"] == "tools/call":
+                out = self.tool(body["params"]["name"], body["params"].get("arguments", {}))
+                return {"result": {"content": [{"type": "text", "text": json.dumps(out)}]}}
+            if body["method"] == "tools/list":
+                result = self.client.rpc("tools/list", {})
+                return {"result": {"tools": [t for t in result.get("tools", []) if t.get("name", "").startswith("fleetlink_")]}}
+            raise CliError("Unsupported MCP method in fleet bearer mode.")
+        parsed = urllib.parse.urlsplit(path)
+        parts = [urllib.parse.unquote(p) for p in parsed.path.split("/") if p]
+        query = dict(urllib.parse.parse_qsl(parsed.query))
+        args = dict(body or {})
+        name = None
+        if parts == ["api", "me"] and method == "GET":
+            name = "fleetlink_whoami"
+        elif parts == ["api", "teams"] and method == "GET":
+            name = "fleetlink_list_teams"
+        elif parts == ["api", "links"] and method == "POST":
+            name = "fleetlink_create_link"
+        elif parts == ["api", "shares"]:
+            if method == "GET":
+                name, args = "fleetlink_list_shares", query
+                if "limit" in args:
+                    args["limit"] = int(args["limit"])
+            elif method == "POST":
+                name = "fleetlink_create_share"
+                args["empty"] = True
+                if "days" in args and args["days"] != "forever":
+                    args["days"] = float(args["days"])
+        elif parts[:2] == ["api", "shares"] and len(parts) >= 3:
+            args["slug"] = parts[2]
+            if len(parts) == 3:
+                if method == "GET":
+                    name = "fleetlink_get_share"
+                elif method == "DELETE":
+                    name = "fleetlink_delete_share"
+                elif method == "PATCH":
+                    if "team_id" in args:
+                        team = args.pop("team_id")
+                        if team is None:
+                            name = "fleetlink_make_personal"
+                        else:
+                            name = "fleetlink_share_to_team"
+                            args["team_id"] = team
+                            args["access"] = args.pop("team_access", "edit")
+                    else:
+                        name = "fleetlink_update_share"
+                        if body and "slug" in body:
+                            args["new_slug"] = body["slug"]
+                            args["slug"] = parts[2]
+            elif parts[3] == "renew" and method == "POST":
+                name = "fleetlink_renew_share"
+            elif parts[3] == "upload-url" and method == "POST":
+                name = "fleetlink_upload_url"
+            elif parts[3] == "files" and len(parts) > 4:
+                args["path"] = "/".join(parts[4:])
+                if method == "DELETE":
+                    name = "fleetlink_delete_file"
+                elif method == "PUT":
+                    args.update({"max_bytes": max(1, length), "content_type": headers["Content-Type"]})
+                    grant = self.tool("fleetlink_upload_url", args)
+                    return self.stream(grant, data, length, args["path"], parts[2])
+        if name is None:
+            raise CliError("This account/admin operation is not exposed by the fleet gateway. No provider fallback was used; use an explicit human/operator session for account management.")
+        if "days" in args and args["days"] != "forever":
+            args["days"] = float(args["days"])
+        return self.tool(name, args)
+
+    def stream(self, grant, handle, length, path, slug):
+        upload = grant.get("upload", {})
+        url = upload.get("upload_url", "")
+        parsed = urllib.parse.urlsplit(url)
+        try:
+            expiry = datetime.fromisoformat(upload["expires_at"].replace("Z", "+00:00"))
+            remaining = expiry.timestamp() - time.time()
+            valid = (parsed.scheme == "https" and parsed.netloc == "fleetlink.online"
+                     and not parsed.query and not parsed.fragment
+                     and re.fullmatch(r"/api/uploads/flu_[0-9a-f]{64}", parsed.path)
+                     and upload.get("path") == path and (grant.get("share") or {}).get("slug") == slug
+                     and expiry.tzinfo is not None and 0 < remaining <= 1800
+                     and type(upload.get("max_bytes")) is int and length <= upload["max_bytes"])
+            if not valid:
+                raise ValueError
+        except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
+            raise CliError("Invalid or expired upload grant. No bytes sent; check the share before repeating.") from None
+        request = urllib.request.Request(url, data=handle, method="PUT", headers={
+            "Content-Type": upload.get("content_type", "application/octet-stream"), "Content-Length": str(length)})
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+            with opener.open(request, timeout=min(600, remaining)) as response:
+                raw = response.read(MAX_BYTES + 1)
+                if len(raw) > MAX_BYTES:
+                    raise ValueError
+                out = bounded_json(raw.decode())
+                if not isinstance(out, dict):
+                    raise ValueError
+                return out
+        except (OSError, ValueError, http.client.HTTPException, urllib.error.URLError):
+            raise CliError("Streamed upload outcome unknown. No retry or cleanup was attempted; inspect the share first.") from None
+
+    def get(self, path):
+        return self.request("GET", path)
+
+    def post(self, path, body=None):
+        return self.request("POST", path, body)
+
+    def patch(self, path, body):
+        return self.request("PATCH", path, body)
+
+    def delete(self, path, body=None):
+        return self.request("DELETE", path, body)
 
 
 # ---------------------------------------------------------------- credentials
@@ -131,6 +525,11 @@ def domain(args):
 # ----------------------------------------------------------------------- http
 
 class Api:
+    def __new__(cls, args, auth=True):
+        if auth and getattr(args, "fleet_bearer_file", None) is not None:
+            return FleetApi(args)
+        return super().__new__(cls)
+
     def __init__(self, args, auth=True):
         self.base = domain(args)
         self.header = resolve_auth(args) if auth else None
@@ -277,7 +676,7 @@ def cmd_upload(args):
                 )
             uploaded.append(result["url"])
     except CliError:
-        if fresh and not uploaded:
+        if fresh and not uploaded and getattr(args, "fleet_bearer_file", None) is None:
             try:
                 api.delete("/api/shares/" + q(share["slug"]))
             except CliError:
@@ -781,6 +1180,7 @@ COMMANDS = {"upload", "link", "list", "ls", "info", "cat", "add", "rm-file", "up
 def build_parser():
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--domain", help="FleetLink base URL (default {} or FLEETLINK_DOMAIN)".format(DEFAULT_DOMAIN))
+    common.add_argument("--fleet-bearer-file", default=argparse.SUPPRESS, metavar="PATH", help="use this bot's existing private fleet bearer via the gateway, never a provider fallback")
     common.add_argument("--token", help="API token for this call (prefer FLEETLINK_TOKEN or `fleet-share login`)")
     common.add_argument("--operator", action="store_true", help="use the operator secret (FLEET_ADMIN_SECRET) even if a token is set")
     common.add_argument("--json", action="store_true", help="print JSON")
@@ -946,7 +1346,18 @@ def main(argv):
     if argv and argv[0] == "help":
         argv = ["--help"]
     # Bare paths mean upload, as before: `fleet-share notes.md`.
-    first = next((a for a in argv if not a.startswith("-")), None)
+    first = None
+    skip_value = False
+    for value in argv:
+        if skip_value:
+            skip_value = False
+            continue
+        if value in ("--fleet-bearer-file", "--domain", "--token"):
+            skip_value = True
+            continue
+        if not value.startswith("-"):
+            first = value
+            break
     if first is not None and first not in COMMANDS:
         argv = ["upload"] + argv
     parser = build_parser()
@@ -958,9 +1369,11 @@ def main(argv):
         if not hasattr(args, attr):
             setattr(args, attr, None)
     try:
+        if getattr(args, "fleet_bearer_file", None) is not None and args.command in {"login", "logout", "tokens", "bots", "admin", "skill"}:
+            raise CliError("This account/admin operation is not exposed by the fleet gateway. No provider fallback was used; use an explicit human/operator session for account management.")
         result = args.func(args)
         return result if isinstance(result, int) else 0
-    except CliError as err:
+    except (CliError, FleetError) as err:
         print("Error: {}".format(err), file=sys.stderr)
         return 1
     except KeyboardInterrupt:
