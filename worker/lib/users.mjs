@@ -102,27 +102,39 @@ export async function accountSummary(env, user, settings) {
 }
 
 /**
- * Close an account.  Credentials go now; shares are expired so the hourly sweep
- * deletes their objects, and the sweep removes the user row once no share
- * references it.  Teams the person owned alone pass to the next member or go.
+ * Close an account.  Credentials go now; shares either expire (a person
+ * closing:  the hourly sweep reclaims their objects) or transfer to a living
+ * owner (a bot being deleted:  its work survives it).  The sweep removes the
+ * user row once no share references it.  Teams the account owned alone pass
+ * to the next member or go.
  */
-export async function closeAccount(env, userId, actorId) {
+export async function closeAccount(env, userId, actorId, { shares = "expire", transferTo = null, action = "account.delete", detail = null } = {}) {
   const user = await getUser(env.DB, userId);
   if (!user || user.status === "deleted") return false;
   if (user.is_system) throw badRequest("The operator account cannot be deleted.");
+  if (shares === "transfer" && !transferTo) throw badRequest("A share transfer needs a new owner.");
   const ts = now();
+  // Team hand-over runs before the batch:  it reads then writes per team, so
+  // it cannot join the batch.  If the batch then fails, the account is still
+  // active and the hand-over is simply already done - nothing is lost.
   await handOverTeams(env, userId);
-  await env.DB.batch([
+  const statements = [
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM api_tokens WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM passkeys WHERE user_id = ?").bind(userId),
-    env.DB.prepare("DELETE FROM team_members WHERE user_id = ?").bind(userId),
-    env.DB.prepare("UPDATE shares SET expires_at = ?, updated_at = ? WHERE owner_id = ?").bind(ts - 1, ts, userId),
-    env.DB.prepare(
-      "UPDATE users SET status = 'deleted', email = NULL, display_name = 'Deleted account', updated_at = ? WHERE id = ?"
-    ).bind(ts, userId)
-  ]);
-  await audit(env, actorId, "account.delete", userId);
+    env.DB.prepare("DELETE FROM team_members WHERE user_id = ?").bind(userId)
+  ];
+  // A closing person's shares expire so the sweep reclaims their objects.  A
+  // deleted bot's shares MOVE to its manager instead:  serving stops for any
+  // non-active owner (serve.mjs), so preserving the fleet's access - public
+  // links included - means the shares need a living owner, not a tombstone.
+  if (shares === "expire") statements.push(env.DB.prepare("UPDATE shares SET expires_at = ?, updated_at = ? WHERE owner_id = ?").bind(ts - 1, ts, userId));
+  else statements.push(env.DB.prepare("UPDATE shares SET owner_id = ?, updated_at = ? WHERE owner_id = ?").bind(transferTo, ts, userId));
+  statements.push(env.DB.prepare(
+    "UPDATE users SET status = 'deleted', email = NULL, display_name = 'Deleted account', updated_at = ? WHERE id = ?"
+  ).bind(ts, userId));
+  await env.DB.batch(statements);
+  await audit(env, actorId, action, userId, detail ?? undefined);
   return true;
 }
 

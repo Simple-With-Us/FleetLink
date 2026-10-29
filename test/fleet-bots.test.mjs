@@ -22,13 +22,13 @@ async function fleet() {
 test("every fleet bot exists up front, as an admin of the Fleet team", async () => {
   const env = await makeEnv();
   await call(env, "GET", "/api/shares"); // the first request applies the migrations
-  assert.equal(FLEET_BOTS.length, 37);
+  assert.equal(FLEET_BOTS.length, 36);
   const seats = FLEET_BOTS.map((b) => b.seat);
-  for (const seat of ["CLAUDE", "CODEX", "AG", "CURSOR", "GROK", "GROK-WEB", "CLUTCH", "MM", "FX", "MC", "OPENCODE", "MA", "JET", "ECHO", "WISE", "BF-BUILDER", "BF-PUBLISHER", "GB-TRADER"]) {
+  for (const seat of ["CLAUDE", "CODEX", "AG", "CURSOR", "GROK", "GROK-WEB", "CLUTCH", "MM", "FX", "MC", "OPENCODE", "MA", "JET", "ECHO", "WISE", "BF-PUBLISHER", "GB-TRADER"]) {
     assert.ok(seats.includes(seat), seat);
   }
   const rows = (await env.DB.prepare("SELECT u.agent_seat, u.kind, m.role FROM users u LEFT JOIN team_members m ON m.user_id = u.id AND m.team_id = 'team_fleet' WHERE u.kind = 'agent'").all()).results;
-  assert.equal(rows.length, 37);
+  assert.equal(rows.length, 36);
   assert.ok(rows.every((r) => r.role === "admin"), "every bot is a Fleet team admin");
   assert.equal((await env.DB.prepare("SELECT name FROM teams WHERE id = 'team_fleet'").first()).name, "Fleet");
 });
@@ -36,12 +36,12 @@ test("every fleet bot exists up front, as an admin of the Fleet team", async () 
 test("the fleet owner is found by FLEET_OWNER_EMAIL, owns the Fleet team, and manages every bot", async () => {
   const { env, jay } = await fleet();
   const me = await callJson(env, "GET", "/api/me", { auth: jay });
-  assert.deepEqual(me.data.bots, { count: 37, fleet_owner: true });
+  assert.deepEqual(me.data.bots, { count: 36, fleet_owner: true });
   const teams = await callJson(env, "GET", "/api/teams", { auth: jay });
-  assert.deepEqual(teams.data.teams.map((t) => [t.id, t.name, t.my_role, t.members.length]), [["team_fleet", "Fleet", "owner", 39]]);
+  assert.deepEqual(teams.data.teams.map((t) => [t.id, t.name, t.my_role, t.members.length]), [["team_fleet", "Fleet", "owner", 38]]);
   const bots = await callJson(env, "GET", "/api/bots", { auth: jay });
   assert.equal(bots.data.fleet_owner, true);
-  assert.equal(bots.data.bots.length, 37);
+  assert.equal(bots.data.bots.length, 36);
   assert.ok(bots.data.bots.every((b) => b.manager_id === jay.user.id));
 
   // Somebody else with no email match is not the owner and has no bots.
@@ -157,13 +157,13 @@ test("a site admin can claim the fleet when no email matches", async () => {
   assert.equal((await callJson(env, "POST", "/api/admin/fleet/claim", { auth: ada })).status, 403);
   await makeAdmin(env, ada);
   const before = await callJson(env, "GET", "/api/admin/fleet", { auth: ada });
-  assert.deepEqual([before.data.owner, before.data.bots, before.data.unmanaged], [null, 37, 37]);
+  assert.deepEqual([before.data.owner, before.data.bots, before.data.unmanaged], [null, 36, 36]);
   assert.equal((await callJson(env, "POST", "/api/admin/fleet/claim", { auth: { operator: true } })).status, 400);
   const claimed = await callJson(env, "POST", "/api/admin/fleet/claim", { auth: ada });
-  assert.deepEqual([claimed.data.owner_id, claimed.data.bots], [ada.user.id, 37]);
+  assert.deepEqual([claimed.data.owner_id, claimed.data.bots], [ada.user.id, 36]);
   const after = await callJson(env, "GET", "/api/admin/fleet", { auth: ada });
   assert.deepEqual([after.data.owner.id, after.data.unmanaged], [ada.user.id, 0]);
-  assert.deepEqual((await callJson(env, "GET", "/api/me", { auth: ada })).data.bots, { count: 37, fleet_owner: true });
+  assert.deepEqual((await callJson(env, "GET", "/api/me", { auth: ada })).data.bots, { count: 36, fleet_owner: true });
   const audit = await callJson(env, "GET", "/api/admin/audit", { auth: ada });
   assert.ok(audit.data.events.some((e) => e.action === "fleet.owner"));
 });
@@ -411,7 +411,7 @@ test("migration order v8 -> v9 applies cleanly and pre-existing rows are unchang
   // Every pre-existing fleet bot keeps the explicit legacy policy;  no person
   // gains a non-legacy default silently.
   const bots = (await env.DB.prepare("SELECT agent_limit_mode FROM users WHERE kind = 'agent'").all()).results;
-  assert.ok(bots.length >= 37);
+  assert.ok(bots.length >= 36);
   assert.ok(bots.every((r) => r.agent_limit_mode === "legacy"));
   const people = (await env.DB.prepare("SELECT bot_default_mode FROM users WHERE kind = 'person'").all()).results;
   assert.ok(people.every((r) => r.bot_default_mode === "legacy"));
@@ -580,4 +580,130 @@ test("a failing cleanup reports a sanitized error and leaves the residue named",
   assert.equal(residue.tokens, 1);
   assert.ok(residue.bot && residue.seat);
   assert.deepEqual(residue.audits, ["bot.create", "bot.create.abort_failed"]);
+});
+
+test("deleting a bot kills its credentials and hides it, and its shares transfer to its manager alive", async () => {
+  const { env, jay } = await fleet();
+  const made = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-DELETE", first_token: true } });
+  assert.equal(made.status, 201);
+  const id = "usr_agent_ft_delete";
+  const token = made.data.made.token;
+
+  // The bot owns a live share in the Fleet team.
+  const ts = Math.floor(Date.now() / 1000);
+  await env.DB.prepare("INSERT INTO shares (id, slug, owner_id, team_id, kind, created_at, updated_at) VALUES (?, ?, ?, 'team_fleet', 'files', ?, ?)")
+    .bind("share_ft_delete", "ft-delete-doc", id, ts, ts).run();
+
+  // The confirmation must name the seat.
+  const wrong = await callJson(env, "DELETE", `/api/bots/${id}`, { auth: jay, json: { confirm: "delete FT-WRONG" } });
+  assert.equal(wrong.status, 400);
+  const missing = await callJson(env, "DELETE", `/api/bots/${id}`, { auth: jay, json: {} });
+  assert.equal(missing.status, 400);
+
+  // The share serves before the delete.
+  const before = await callJson(env, "GET", "/ft-delete-doc?manifest=1", { auth: jay });
+  assert.equal(before.status, 200);
+
+  const res = await callJson(env, "DELETE", `/api/bots/${id}`, { auth: jay, json: { confirm: "delete FT-DELETE" } });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.deleted, true);
+  assert.equal(res.data.shares_transferred, 1);
+
+  // Credentials, sessions, and the Fleet seat are gone; the row is a tombstone.
+  const row = await env.DB.prepare("SELECT status, display_name, email FROM users WHERE id = ?").bind(id).first();
+  assert.equal(row.status, "deleted");
+  assert.equal(row.email, null);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?").bind(id).first()).n, 0);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM team_members WHERE user_id = ?").bind(id).first()).n, 0);
+
+  // The minted token dies with the bot.
+  const me = await callJson(env, "GET", "/api/me", { auth: { token } });
+  assert.equal(me.status, 401);
+
+  // The share moves to the manager with its own lifetime, so it keeps
+  // serving - a tombstoned owner would 404 it for everyone (serve.mjs).
+  const share = await env.DB.prepare("SELECT owner_id, team_id, expires_at FROM shares WHERE id = 'share_ft_delete'").first();
+  assert.equal(share.owner_id, jay.user.id);
+  assert.equal(share.team_id, "team_fleet");
+  assert.equal(share.expires_at, null);
+  const after = await callJson(env, "GET", "/ft-delete-doc?manifest=1", { auth: jay });
+  assert.equal(after.status, 200);
+  const anon = await callJson(env, "GET", "/ft-delete-doc?manifest=1");
+  assert.equal(anon.status, 200);
+
+  // The bot is hidden from the list, and a second delete finds nothing.
+  const list = await callJson(env, "GET", "/api/bots", { auth: jay });
+  assert.equal(list.data.bots.some((b) => b.seat === "FT-DELETE"), false);
+  const again = await callJson(env, "DELETE", `/api/bots/${id}`, { auth: jay, json: { confirm: "delete FT-DELETE" } });
+  assert.equal(again.status, 404);
+
+  const actions = (await env.DB.prepare("SELECT action FROM audit_events WHERE target = ? ORDER BY rowid").bind(id).all()).results.map((r) => r.action);
+  assert.deepEqual(actions, ["bot.create", "bot.token.create", "bot.delete"]);
+});
+
+test("a deleted bot's shares transfer across every team, with attribution intact", async () => {
+  const { env, jay } = await fleet();
+  const made = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-MULTI", first_token: true } });
+  assert.equal(made.status, 201);
+  const id = "usr_agent_ft_multi";
+  const ts = Math.floor(Date.now() / 1000);
+  await env.DB.prepare("INSERT INTO teams (id, name, created_at, updated_at) VALUES ('team_second', 'Second', ?, ?)").bind(ts, ts).run();
+  await env.DB.prepare("INSERT INTO team_members (team_id, user_id, role, created_at) VALUES ('team_second', ?, 'member', ?)").bind(id, ts).run();
+  for (const [sid, slug, team] of [["sh_m1", "ft-multi-one", "team_fleet"], ["sh_m2", "ft-multi-two", "team_second"], ["sh_m3", "ft-multi-three", null]]) {
+    await env.DB.prepare("INSERT INTO shares (id, slug, owner_id, team_id, kind, created_at, updated_at) VALUES (?, ?, ?, ?, 'files', ?, ?)")
+      .bind(sid, slug, id, team, ts, ts).run();
+  }
+
+  const res = await callJson(env, "DELETE", `/api/bots/${id}`, { auth: jay, json: { confirm: "delete FT-MULTI" } });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.shares_transferred, 3);
+  const rows = (await env.DB.prepare("SELECT owner_id, team_id FROM shares WHERE id IN ('sh_m1','sh_m2','sh_m3') ORDER BY id").all()).results;
+  assert.ok(rows.every((r) => r.owner_id === jay.user.id), "every share moves to the manager");
+  assert.deepEqual(rows.map((r) => r.team_id), ["team_fleet", "team_second", null], "team attribution and personal shares are untouched");
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM team_members WHERE user_id = ?").bind(id).first()).n, 0, "both memberships end");
+});
+
+test("a deleted bot with an inactive or missing manager transfers to the person deleting", async () => {
+  const { env, jay } = await fleet();
+  const other = await signUp(env, "Other Manager");
+  const made = await callJson(env, "POST", "/api/bots", { auth: other, json: { seat: "FT-ORPHAN", first_token: true } });
+  assert.equal(made.status, 201);
+  const id = "usr_agent_ft_orphan";
+  const ts = Math.floor(Date.now() / 1000);
+  await env.DB.prepare("INSERT INTO shares (id, slug, owner_id, kind, created_at, updated_at) VALUES ('sh_orphan', 'ft-orphan-doc', ?, 'files', ?, ?)").bind(id, ts, ts).run();
+
+  // The manager closes their account; the bot and its share outlive it.
+  const closed = await callJson(env, "DELETE", "/api/me", { auth: other, json: { confirm: "delete my account" } });
+  assert.equal(closed.status, 200);
+
+  // The fleet owner (site admin) deletes the orphaned bot.
+  const res = await callJson(env, "DELETE", `/api/bots/${id}`, { auth: jay, json: { confirm: "delete FT-ORPHAN" } });
+  assert.equal(res.status, 200);
+  const share = await env.DB.prepare("SELECT owner_id FROM shares WHERE id = 'sh_orphan'").first();
+  assert.equal(share.owner_id, jay.user.id, "an inactive manager cannot inherit: the deleting admin does");
+  const served = await callJson(env, "GET", "/ft-orphan-doc?manifest=1");
+  assert.equal(served.status, 200, "the link survives under the living owner");
+});
+
+test("a failing delete batch keeps the bot, its credentials, and its shares untouched", async () => {
+  const { env, jay } = await fleet();
+  const made = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-DELFAIL", first_token: true } });
+  assert.equal(made.status, 201);
+  const id = "usr_agent_ft_delfail";
+  const token = made.data.made.token;
+  const ts = Math.floor(Date.now() / 1000);
+  await env.DB.prepare("INSERT INTO shares (id, slug, owner_id, kind, created_at, updated_at) VALUES ('sh_df', 'ft-delfail-doc', ?, 'files', ?, ?)").bind(id, ts, ts).run();
+
+  const res = await callJson(envWithFailing(env, "UPDATE shares SET owner_id"), "DELETE", `/api/bots/${id}`, { auth: jay, json: { confirm: "delete FT-DELFAIL" } });
+  assert.equal(res.status, 500);
+  assert.match(res.data.error, /Deleting the bot failed/);
+  assert.equal(res.data.error.includes("injected"), false);
+
+  // The batch rolled back:  nothing about the bot changed.
+  const row = await env.DB.prepare("SELECT status FROM users WHERE id = ?").bind(id).first();
+  assert.equal(row.status, "active");
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ?").bind(id).first()).n, 1);
+  assert.equal((await env.DB.prepare("SELECT owner_id FROM shares WHERE id = 'sh_df'").first()).owner_id, id);
+  const me = await callJson(env, "GET", "/api/me", { auth: { token } });
+  assert.equal(me.status, 200, "the bot's token still works");
 });

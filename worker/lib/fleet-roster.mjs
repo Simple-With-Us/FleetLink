@@ -12,7 +12,7 @@ const SEATS = [
   ["GROK-WEB", "Grok Web"], ["CLUTCH", "Clutch"], ["MM", "MiniMax"], ["FX", "Fx"], ["MC", "Muse Code"],
   ["OPENCODE", "OpenCode"], ["MA", "Muse Assist"], ["JET", "Jet"], ["ECHO", "Echo"], ["WISE", "Wise"]
 ];
-const ROLES = ["BUILDER", "COMPILER", "DEPLOYER", "DESIGNER", "DIRECTOR", "FIXER", "HOUSEKEEPER", "MONITOR", "ORACLE", "PLUMBER", "PUBLISHER"];
+const ROLES = ["COMPILER", "DEPLOYER", "DESIGNER", "DIRECTOR", "FIXER", "HOUSEKEEPER", "MONITOR", "ORACLE", "PLUMBER", "PUBLISHER"];
 const GB_ROLES = ["DIRECTOR", "FIXER", "DESIGNER", "COMPILER", "HOUSEKEEPER", "PUBLISHER", "DEPLOYER", "MONITOR", "PLUMBER", "ORACLE", "TRADER"];
 const title = (role) => role.charAt(0) + role.slice(1).toLowerCase();
 

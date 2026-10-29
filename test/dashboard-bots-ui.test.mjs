@@ -94,3 +94,20 @@ test("the server mints the first token atomically and rolls the bot back on fail
   assert.match(api, /bot\.create\.abort/, "the rollback is audited");
   assert.match(api, /token_follows: follows/, "the response says what the token follows");
 });
+
+test("every bot row's menu ends in a Delete that confirms the real consequences", () => {
+  const botRow = fnBody(DASH, "botRow");
+  const del = botRow.indexOf('text: "Delete"');
+  assert.notEqual(del, -1, "a Delete action is rendered");
+  const menu = botRow.indexOf("rowMenu(actions)");
+  assert.ok(del < menu, "Delete lives inside the row menu's action list");
+  const block = botRow.slice(del, menu);
+  assert.match(block, /move to /, "the confirm says the shares transfer");
+  assert.match(block, /your account/, "the manager's own rows name the manager as the destination");
+  assert.match(block, /its owner's account/, "another manager's rows name the owner as the destination");
+  assert.match(block, /b\.manager_status === "active" && b\.manager_id !== meId/, "the destination words follow the route's resolution: active manager, else the person deleting");
+  assert.match(block, /public links included/, "the confirm states public links keep working");
+  assert.match(block, /cannot be undone/, "the confirm states irreversibility");
+  assert.match(block, /FL\.api\("DELETE", base, \{ confirm: "delete " \+ b\.seat \}\)/, "the request carries the typed-seat confirmation");
+  assert.match(block, /loadBots\(\)/, "the list refreshes after the delete");
+});
