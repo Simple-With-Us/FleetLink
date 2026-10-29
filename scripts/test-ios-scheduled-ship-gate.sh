@@ -63,6 +63,21 @@ run_gate() {
     "$@" 2>&1
 }
 
+run_gate_multi() {
+  # run_gate_multi <event> [apps...] -> like run_gate, but watching the same
+  # four push paths as .github/workflows/ios-testflight.yml
+  local event="$1"; shift
+  bash "$GATE" \
+    --event "$event" \
+    --path-prefix 'ios/**' \
+    --path-prefix '.github/workflows/ios-testflight.yml' \
+    --path-prefix 'scripts/ios-*' \
+    --path-prefix 'scripts/ios-fleet/**' \
+    --repo-root "$REPO" \
+    --state-dir "$STATE" \
+    "$@" 2>&1
+}
+
 field() {
   # field <output> <key>
   printf '%s\n' "$1" | awk -F= -v k="$2" '$1 == k {print $2}' | tail -1
@@ -141,6 +156,62 @@ set_state demo "$(git -C "$REPO" rev-parse HEAD)"
 echo "== 8. deciding 'skip' is never an error exit =="
 run_gate schedule demo >/dev/null
 check "exit code on skip" 0 "$?"
+
+echo "== 9. a merge touching only ship tooling still ships (the missed-push backstop) =="
+set_state demo "$(git -C "$REPO" rev-parse HEAD)"
+commit "scripts/ios-fleet/ship-testflight.sh" "# tooling tweak" "chore(ios): tune the ship tooling" >/dev/null
+out="$(run_gate_multi schedule demo)"
+check "scripts/ios-fleet-only -> should_ship" 1 "$(field "$out" should_ship)"
+
+echo "== 10. a merge touching only the workflow file ships =="
+set_state demo "$(git -C "$REPO" rev-parse HEAD)"
+commit ".github/workflows/ios-testflight.yml" "# workflow tweak" "ci(ios): tune the ship workflow" >/dev/null
+out="$(run_gate_multi schedule demo)"
+check "workflow-file-only -> should_ship" 1 "$(field "$out" should_ship)"
+
+echo "== 11. a merge touching only a scripts/ios-* helper ships =="
+set_state demo "$(git -C "$REPO" rev-parse HEAD)"
+commit "scripts/ios-scheduled-ship-gate.sh" "# gate tweak" "fix(ios): tune the scheduled gate" >/dev/null
+out="$(run_gate_multi schedule demo)"
+check "scripts/ios-*-only -> should_ship" 1 "$(field "$out" should_ship)"
+
+echo "== 12. unrelated changes still skip, even with every push path watched =="
+set_state demo "$(git -C "$REPO" rev-parse HEAD)"
+commit "README.md" "more docs" "docs: readme only" >/dev/null
+commit "server/api.ts" "more backend" "feat(server): backend only" >/dev/null
+out="$(run_gate_multi schedule demo)"
+check "unrelated-only, multi-prefix -> should_ship" 0 "$(field "$out" should_ship)"
+
+echo "== 13. HEAD already shipped still skips with every push path watched =="
+set_state demo "$(git -C "$REPO" rev-parse HEAD)"
+out="$(run_gate_multi schedule demo)"
+check "HEAD already shipped, multi-prefix -> should_ship" 0 "$(field "$out" should_ship)"
+
+echo "== 14. '!' exclusions narrow a watched tree, and '*' stays in its segment =="
+set_state demo "$(git -C "$REPO" rev-parse HEAD)"
+commit "ios/ignore/notes.md" "ignored" "docs(ios): ignored tree only" >/dev/null
+out="$(bash "$GATE" --event schedule --path-prefix 'ios/**' --path-prefix '!ios/ignore/**' --repo-root "$REPO" --state-dir "$STATE" demo 2>&1)"
+check "excluded-only -> should_ship" 0 "$(field "$out" should_ship)"
+commit "ios/App/Real.swift" "// real" "fix(ios): real change" >/dev/null
+out="$(bash "$GATE" --event schedule --path-prefix 'ios/**' --path-prefix '!ios/ignore/**' --repo-root "$REPO" --state-dir "$STATE" demo 2>&1)"
+check "excluded plus real -> should_ship" 1 "$(field "$out" should_ship)"
+set_state demo "$(git -C "$REPO" rev-parse HEAD)"
+commit "scripts/ios-fleet/nested.sh" "# nested" "chore(ios): nested tooling file" >/dev/null
+out="$(bash "$GATE" --event schedule --path-prefix 'scripts/ios-*' --repo-root "$REPO" --state-dir "$STATE" demo 2>&1)"
+check "'scripts/ios-*' does not cross '/' -> should_ship" 0 "$(field "$out" should_ship)"
+out="$(run_gate_multi schedule demo)"
+check "full push list still catches the nested file" 1 "$(field "$out" should_ship)"
+
+echo "== 15. the old single-prefix call keeps its meaning =="
+set_state demo "$(git -C "$REPO" rev-parse HEAD)"
+commit "scripts/ios-fleet/ship-testflight.sh" "# another tweak" "chore(ios): tooling again" >/dev/null
+out="$(run_gate schedule demo)"
+check "single 'ios/' prefix ignores tooling" 0 "$(field "$out" should_ship)"
+out="$(run_gate_multi schedule demo)"
+check "same merge ships under the full push list" 1 "$(field "$out" should_ship)"
+commit "ios/App/More.swift" "// more" "fix(ios): more ui" >/dev/null
+out="$(run_gate schedule demo)"
+check "single 'ios/' prefix still ships on ios changes" 1 "$(field "$out" should_ship)"
 
 echo
 echo "passed=${PASS} failed=${FAIL}"

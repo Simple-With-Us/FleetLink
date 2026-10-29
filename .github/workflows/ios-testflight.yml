@@ -35,9 +35,9 @@ name: iOS TestFlight
 # recursion guard and dispatches no push run.  The same is true of a merge that
 # the hourly rate gate skipped: nothing would retry it.  The cron notices both.
 # It is guarded by scripts/ios-scheduled-ship-gate.sh, which refuses to try
-# unless ios/ changed between the last successful ship and HEAD, and which never
-# ships on a tick that has no ship record, so a backend-only commit or an
-# evicted cache cannot put a build on TestFlight.
+# unless one of the push paths above changed between the last successful ship
+# and HEAD, and which never ships on a tick that has no ship record, so a
+# backend-only commit or an evicted cache cannot put a build on TestFlight.
 #
 # Signing: ASC key from Fleet-OPS prod /asc, distribution identity from Fleet-OPS
 # prod /mac-certs, via the CI machine identity (scripts/ios-load-signing.mjs).
@@ -110,12 +110,15 @@ jobs:
       # load and the ASC build inventories below instead of planning a value
       # the gated ship then discards.  Both jobs read the same restored state
       # and the same event SHA, so their votes always agree.
-      - name: Scheduled ship gate (skip unless iOS code changed)
+      - name: Scheduled ship gate (skip unless ship paths changed)
         id: gate
         run: |
           bash "$GITHUB_WORKSPACE/scripts/ios-scheduled-ship-gate.sh" \
             --event "${{ github.event_name }}" \
-            --path-prefix 'ios/' \
+            --path-prefix 'ios/**' \
+            --path-prefix '.github/workflows/ios-testflight.yml' \
+            --path-prefix 'scripts/ios-*' \
+            --path-prefix 'scripts/ios-fleet/**' \
             --repo-root "$GITHUB_WORKSPACE" \
             fleetlink
 
@@ -190,12 +193,15 @@ jobs:
       # Runs first so a tick with nothing to ship costs seconds and cannot go
       # red on an unrelated environment problem.  Push and dispatch always vote
       # ship (a push already passed the paths filter above).
-      - name: Scheduled ship gate (skip unless iOS code changed)
+      - name: Scheduled ship gate (skip unless ship paths changed)
         id: gate
         run: |
           bash "$GITHUB_WORKSPACE/scripts/ios-scheduled-ship-gate.sh" \
             --event "${{ github.event_name }}" \
-            --path-prefix 'ios/' \
+            --path-prefix 'ios/**' \
+            --path-prefix '.github/workflows/ios-testflight.yml' \
+            --path-prefix 'scripts/ios-*' \
+            --path-prefix 'scripts/ios-fleet/**' \
             --repo-root "$GITHUB_WORKSPACE" \
             fleetlink
 

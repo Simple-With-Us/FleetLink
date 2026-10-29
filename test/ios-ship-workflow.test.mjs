@@ -29,6 +29,18 @@ test("only main pushes, dispatches and a gated cron can start a ship", () => {
   assert.match(active, /steps\.gate\.outputs\.should_ship == '1'/);
 });
 
+test("the scheduled gate watches every push path, so a missed push still ships", () => {
+  const triggers = triggerBlock();
+  const pushPaths = [...triggers.matchAll(/-\s+"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(pushPaths.length > 0, "the push trigger lists watched paths");
+  const gateCalls = active.split("ios-scheduled-ship-gate.sh").slice(1);
+  assert.equal(gateCalls.length, 2, "plan-build and ship each run the scheduled gate");
+  for (const call of gateCalls) {
+    const prefixes = [...call.slice(0, 800).matchAll(/--path-prefix '([^']+)'/g)].map((m) => m[1]);
+    assert.deepEqual([...prefixes].sort(), [...pushPaths].sort(), "the gate watches exactly the workflow's push paths");
+  }
+});
+
 test("plan-build is gated like ship, so idle cron ticks skip the ASC inventories", () => {
   const planJob = active.slice(active.indexOf("plan-build:"), active.indexOf("\n  ship:\n"));
   assert.ok(planJob.length > 0, "workflow has a plan-build job ahead of ship");
