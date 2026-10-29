@@ -150,7 +150,11 @@ export function botRoutes(router) {
           await audit(ctx.env, principal.user.id, "bot.create.abort_failed", id, { seat });
           throw new HttpError(500, `Adding the bot failed and cleaning it up failed too; the seat ${seat} may need manual removal.`);
         }
-        throw err;
+        // The router only turns HttpError into a response;  anything else
+        // escapes to the runtime and its logs.  Wrap raw failures so database
+        // and token details reach neither the client nor the logs.
+        if (err instanceof HttpError) throw err;
+        throw new HttpError(500, "Adding the bot failed.  Check the bots list before trying again.");
       }
     }
     return json({ bot: await botView(ctx.env, row), ...(made ? { made, token_follows: follows } : {}) }, 201);

@@ -544,6 +544,8 @@ test("a mint that fails before writing keeps nothing, and the seat stays reusabl
   const { env, jay } = await fleet();
   const res = await callJson(envWithFailing(env, "INSERT INTO api_tokens"), "POST", "/api/bots", { auth: jay, json: { seat: "FT-ROLLBACK", first_token: true } });
   assert.equal(res.status, 500);
+  assert.match(res.data.error, /Adding the bot failed/);
+  assert.equal(res.data.error.includes("injected"), false);
   assert.deepEqual(await rollbackResidue(env, "usr_agent_ft_rollback"), { bot: null, seat: null, tokens: 0, audits: ["bot.create", "bot.create.abort"] });
 
   const retry = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-ROLLBACK", first_token: true } });
@@ -557,6 +559,8 @@ test("a mint that fails after writing the token removes it with the bot", async 
   // a failure after the token write committed.
   const res = await callJson(envWithFailing(env, "SELECT t.*, tm.name AS team_name FROM api_tokens"), "POST", "/api/bots", { auth: jay, json: { seat: "FT-AFTER", first_token: true } });
   assert.equal(res.status, 500);
+  assert.match(res.data.error, /Adding the bot failed/);
+  assert.equal(res.data.error.includes("injected"), false);
   assert.deepEqual(await rollbackResidue(env, "usr_agent_ft_after"), { bot: null, seat: null, tokens: 0, audits: ["bot.create", "bot.create.abort"] });
 });
 
