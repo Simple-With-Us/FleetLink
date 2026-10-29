@@ -566,8 +566,9 @@ test("a mint that fails after writing the token removes it with the bot", async 
 
 test("a failing cleanup reports a sanitized error and leaves the residue named", async () => {
   const { env, jay } = await fleet();
-  // Fail the mint after its token write and the first compensating delete:
-  // the route must report a generic error instead of masking or leaking.
+  // Fail the mint after its token write and the compensating delete batch:
+  // the route must report a generic error instead of masking or leaking, and
+  // the rolled-back batch leaves every row it was meant to remove.
   const res = await callJson(envWithFailing(env, "SELECT t.*, tm.name AS team_name FROM api_tokens", "DELETE FROM api_tokens"), "POST", "/api/bots", { auth: jay, json: { seat: "FT-RESIDUE", first_token: true } });
   assert.equal(res.status, 500);
   // The client learns the state and the seat, never raw database details.

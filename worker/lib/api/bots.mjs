@@ -140,9 +140,13 @@ export function botRoutes(router) {
         // only match rows from this request - the bot was inserted above, and
         // a conflict on an existing seat never reaches here.
         try {
-          await run(ctx.env.DB, "DELETE FROM api_tokens WHERE user_id = ?", id);
-          await run(ctx.env.DB, "DELETE FROM team_members WHERE team_id = ? AND user_id = ?", FLEET_TEAM_ID, id);
-          await run(ctx.env.DB, "DELETE FROM users WHERE id = ? AND kind = 'agent'", id);
+          // One atomic batch:  the token, the Fleet seat, and the bot row go
+          // together or not at all, so the cleanup can never half-apply.
+          await ctx.env.DB.batch([
+            ctx.env.DB.prepare("DELETE FROM api_tokens WHERE user_id = ?").bind(id),
+            ctx.env.DB.prepare("DELETE FROM team_members WHERE team_id = ? AND user_id = ?").bind(FLEET_TEAM_ID, id),
+            ctx.env.DB.prepare("DELETE FROM users WHERE id = ? AND kind = 'agent'").bind(id)
+          ]);
           await audit(ctx.env, principal.user.id, "bot.create.abort", id, { seat });
         } catch (cleanupErr) {
           // Only the seat names the residue;  raw database and token details
