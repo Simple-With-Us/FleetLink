@@ -81,3 +81,10 @@ test("the row menu summary is never hidden, so actions are reachable at every wi
 test("the Bots tab intro tells the owner the first token is created and shown", () => {
   assert.match(INDEX, /creates its first token and shows it once/, "the dashboard intro documents the behavior");
 });
+
+test("an open row menu is positioned against the viewport, not the clipping scroll box", () => {
+  assert.match(DASH, /addEventListener\("toggle",[\s\S]*?details\.rowmenu/, "the menu repositions when it opens");
+  assert.match(DASH, /actions\.style\.position = "fixed"/, "the open menu escapes the table scroll box");
+  assert.match(DASH, /actions\.style\.position = ""/, "the menu returns to the row when it closes");
+  assert.match(DASH, /window\.addEventListener\("scroll"/, "scrolling closes an open menu");
+});

@@ -1184,6 +1184,34 @@ export const DASHBOARD_JS = String.raw`
     if (item) { var own = item.closest("details.rowmenu"); if (own) own.open = false; }
     document.querySelectorAll("details.rowmenu[open]").forEach(function (d) { if (!d.contains(e.target)) d.open = false; });
   });
+  // An open row menu sits inside the table's horizontal scroll box, which
+  // clips it, so while it is open it is positioned against the viewport.
+  document.addEventListener("toggle", function (e) {
+    var d = e.target;
+    if (!d.matches || !d.matches("details.rowmenu")) return;
+    var actions = d.querySelector(".actions");
+    var summary = d.querySelector("summary");
+    if (!actions || !summary) return;
+    if (d.open) {
+      var r = summary.getBoundingClientRect();
+      var w = actions.offsetWidth, hgt = actions.offsetHeight;
+      var top = r.bottom + 4;
+      if (top + hgt > window.innerHeight - 8 && r.top - hgt - 4 > 8) top = r.top - hgt - 4;
+      var left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
+      actions.style.position = "fixed";
+      actions.style.top = top + "px";
+      actions.style.left = left + "px";
+      actions.style.right = "auto";
+    } else {
+      actions.style.position = "";
+      actions.style.top = "";
+      actions.style.left = "";
+      actions.style.right = "";
+    }
+  }, true);
+  window.addEventListener("scroll", function () {
+    document.querySelectorAll("details.rowmenu[open]").forEach(function (d) { d.open = false; });
+  }, true);
   loadMe().then(loadTeams).then(function () { return loadShares(false); }).catch(FL.fail);
   void show;
 })();
