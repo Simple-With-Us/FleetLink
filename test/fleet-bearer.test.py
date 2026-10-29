@@ -40,14 +40,14 @@ class FleetTests(unittest.TestCase):
         raw = ('{"jsonrpc":"2.0","id":1,"result":{"structuredContent":{"nested":["' + escaped + '"]}}}').encode()
         response = io.BytesIO(raw)
         response.headers = {"Content-Type": "application/json"}
-        with patch.object(F.urllib.request, "build_opener") as opener:
+        with patch.object(F, "gateway_transport") as opener:
             opener.return_value.open.return_value = response
             with self.assertRaises(F.FleetError):
-                self.api.client.rpc("tools/call", {}, True)
-        with patch.object(F.urllib.request, "build_opener") as opener:
+                F.Client(self.path).rpc("tools/call", {}, True)
+        with patch.object(F, "gateway_transport") as opener:
             with self.assertRaises(F.FleetError):
-                self.api.client.rpc("tools/call", json.loads('{"nested":["' + escaped + '"]}'), True)
-            opener.assert_not_called()
+                F.Client(self.path).rpc("tools/call", json.loads('{"nested":["' + escaped + '"]}'), True)
+            opener.return_value.open.assert_not_called()
 
     def test_empty_prefix_or_verb_option_never_reaches_legacy_auth(self):
         for argv in (["--fleet-bearer-file", "", "whoami"], ["whoami", "--fleet-bearer-file", ""]):
@@ -72,6 +72,26 @@ class FleetTests(unittest.TestCase):
         import inspect
         self.assertNotIn("removesuffix", inspect.getsource(F.private_bearer))
         self.assertNotIn("removeprefix", inspect.getsource(F.private_bearer))
+
+    def test_gateway_keepalive_and_unknown_write_http_statuses(self):
+        import urllib.error
+        with patch.object(F.http.client, "HTTPSConnection") as tls:
+            response = tls.return_value.getresponse.return_value
+            response.status = 200
+            transport = F.GatewayTransport()
+            request = F.urllib.request.Request(F.ENDPOINT, data=b"{}", method="POST")
+            transport.open(request)
+            transport.open(request)
+            self.assertEqual(tls.call_count, 1)
+            self.assertEqual(tls.return_value.request.call_count, 2)
+        for status in (408, 429, 500):
+            with patch.object(F, "gateway_transport") as factory:
+                factory.return_value.open.side_effect = urllib.error.HTTPError(F.ENDPOINT, status, "refuse", {}, None)
+                with self.assertRaises(F.FleetError) as exc:
+                    F.Client(self.path).rpc("tools/call", {}, True)
+                self.assertEqual(exc.exception.code, "outcome_unknown")
+                self.assertEqual(factory.return_value.open.call_count, 1)
+        self.assertEqual(F.canonical_hint("Grok (Build)"), "GROK")
 
     def test_same_client_private_file_behavior(self):
         self.assertEqual(self.api.client.seat, "CODEX")
@@ -114,7 +134,7 @@ class FleetTests(unittest.TestCase):
             with patch.object(F.urllib.request, "build_opener") as opener:
                 with self.assertRaises(F.CliError):
                     self.api.stream(self.grant(**changes), io.BytesIO(b"abc"), 3, "a.bin", "demo")
-                opener.assert_not_called()
+                opener.return_value.open.assert_not_called()
 
     def test_stream_has_no_bearer_no_retry_no_cleanup_on_failure(self):
         with patch.object(F.urllib.request, "build_opener") as opener:
