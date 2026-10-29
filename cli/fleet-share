@@ -20,6 +20,7 @@ import hashlib
 import http.client
 import json
 import mimetypes
+import math
 import os
 import re
 import stat
@@ -119,7 +120,8 @@ def private_bearer(path):
         finally:
             os.close(directory)
         value = raw.decode("ascii")
-        value = value.removesuffix("\n")
+        if value[-1:] == "\n":
+            value = value[:-1]
         match = TOKEN.fullmatch(value)
         if not match:
             raise ValueError
@@ -332,10 +334,23 @@ class FleetApi:
                 continue
             match = re.search(r"(?m)^BEGIN_UNTRUSTED_FLEETLINK nonce=([A-Za-z0-9_-]+)\n([^\n]*)\nEND_UNTRUSTED_FLEETLINK nonce=\1$", text)
             if match:
-                data = bounded_json(match[2])
+                try:
+                    data = bounded_json(match[2])
+                except (ValueError, TypeError, RecursionError):
+                    raise CliError("Gateway returned no complete FleetLink result; a write may have landed. Check before repeating.") from None
                 if isinstance(data, dict):
                     return data
         raise CliError("Gateway returned no complete FleetLink result; a write may have landed. Check before repeating.")
+
+    @staticmethod
+    def number(value, convert, name):
+        try:
+            out = convert(value)
+            if not math.isfinite(out):
+                raise ValueError
+            return out
+        except (ValueError, TypeError, OverflowError):
+            raise CliError("Invalid " + name + " value; nothing was sent.") from None
 
     def request(self, method, path, body=None, data=None, headers=None, length=None):
         if path == "/mcp":
@@ -361,12 +376,12 @@ class FleetApi:
             if method == "GET":
                 name, args = "fleetlink_list_shares", query
                 if "limit" in args:
-                    args["limit"] = int(args["limit"])
+                    args["limit"] = self.number(args["limit"], int, "limit")
             elif method == "POST":
                 name = "fleetlink_create_share"
                 args["empty"] = True
                 if "days" in args and args["days"] != "forever":
-                    args["days"] = float(args["days"])
+                    args["days"] = self.number(args["days"], float, "days")
         elif parts[:2] == ["api", "shares"] and len(parts) >= 3:
             args["slug"] = parts[2]
             if len(parts) == 3:
@@ -403,7 +418,7 @@ class FleetApi:
         if name is None:
             raise CliError("This account/admin operation is not exposed by the fleet gateway. No provider fallback was used; use an explicit human/operator session for account management.")
         if "days" in args and args["days"] != "forever":
-            args["days"] = float(args["days"])
+            args["days"] = self.number(args["days"], float, "days")
         return self.tool(name, args)
 
     def stream(self, grant, handle, length, path, slug):

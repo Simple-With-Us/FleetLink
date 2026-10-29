@@ -57,6 +57,22 @@ class FleetTests(unittest.TestCase):
                     F.Api(args)
                 legacy.assert_not_called()
 
+    def test_invalid_fenced_json_and_numeric_options_are_cli_errors(self):
+        answer = {"content": [{"text": "BEGIN_UNTRUSTED_FLEETLINK nonce=abc\n{bad}\nEND_UNTRUSTED_FLEETLINK nonce=abc"}]}
+        with patch.object(self.api.client, "call", return_value=answer):
+            with self.assertRaises(F.CliError):
+                self.api.tool("fleetlink_read_file", {})
+        with patch.object(self.api, "tool") as tool:
+            for path, method, body in (("/api/shares?limit=no", "GET", None), ("/api/shares", "POST", {"days": "no"}), ("/api/shares/demo/renew", "POST", {"days": "NaN"}), ("/api/links", "POST", {"days": "Infinity"})):
+                with self.assertRaises(F.CliError):
+                    self.api.request(method, path, body)
+            tool.assert_not_called()
+
+    def test_python38_credential_reader_avoids_post38_string_methods(self):
+        import inspect
+        self.assertNotIn("removesuffix", inspect.getsource(F.private_bearer))
+        self.assertNotIn("removeprefix", inspect.getsource(F.private_bearer))
+
     def test_same_client_private_file_behavior(self):
         self.assertEqual(self.api.client.seat, "CODEX")
         self.path.chmod(0o644)
