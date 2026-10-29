@@ -98,20 +98,44 @@ jobs:
           # history is needed to resolve it exactly as the ship does.
           fetch-depth: 0
 
+      - name: Restore iOS ship state
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ios-fleet
+          key: ios-fleet-fleetlink-${{ github.run_id }}
+          restore-keys: |
+            ios-fleet-fleetlink-
+
+      # The same gate as ship: a tick with nothing to ship skips the signing
+      # load and the ASC build inventories below instead of planning a value
+      # the gated ship then discards.  Both jobs read the same restored state
+      # and the same event SHA, so their votes always agree.
+      - name: Scheduled ship gate (skip unless iOS code changed)
+        id: gate
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/ios-scheduled-ship-gate.sh" \
+            --event "${{ github.event_name }}" \
+            --path-prefix 'ios/' \
+            --repo-root "$GITHUB_WORKSPACE" \
+            fleetlink
+
       - name: Verify in-repo ios-fleet pin
+        if: steps.gate.outputs.should_ship == '1'
         run: bash scripts/ios-fleet-pin.sh --check
 
       - name: Install Node dependencies
+        if: steps.gate.outputs.should_ship == '1'
         run: npm ci
 
       - name: Load signing material from Infisical
+        if: steps.gate.outputs.should_ship == '1'
         run: node scripts/ios-load-signing.mjs
 
       # Computed ONCE per release; every ship job of this release reuses the
-      # single value via --build.  Read-only: nothing is uploaded here, so a
-      # later ship-gate skip still uploads nothing.
+      # single value via --build.  Read-only: nothing is uploaded here.
       - name: Plan the shared merge-timestamp build
         id: plan
+        if: steps.gate.outputs.should_ship == '1'
         run: |
           set -euo pipefail
           S="$(TZ=America/Chicago git show -s --format=%cd --date=format-local:%Y%m%d%H%M HEAD)"

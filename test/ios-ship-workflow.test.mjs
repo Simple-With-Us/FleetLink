@@ -29,6 +29,19 @@ test("only main pushes, dispatches and a gated cron can start a ship", () => {
   assert.match(active, /steps\.gate\.outputs\.should_ship == '1'/);
 });
 
+test("plan-build is gated like ship, so idle cron ticks skip the ASC inventories", () => {
+  const planJob = active.slice(active.indexOf("plan-build:"), active.indexOf("\n  ship:\n"));
+  assert.ok(planJob.length > 0, "workflow has a plan-build job ahead of ship");
+  assert.match(planJob, /scripts\/ios-scheduled-ship-gate\.sh/, "plan-build runs the same scheduled gate as ship");
+  assert.match(planJob, /actions\/cache\/restore/, "plan-build restores the ship state the gate reads");
+  for (const name of ["Verify in-repo ios-fleet pin", "Install Node dependencies", "Load signing material from Infisical", "Plan the shared merge-timestamp build"]) {
+    const at = planJob.indexOf(`name: ${name}`);
+    assert.ok(at > -1, `plan-build still has step "${name}"`);
+    const step = planJob.slice(at).split("\n      - name:")[0];
+    assert.match(step, /if: steps\.gate\.outputs\.should_ship == '1'/, `"${name}" runs only when the gate votes ship`);
+  }
+});
+
 test("a ref other than main can only export, never upload", () => {
   assert.match(active, /\[ "\$REF" != "refs\/heads\/main" \]/);
   assert.match(active, /args="--export-only"/);
