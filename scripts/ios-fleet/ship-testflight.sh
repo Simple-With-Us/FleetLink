@@ -391,7 +391,10 @@ asc_released_store_version() {
 # Prints the build on stdout.  Returns 1 (and prints nothing) when it cannot
 # be worked out.
 asc_next_shared_build() {
-  local out rc mac_id feed feed_xml max floor
+  local out rc mac_id feed feed_xml max floor errf
+  # The registry's appleId wins; without one, an ASC_APPLE_ID already in the
+  # environment is kept so resolveAscAppId's fallback still works.
+  local asc_hint="${APPLE_ID_HINT:-${ASC_APPLE_ID:-}}"
   mac_id="$(json_get "$APP_KEY" macBundleId 2>/dev/null || true)"
   feed="$(json_get "$APP_KEY" pairedBuildFeed 2>/dev/null || true)"
   floor=""
@@ -408,16 +411,16 @@ asc_next_shared_build() {
   fi
   set +e
   if [[ -n "$mac_id" && -n "$floor" ]]; then
-    out=$(ASC_APPLE_ID="${APPLE_ID_HINT:-}" asc_client next-shared-build "$BUNDLE_ID" "$mac_id" "$floor")
+    out=$(ASC_APPLE_ID="$asc_hint" asc_client next-shared-build "$BUNDLE_ID" "$mac_id" "$floor")
     rc=$?
   elif [[ -n "$mac_id" ]]; then
-    out=$(ASC_APPLE_ID="${APPLE_ID_HINT:-}" asc_client next-shared-build "$BUNDLE_ID" "$mac_id")
+    out=$(ASC_APPLE_ID="$asc_hint" asc_client next-shared-build "$BUNDLE_ID" "$mac_id")
     rc=$?
   elif [[ -n "$floor" ]]; then
-    out=$(ASC_APPLE_ID="${APPLE_ID_HINT:-}" asc_client next-shared-build "$BUNDLE_ID" "$floor")
+    out=$(ASC_APPLE_ID="$asc_hint" asc_client next-shared-build "$BUNDLE_ID" "$floor")
     rc=$?
   else
-    out=$(ASC_APPLE_ID="${APPLE_ID_HINT:-}" asc_client next-shared-build "$BUNDLE_ID")
+    out=$(ASC_APPLE_ID="$asc_hint" asc_client next-shared-build "$BUNDLE_ID")
     rc=$?
   fi
   set -e
