@@ -17,7 +17,7 @@ printf '%s\n' "$2" >>"$STUB_MARKER"
 shift
 case "$1" in
   released-store-version) [[ -n "${STUB_RELEASED_FAIL:-}" ]] && { echo "released-store-version: stub reason: HTTP 500" >&2; exit 2; }; printf '%s\n' "${STUB_RELEASED:-}"; exit 0 ;;
-  next-dotted-build) [[ -n "${STUB_NEXT_FAIL:-}" ]] && exit 3; printf '%s\n' "${STUB_NEXT:-0.1.0}"; exit 0 ;;
+  next-shared-build) [[ -n "${STUB_NEXT_FAIL:-}" ]] && exit 3; printf '%s\n' "${STUB_NEXT:-1000}"; exit 0 ;;
   *) exit 2 ;;
 esac
 NODE
@@ -27,8 +27,10 @@ chmod +x "$STUB/node"
 node() { "$STUB/node" "$@"; }
 export -f node
 export STUB
+SHIP_UNDER_TEST="$HERE/ship-testflight.sh"
 pass=0; fail=0
-run() { : >"$STUB_MARKER"; HOME="$WORK/home" PATH="$STUB:$PATH" bash "$HERE/ship-testflight.sh" fleetlink --dry-run "$@" 2>&1; }
+run_app() { local app="$1"; shift; : >"$STUB_MARKER"; HOME="$WORK/home" PATH="$STUB:$PATH" bash "$SHIP_UNDER_TEST" "$app" --dry-run "$@" 2>&1; }
+run() { run_app fleetlink "$@"; }
 check() { # check <label> <expected-rc-zero|nonzero> <pattern> <output> <rc>
   local ok=1
   [[ "$2" == zero && "$5" -ne 0 ]] && ok=0
@@ -37,12 +39,13 @@ check() { # check <label> <expected-rc-zero|nonzero> <pattern> <output> <rc>
   grep -q released-store-version "$STUB_MARKER" 2>/dev/null || { ok=0; echo "  (stub node was not called: the real node may have shadowed it)"; }
   if [[ $ok -eq 1 ]]; then pass=$((pass+1)); echo "  PASS  $1"; else fail=$((fail+1)); echo "  FAIL  $1"; echo "$4" | tail -5; fi
 }
-out="$(STUB_NEXT=0.1.0 run)"; rc=$?
-check "empty train: 0.1.0 (0.1.0)" zero "marketing=0.1.0 build=0.1.0" "$out" $rc
-out="$(STUB_NEXT=0.1.4 run)"; rc=$?
-check "train holds builds: next dotted build 0.1.4" zero "marketing=0.1.0 build=0.1.4" "$out" $rc
-out="$(STUB_NEXT=0.1.4 run --version 0.1.0)"; rc=$?
-check "--version equal to the fixed version stays in fixed mode" zero "marketing=0.1.0 build=0.1.4" "$out" $rc
+out="$(STUB_NEXT=1000 run)"; rc=$?
+check "empty inventory: 0.1.0 (1000)" zero "marketing=0.1.0 build=1000" "$out" $rc
+check "empty inventory: logs the shared counter line" zero "shared four-digit build 1000 for fixed version 0.1.0" "$out" $rc
+out="$(STUB_NEXT=1001 run)"; rc=$?
+check "counter holds builds: next shared build 1001" zero "marketing=0.1.0 build=1001" "$out" $rc
+out="$(STUB_NEXT=1001 run --version 0.1.0)"; rc=$?
+check "--version equal to the fixed version stays in fixed mode" zero "marketing=0.1.0 build=1001" "$out" $rc
 out="$(STUB_RELEASED=0.1.0 run)"; rc=$?
 check "released App Store version equal to fixed is refused" nonzero "at or below the released App Store version" "$out" $rc
 out="$(STUB_RELEASED=1.0.235 run)"; rc=$?
@@ -51,11 +54,36 @@ out="$(STUB_RELEASED_FAIL=1 run)"; rc=$?
 check "unreadable released version fails closed" nonzero "cannot read the released App Store version" "$out" $rc
 check "the reason from released-store-version reaches the log" nonzero "released-store-version: stub reason: HTTP 500" "$out" $rc
 out="$(STUB_NEXT_FAIL=1 run)"; rc=$?
-check "unreadable or odd train fails closed" nonzero "cannot work out the next dotted build" "$out" $rc
+check "unreadable or exhausted inventory fails closed" nonzero "cannot work out the next shared four-digit build" "$out" $rc
 out="$(run --build 239)"; rc=$?
-check "non-dotted --build is refused in fixed mode" nonzero "is not 0.1.<n>" "$out" $rc
-out="$(STUB_NEXT=0.1.4 run --build 0.1.9)"; rc=$?
-check "dotted --build is honoured" zero "marketing=0.1.0 build=0.1.9" "$out" $rc
+check "non-four-digit --build is refused in fixed mode" nonzero "fixed mode requires a four-digit build" "$out" $rc
+out="$(STUB_NEXT=1001 run --build 1009)"; rc=$?
+check "four-digit --build at or above the minimum is honoured" zero "marketing=0.1.0 build=1009" "$out" $rc
+out="$(STUB_NEXT=1005 run --build 1001)"; rc=$?
+check "--build below the planned minimum is refused" nonzero "below the planned four-digit minimum 1005" "$out" $rc
+# macOS fixed mode runs against a copy of the fleet dir with a Mac app added,
+# because the real apps.json holds only the iOS app.
+MACDIR="$WORK/fleet-mac"; rm -rf "$MACDIR"; cp -R "$HERE" "$MACDIR"
+python3 - "$MACDIR/apps.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["apps"]["fixmac"] = {
+  "displayName": "Fixed Mac",
+  "fixedMarketingVersion": "0.1.0",
+  "bundleId": "online.fleetlink.fixmac",
+  "scheme": "FixMac",
+  "projectRel": "mac/FixMac.xcodeproj",
+  "platform": "macOS",
+  "marketingVersionDefault": "1.0.0"
+}
+json.dump(d, open(p, "w"), indent=2)
+PY
+SHIP_UNDER_TEST="$MACDIR/ship-testflight.sh"
+out="$(STUB_NEXT=1000 run_app fixmac)"; rc=$?
+check "macOS fixed mode: marketing stays 0.1.0 with a shared build" zero "marketing=0.1.0 build=1000" "$out" $rc
+check "macOS fixed mode: logs the shared counter line" zero "shared four-digit build 1000 for fixed version 0.1.0" "$out" $rc
+SHIP_UNDER_TEST="$HERE/ship-testflight.sh"
 echo "----------------------------------------"
 echo "passed: ${pass}   failed: ${fail}"
 [[ $fail -eq 0 ]]

@@ -1,4 +1,4 @@
-// Behavioral tests for asc-api.mjs released-store-version and next-dotted-build.
+// Behavioral tests for asc-api.mjs released-store-version and next-shared-build.
 // The real script runs as a child process with a fetch stub preloaded
 // (--import), so JWT signing, argument parsing, app lookup, pagination and exit
 // codes are the real ones.  Nothing reaches App Store Connect.
@@ -34,7 +34,11 @@ globalThis.fetch = async (url) => {
 `);
 
 const BUNDLE = "online.fleetlink.ios";
+const MAC_BUNDLE = "online.fleetlink.mac";
 const appsOk = { prefix: "/v1/apps?filter[bundleId]=", body: { data: [{ id: "111", attributes: { bundleId: BUNDLE } }] } };
+// Route order matters: the stub answers the first prefix match, so the Mac
+// app route goes before the catch-all appsOk.
+const macAppsOk = { prefix: `/v1/apps?filter[bundleId]=${MAC_BUNDLE}`, body: { data: [{ id: "222", attributes: { bundleId: MAC_BUNDLE } }] } };
 let n = 0;
 function run(args, scenario) {
   const sc = join(dir, `sc${n}.json`), log = join(dir, `log${n}.txt`); n += 1;
@@ -47,7 +51,12 @@ function run(args, scenario) {
 }
 const ver = (versionString, appVersionState, appStoreState) => ({ attributes: { versionString, appVersionState, appStoreState } });
 const store = (...v) => ({ prefix: "/v1/apps/111/appStoreVersions", body: { data: v } });
-const builds = (...v) => ({ prefix: "/v1/builds?filter[app]=111", body: { data: v.map((x) => ({ attributes: { version: x } })) } });
+const row = (x) => ({ attributes: { version: x } });
+const builds = (...v) => ({ prefix: "/v1/builds?filter[app]=111", body: { data: v.map(row) } });
+const iosBuilds = (...v) => ({ prefix: "/v1/builds?filter[app]=111&filter[preReleaseVersion.platform]=IOS", body: { data: v.map(row) } });
+const macBuilds = (...v) => ({ prefix: "/v1/builds?filter[app]=111&filter[preReleaseVersion.platform]=MAC_OS", body: { data: v.map(row) } });
+const macAppBuilds = (...v) => ({ prefix: "/v1/builds?filter[app]=222&filter[preReleaseVersion.platform]=MAC_OS", body: { data: v.map(row) } });
+const macAppIosBuilds = (...v) => ({ prefix: "/v1/builds?filter[app]=222&filter[preReleaseVersion.platform]=IOS", body: { data: v.map(row) } });
 
 // ---- released-store-version ------------------------------------------------
 test("released: no versions prints nothing, exit 0", () => {
@@ -120,65 +129,111 @@ test("lookup: no hint and not listed exits 2", () => {
   assert.equal(r.rc, 2);
 });
 test("lookup: apps query HTTP error exits 2", () => {
-  const r = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [{ prefix: "/v1/apps?filter", status: 401, body: {} }] });
+  const r = run(["next-shared-build", BUNDLE], { routes: [{ prefix: "/v1/apps?filter", status: 401, body: {} }] });
   assert.equal(r.rc, 2);
 });
 
-// ---- next-dotted-build -----------------------------------------------------
-test("next: empty train starts at the fixed version", () => {
-  const r = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [appsOk, builds()] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "0.1.0");
+// ---- next-shared-build ------------------------------------------------------
+test("shared: empty inventory starts at the smallest four-digit integer", () => {
+  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, builds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "1000");
+  assert.match(r.err, /0 iOS build\(s\) \+ 0 macOS build\(s\) inspected; ignored 0 iOS timestamp build\(s\); next is 1000/);
 });
-test("next: existing builds give max + 1, regardless of order", () => {
-  const r = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [appsOk, builds("0.1.2", "0.1.0", "0.1.10", "0.1.9")] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "0.1.11");
+test("shared: an iOS four-digit build continues above it", () => {
+  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("2394"), macBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "2395");
 });
-test("next: floor at the patch number (fixed 0.1.5 with an empty train is 0.1.5; with 0.1.1 is 0.1.5)", () => {
-  assert.equal(run(["next-dotted-build", BUNDLE, "0.1.5", "IOS"], { routes: [appsOk, builds()] }).out, "0.1.5");
-  assert.equal(run(["next-dotted-build", BUNDLE, "0.1.5", "IOS"], { routes: [appsOk, builds("0.1.1")] }).out, "0.1.5");
+test("shared: takes the max across iOS and macOS", () => {
+  const r1 = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("1100"), macBuilds("1200")] });
+  assert.equal(r1.rc, 0); assert.equal(r1.out, "1201");
+  const r2 = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("1300"), macBuilds("1200")] });
+  assert.equal(r2.rc, 0); assert.equal(r2.out, "1301");
 });
-test("next: a build of another shape stops the run (exit 3)", () => {
-  for (const bad of ["239", "1.0.239", "0.2.3", "0.1", "0.1.x", "0.1.2.3"]) {
-    const r = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [appsOk, builds("0.1.1", bad)] });
-    assert.equal(r.rc, 3, bad);
-  }
+test("shared: a pure-integer second arg is an extra floor, not a Mac bundle", () => {
+  const r = run(["next-shared-build", BUNDLE, "1500"], { routes: [appsOk, builds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "1501");
+  const r2 = run(["next-shared-build", BUNDLE, "986"], { routes: [appsOk, builds()] });
+  assert.equal(r2.rc, 0); assert.equal(r2.out, "1000");
 });
-test("next: a build with no version attribute stops the run (exit 3)", () => {
-  const r = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [appsOk, { prefix: "/v1/builds?filter[app]=111", body: { data: [{ attributes: {} }] } }] });
+test("shared: macBundleId adds the Mac app's builds to the counter", () => {
+  const r = run(["next-shared-build", BUNDLE, MAC_BUNDLE], { routes: [macAppsOk, appsOk, iosBuilds("1100"), macBuilds(), macAppBuilds("1200"), macAppIosBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "1201");
+});
+test("shared: the paired app's iOS builds join the counter too", () => {
+  // A Mac app that points macBundleId at its iOS sibling must not plan below
+  // the sibling's iOS builds.
+  const r = run(["next-shared-build", BUNDLE, MAC_BUNDLE], { routes: [macAppsOk, appsOk, iosBuilds(), macBuilds("1100"), macAppBuilds(), macAppIosBuilds("2394")] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "2395");
+});
+test("shared: macBundleId equal to the iOS bundle queries the Mac trains once", () => {
+  const r = run(["next-shared-build", BUNDLE, BUNDLE], { routes: [appsOk, iosBuilds("1100"), macBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "1101");
+  assert.match(r.err, /1 iOS build\(s\) \+ 0 macOS build\(s\) inspected/);
+});
+test("shared: missing Mac app exits 2", () => {
+  const missing = { prefix: "/v1/apps?filter[bundleId]=online.unknown.mac", body: { data: [] } };
+  const r = run(["next-shared-build", BUNDLE, "online.unknown.mac"], { routes: [missing, appsOk, builds()] });
+  assert.equal(r.rc, 2); assert.match(r.err, /mac app not found/);
+});
+test("shared: iOS timestamp builds are ignored and counted", () => {
+  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("202610190645", "2394"), macBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "2395");
+  assert.match(r.err, /ignored 1 iOS timestamp build\(s\)/);
+});
+test("shared: a macOS timestamp build cannot fit the four-digit range (exit 3)", () => {
+  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds(), macBuilds("202610190645")] });
+  assert.equal(r.rc, 3); assert.match(r.err, /four-digit build unavailable on macOS/);
+});
+test("shared: 9999 exhausts the range (exit 3)", () => {
+  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("9999"), macBuilds()] });
+  assert.equal(r.rc, 3); assert.match(r.err, /four-digit build range exhausted/);
+});
+test("shared: a malformed build stops the run (exit 3)", () => {
+  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("1000", "NaN"), macBuilds()] });
+  assert.equal(r.rc, 3); assert.match(r.err, /malformed build inventory/);
+});
+test("shared: a build with no version attribute stops the run (exit 3)", () => {
+  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, { prefix: "/v1/builds?filter[app]=111", body: { data: [{ attributes: {} }] } }] });
   assert.equal(r.rc, 3);
 });
-test("next: follows pagination and counts every page", () => {
-  const r = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [
+test("shared: follows pagination and counts every page", () => {
+  const r = run(["next-shared-build", BUNDLE], { routes: [
     appsOk,
-    { prefix: "/v1/builds?filter[app]=111", body: { data: [{ attributes: { version: "0.1.1" } }], links: { next: "https://api.appstoreconnect.apple.com/v1/builds?page=2" } } },
-    { prefix: "/v1/builds?page=2", body: { data: [{ attributes: { version: "0.1.7" } }] } },
+    { prefix: "/v1/builds?filter[app]=111&filter[preReleaseVersion.platform]=IOS", body: { data: [row("1100")], links: { next: "https://api.appstoreconnect.apple.com/v1/builds?page=2&platform=IOS" } } },
+    { prefix: "/v1/builds?page=2&platform=IOS", body: { data: [row("1200")] } },
+    macBuilds(),
   ] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "0.1.8");
+  assert.equal(r.rc, 0); assert.equal(r.out, "1201");
 });
-test("next: endless pagination refuses (exit 2)", () => {
-  const loop = { prefix: "/v1/builds?filter[app]=111", body: { data: [{ attributes: { version: "0.1.1" } }], links: { next: "https://api.appstoreconnect.apple.com/v1/builds?filter[app]=111&x=1" } } };
-  const r = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [appsOk, loop] });
+test("shared: endless pagination refuses (exit 2)", () => {
+  const loop = { prefix: "/v1/builds?filter[app]=111", body: { data: [row("1100")], links: { next: "https://api.appstoreconnect.apple.com/v1/builds?filter[app]=111&x=1" } } };
+  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, loop] });
   assert.equal(r.rc, 2);
 });
-test("next: HTTP error on the builds query fails (nonzero, no output)", () => {
-  const r = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [appsOk, { prefix: "/v1/builds", status: 500, body: {} }] });
+test("shared: HTTP error on the builds query fails (nonzero, no output)", () => {
+  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, { prefix: "/v1/builds", status: 500, body: {} }] });
   assert.notEqual(r.rc, 0); assert.equal(r.out, "");
 });
-test("next: bad version argument exits 2", () => {
-  for (const v of ["0.1", "1", "a.b.c", ""]) {
-    const r = run(["next-dotted-build", BUNDLE, v, "IOS"], { routes: [appsOk, builds()] });
-    assert.equal(r.rc, 2, v);
+test("shared: a floor that is not a non-negative safe integer exits 2", () => {
+  for (const args of [["next-shared-build", BUNDLE, "1500", "1.5"], ["next-shared-build", BUNDLE, "1500", "-1"], ["next-shared-build", BUNDLE, "99999999999999999999"]]) {
+    const r = run(args, { routes: [appsOk, builds()] });
+    assert.equal(r.rc, 2, JSON.stringify(args));
   }
 });
-test("next: asks for the right train and platform", () => {
+test("shared: missing bundle prints usage (exit 1, like every method)", () => {
+  const r = run(["next-shared-build"], { routes: [appsOk, builds()] });
+  assert.equal(r.rc, 1); assert.equal(r.out, "");
+});
+test("shared: queries both platforms on all trains (no version filter)", () => {
   const sc = join(dir, "q.json"), log = join(dir, "q.log");
   writeFileSync(sc, JSON.stringify({ routes: [appsOk, builds()] })); writeFileSync(log, "");
-  spawnSync(process.execPath, ["--import", stub, join(HERE, "asc-api.mjs"), "next-dotted-build", BUNDLE, "0.1.0", "ios"], {
+  spawnSync(process.execPath, ["--import", stub, join(HERE, "asc-api.mjs"), "next-shared-build", BUNDLE], {
     encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, ASC_KEY_ID: "ABC123DEFG", ASC_ISSUER_ID: "00000000-0000-0000-0000-000000000000", ASC_KEY_P8: pk8, STUB_SCENARIO: sc, STUB_LOG: log },
   });
   const seen = execFileSync("cat", [log], { encoding: "utf8" });
-  assert.match(seen, /filter\[preReleaseVersion\.version\]=0\.1\.0/);
   assert.match(seen, /filter\[preReleaseVersion\.platform\]=IOS/);
+  assert.match(seen, /filter\[preReleaseVersion\.platform\]=MAC_OS/);
+  assert.doesNotMatch(seen, /filter\[preReleaseVersion\.version\]/);
 });
 
 // ---- malformed answers (Kody 4383916249) and platform enum (4383917723) -----
@@ -186,7 +241,7 @@ test("malformed list answers stop the run (exit 3)", () => {
   for (const bad of ["oops", { a: 1 }, null, [1], [[]], [null]]) {
     const r1 = run(["released-store-version", BUNDLE, "IOS"], { routes: [appsOk, { prefix: "/v1/apps/111/appStoreVersions", body: { data: bad } }] });
     assert.equal(r1.rc, 3, JSON.stringify(bad));
-    const r2 = run(["next-dotted-build", BUNDLE, "0.1.0", "IOS"], { routes: [appsOk, { prefix: "/v1/builds?filter[app]=111", body: { data: bad } }] });
+    const r2 = run(["next-shared-build", BUNDLE], { routes: [appsOk, { prefix: "/v1/builds?filter[app]=111", body: { data: bad } }] });
     assert.equal(r2.rc, 3, JSON.stringify(bad));
   }
 });
@@ -197,12 +252,10 @@ test("released: a version record with no readable versionString stops the run (e
   }
 });
 test("platform MACOS is sent to ASC as MAC_OS", () => {
-  for (const [args, tail] of [[["released-store-version", BUNDLE, "macos"], "filter[platform]=MAC_OS"], [["next-dotted-build", BUNDLE, "0.1.0", "MACOS"], "filter[preReleaseVersion.platform]=MAC_OS"]]) {
-    const sc = join(dir, "m.json"), log = join(dir, "m.log");
-    writeFileSync(sc, JSON.stringify({ routes: [appsOk, store(), builds()] })); writeFileSync(log, "");
-    spawnSync(process.execPath, ["--import", stub, join(HERE, "asc-api.mjs"), ...args], {
-      encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, ASC_KEY_ID: "ABC123DEFG", ASC_ISSUER_ID: "00000000-0000-0000-0000-000000000000", ASC_KEY_P8: pk8, STUB_SCENARIO: sc, STUB_LOG: log },
-    });
-    assert.ok(execFileSync("cat", [log], { encoding: "utf8" }).includes(tail), tail);
-  }
+  const sc = join(dir, "m.json"), log = join(dir, "m.log");
+  writeFileSync(sc, JSON.stringify({ routes: [appsOk, store(), builds()] })); writeFileSync(log, "");
+  spawnSync(process.execPath, ["--import", stub, join(HERE, "asc-api.mjs"), "released-store-version", BUNDLE, "macos"], {
+    encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, ASC_KEY_ID: "ABC123DEFG", ASC_ISSUER_ID: "00000000-0000-0000-0000-000000000000", ASC_KEY_P8: pk8, STUB_SCENARIO: sc, STUB_LOG: log },
+  });
+  assert.ok(execFileSync("cat", [log], { encoding: "utf8" }).includes("filter[platform]=MAC_OS"), "filter[platform]=MAC_OS");
 });

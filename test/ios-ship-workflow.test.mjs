@@ -81,7 +81,7 @@ test("the fleet tooling pin matches the vendored files", () => {
   const pin = read("scripts/ios-fleet.sha256")
     .split("\n")
     .filter((line) => line && !line.startsWith("#"));
-  assert.deepEqual(pin.map((line) => line.split(/\s+/)[1]).sort(), ["apps.json", "asc-api.mjs", "asc-key.mjs", "ship-testflight.sh"]);
+  assert.deepEqual(pin.map((line) => line.split(/\s+/)[1]).sort(), ["apps.json", "asc-api.mjs", "asc-key.mjs", "shared-build.mjs", "ship-testflight.sh"]);
   for (const line of pin) {
     const [sha, name] = line.split(/\s+/);
     const actual = createHash("sha256").update(readFileSync(new URL(`scripts/ios-fleet/${name}`, root))).digest("hex");
