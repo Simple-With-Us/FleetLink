@@ -8,14 +8,18 @@ name: iOS TestFlight
 # build on every tester's phone.
 #
 # Ship path: scripts/ios-ship-testflight.sh -> scripts/ios-fleet/ship-testflight.sh
-# (the vendored fleet script, pinned by scripts/ios-fleet.sha256).  It reads the
-# commit count from git, shipping 1.0.<commit count> with CFBundleVersion set
-# to the same integer, raised past any build already on App Store Connect,
-# declares export compliance (ensure-tf-ready), and publishes the mandatory
-# "What to Test" note from the commit range since the last ship.  When App Store
-# Connect already holds that commit count, the pair moves up together to
-# <floor + 1>, so the build number no longer names a commit.  ios/project.yml
-# carries placeholders only; nothing is hand-edited per release.
+# (the vendored fleet script, pinned by scripts/ios-fleet.sha256).  It ships
+# the fixed marketing version 0.1.0 with CFBundleVersion max(S, M + 1), where
+# S is the merge stamp (TZ=America/Chicago git show -s
+# --format=%cd --date=format-local:%Y%m%d%H%M HEAD) and M is the highest build
+# already on App Store Connect, declares export compliance (ensure-tf-ready),
+# and publishes the mandatory "What to Test" note from the commit range since
+# the last ship.  The build is computed ONCE per release by the plan-build job
+# (ship-testflight.sh --plan-build-only, read-only) and every ship job reuses
+# that single value via --build, so iOS and Mac never pick different numbers.
+# A rebuild of the same commit still goes up because M includes the previous
+# upload.  ios/project.yml carries placeholders only; nothing is hand-edited
+# per release.
 #
 # Rate gate and same-HEAD skip stay at the fleet defaults (one upload per hour,
 # nothing twice for one commit).  No IOS_TF_MIN_INTERVAL_SEC and no --force-ship
@@ -75,8 +79,89 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan-build:
+    name: Plan merge-timestamp build
+    if: github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+    env:
+      INFISICAL_PROJECT_ID: 7948d7ef-0f8d-4165-b2c6-8f8fc79049ac
+      INFISICAL_ASC_PROJECT_ID: 8dae6d03-8f12-48b2-adf3-e5c1b881c8c5
+      INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_ID || secrets.INFISICAL_CLIENT_ID }}
+      INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET || secrets.INFISICAL_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The merge stamp S is the committer date of HEAD, so the full
+          # history is needed to resolve it exactly as the ship does.
+          fetch-depth: 0
+
+      - name: Restore iOS ship state
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ios-fleet
+          key: ios-fleet-fleetlink-${{ github.run_id }}
+          restore-keys: |
+            ios-fleet-fleetlink-
+
+      # The same gate as ship: a tick with nothing to ship skips the signing
+      # load and the ASC build inventories below instead of planning a value
+      # the gated ship then discards.  Both jobs read the same restored state
+      # and the same event SHA, so their votes always agree.
+      - name: Scheduled ship gate (skip unless iOS code changed)
+        id: gate
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/ios-scheduled-ship-gate.sh" \
+            --event "${{ github.event_name }}" \
+            --path-prefix 'ios/' \
+            --repo-root "$GITHUB_WORKSPACE" \
+            fleetlink
+
+      - name: Verify in-repo ios-fleet pin
+        if: steps.gate.outputs.should_ship == '1'
+        run: bash scripts/ios-fleet-pin.sh --check
+
+      - name: Install Node dependencies
+        if: steps.gate.outputs.should_ship == '1'
+        run: npm ci
+
+      - name: Load signing material from Infisical
+        if: steps.gate.outputs.should_ship == '1'
+        run: node scripts/ios-load-signing.mjs
+
+      # Computed ONCE per release; every ship job of this release reuses the
+      # single value via --build.  Read-only: nothing is uploaded here.
+      - name: Plan the shared merge-timestamp build
+        id: plan
+        if: steps.gate.outputs.should_ship == '1'
+        run: |
+          set -euo pipefail
+          S="$(TZ=America/Chicago git show -s --format=%cd --date=format-local:%Y%m%d%H%M HEAD)"
+          case "$S" in
+            [1-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+            *) echo "::error::merge stamp is not 12-digit: $S"; exit 1 ;;
+          esac
+          build="$(bash scripts/ios-fleet/ship-testflight.sh fleetlink --plan-build-only --repo-root "$GITHUB_WORKSPACE")"
+          case "$build" in
+            [1-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+            *) echo "::error::planned build is not a 12-digit merge-timestamp build"; exit 1 ;;
+          esac
+          echo "build=${build}" >> "$GITHUB_OUTPUT"
+          echo "Planned merge-timestamp build ${build} from stamp ${S}"
+
+      - name: Remove runner signing material
+        if: always()
+        run: |
+          set +o xtrace
+          rm -rf "$RUNNER_TEMP/ios-signing"
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+          rm -rf "$HOME/.private_keys" "$HOME/private_keys" "$HOME/.appstoreconnect/private_keys"
+
   ship:
     name: TestFlight archive + upload
+    needs: plan-build
     if: github.event.repository.fork == false
     runs-on: macos-latest
     timeout-minutes: 90
@@ -193,10 +278,17 @@ jobs:
         env:
           IOS_TF_RELEASE_NOTES: "1"
           IOS_MANUAL_SIGN: "1"
+          PLAN_BUILD: ${{ needs.plan-build.outputs.build }}
         run: |
           # IOS_SHIP_ARGS is empty or one fleet flag (--export-only, --force-ship).
+          # The build was computed once by plan-build; this ship reuses that
+          # single value via --build.
+          case "$PLAN_BUILD" in
+            [1-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+            *) echo "::error::plan-build output is not a 12-digit merge-timestamp build"; exit 1 ;;
+          esac
           # shellcheck disable=SC2086
-          bash scripts/ios-ship-testflight.sh ${IOS_SHIP_ARGS:-}
+          bash scripts/ios-ship-testflight.sh ${IOS_SHIP_ARGS:-} --build "$PLAN_BUILD"
 
       # Sync the standing testers and attach/submit the new build to the public
       # external group.  A failure here is a warning, never a red ship.

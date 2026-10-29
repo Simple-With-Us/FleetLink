@@ -1,8 +1,9 @@
 # MARKETING_VERSION and CURRENT_PROJECT_VERSION below are placeholders for local
 # builds.  A TestFlight ship overrides both on the xcodebuild command line:
-# scripts/ios-fleet/ship-testflight.sh takes the repo's commit count, ships
-# 1.0.<commit_count> with a <commit_count> build number, and applies the same
-# pair to the app and the App Clip.  Do not bump them by hand to ship.
+# scripts/ios-fleet/ship-testflight.sh ships the fixed marketing version 0.1.0
+# with a merge-timestamp build (max(S, M + 1), computed once per release by
+# the plan-build job), and applies the same pair to the app and the App Clip.
+# Do not bump them by hand to ship.
 name: FleetLink
 options:
   bundleIdPrefix: online.fleetlink.ios
@@ -38,11 +39,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios.Clip
         DEVELOPMENT_TEAM: CC8UTF7ATG
         # RECORD OF WHAT SHIPPED, not the source of truth for what ships next:
-        # the ship script passes both values on the xcodebuild command line, and
-        # reads this one as the build-number FLOOR, so it must stay below the
-        # commit count of any commit that can ship.
-        MARKETING_VERSION: "1.0.112"
-        CURRENT_PROJECT_VERSION: "112"  # commit count; ship script overrides per build
+        # the ship script passes both values on the xcodebuild command line.
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "202610290000"  # placeholder; ship script overrides per build
         SWIFT_VERSION: '5.9'
         TARGETED_DEVICE_FAMILY: '1,2'
         CODE_SIGN_ENTITLEMENTS: Clip/FleetLinkClip.entitlements
@@ -101,8 +100,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios
         DEVELOPMENT_TEAM: CC8UTF7ATG
-        MARKETING_VERSION: "1.0.112"
-        CURRENT_PROJECT_VERSION: "112"  # commit count; ship script overrides per build
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "202610290000"  # placeholder; ship script overrides per build
         SWIFT_VERSION: '5.9'
         TARGETED_DEVICE_FAMILY: '1,2'
         CODE_SIGN_ENTITLEMENTS: App/FleetLink.entitlements

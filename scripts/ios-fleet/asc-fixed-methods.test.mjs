@@ -1,7 +1,8 @@
-// Behavioral tests for asc-api.mjs released-store-version and next-shared-build.
-// The real script runs as a child process with a fetch stub preloaded
-// (--import), so JWT signing, argument parsing, app lookup, pagination and exit
-// codes are the real ones.  Nothing reaches App Store Connect.
+// Behavioral tests for asc-api.mjs released-store-version, plan-release-build,
+// next-shared-build and max-platform-build.  The real script runs as a child
+// process with a fetch stub preloaded (--import), so JWT signing, argument
+// parsing, app lookup, pagination and exit codes are the real ones.  Nothing
+// reaches App Store Connect.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
@@ -35,6 +36,7 @@ globalThis.fetch = async (url) => {
 
 const BUNDLE = "online.fleetlink.ios";
 const MAC_BUNDLE = "online.fleetlink.mac";
+const STAMP = "202610290000";
 const appsOk = { prefix: "/v1/apps?filter[bundleId]=", body: { data: [{ id: "111", attributes: { bundleId: BUNDLE } }] } };
 // Route order matters: the stub answers the first prefix match, so the Mac
 // app route goes before the catch-all appsOk.
@@ -129,96 +131,112 @@ test("lookup: no hint and not listed exits 2", () => {
   assert.equal(r.rc, 2);
 });
 test("lookup: apps query HTTP error exits 2", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [{ prefix: "/v1/apps?filter", status: 401, body: {} }] });
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [{ prefix: "/v1/apps?filter", status: 401, body: {} }] });
   assert.equal(r.rc, 2);
 });
 
-// ---- next-shared-build ------------------------------------------------------
-test("shared: empty inventory starts at the smallest four-digit integer", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, builds()] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "1000");
-  assert.match(r.err, /0 iOS build\(s\) \+ 0 macOS build\(s\) inspected; ignored 0 iOS timestamp build\(s\); next is 1000/);
+// ---- next-shared-build / plan-release-build -----------------------------------
+test("shared: fresh app plans the merge stamp", () => {
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, builds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, STAMP);
+  assert.match(r.err, new RegExp(`0 iOS build\\(s\\) \\+ 0 macOS build\\(s\\) inspected; merge stamp ${STAMP}; next is ${STAMP}`));
 });
-test("shared: an iOS four-digit build continues above it", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("2394"), macBuilds()] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "2395");
+test("shared: existing build below the stamp still plans the stamp", () => {
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds("2394"), macBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, STAMP);
+});
+test("shared: existing build at or above the stamp plans one higher", () => {
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds("209912312359"), macBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "209912312360");
+  const r2 = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds(STAMP), macBuilds()] });
+  assert.equal(r2.rc, 0); assert.equal(r2.out, "202610290001");
+});
+test("shared: iOS timestamp builds now count", () => {
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds("202610290007", "2394"), macBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290008");
 });
 test("shared: takes the max across iOS and macOS", () => {
-  const r1 = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("1100"), macBuilds("1200")] });
-  assert.equal(r1.rc, 0); assert.equal(r1.out, "1201");
-  const r2 = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("1300"), macBuilds("1200")] });
-  assert.equal(r2.rc, 0); assert.equal(r2.out, "1301");
+  const r1 = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds("202610290001"), macBuilds("202610290003")] });
+  assert.equal(r1.rc, 0); assert.equal(r1.out, "202610290004");
+  const r2 = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds("202610290005"), macBuilds("202610290003")] });
+  assert.equal(r2.rc, 0); assert.equal(r2.out, "202610290006");
 });
-test("shared: a pure-integer second arg is an extra floor, not a Mac bundle", () => {
-  const r = run(["next-shared-build", BUNDLE, "1500"], { routes: [appsOk, builds()] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "1501");
-  const r2 = run(["next-shared-build", BUNDLE, "986"], { routes: [appsOk, builds()] });
-  assert.equal(r2.rc, 0); assert.equal(r2.out, "1000");
+test("shared: mac-only higher build raises the value", () => {
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds(), macBuilds("202610290001")] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290002");
 });
-test("shared: macBundleId adds the Mac app's builds to the counter", () => {
-  const r = run(["next-shared-build", BUNDLE, MAC_BUNDLE], { routes: [macAppsOk, appsOk, iosBuilds("1100"), macBuilds(), macAppBuilds("1200"), macAppIosBuilds()] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "1201");
+test("shared: a pure-integer second arg is an extra floor, not a paired bundle", () => {
+  const r = run(["next-shared-build", BUNDLE, "202610290009", "--merge-stamp", STAMP], { routes: [appsOk, builds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290010");
+  const r2 = run(["next-shared-build", BUNDLE, "986", "--merge-stamp", STAMP], { routes: [appsOk, builds()] });
+  assert.equal(r2.rc, 0); assert.equal(r2.out, STAMP);
 });
-test("shared: the paired app's iOS builds join the counter too", () => {
-  // A Mac app that points macBundleId at its iOS sibling must not plan below
+test("shared: pairedBundleId adds the paired app's builds to the plan", () => {
+  const r = run(["next-shared-build", BUNDLE, MAC_BUNDLE, "--merge-stamp", STAMP], { routes: [macAppsOk, appsOk, iosBuilds("202610290001"), macBuilds(), macAppBuilds("202610290003"), macAppIosBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290004");
+});
+test("shared: the paired app's iOS builds join the plan too", () => {
+  // A Mac app that points pairedBundleId at its iOS sibling must not plan below
   // the sibling's iOS builds.
-  const r = run(["next-shared-build", BUNDLE, MAC_BUNDLE], { routes: [macAppsOk, appsOk, iosBuilds(), macBuilds("1100"), macAppBuilds(), macAppIosBuilds("2394")] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "2395");
+  const r = run(["next-shared-build", BUNDLE, MAC_BUNDLE, "--merge-stamp", STAMP], { routes: [macAppsOk, appsOk, iosBuilds(), macBuilds("202610290001"), macAppBuilds(), macAppIosBuilds("202610290007")] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290008");
 });
-test("shared: macBundleId equal to the iOS bundle queries the Mac trains once", () => {
-  const r = run(["next-shared-build", BUNDLE, BUNDLE], { routes: [appsOk, iosBuilds("1100"), macBuilds()] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "1101");
+test("shared: pairedBundleId equal to the bundle queries the trains once", () => {
+  const r = run(["next-shared-build", BUNDLE, BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds("202610290001"), macBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290002");
   assert.match(r.err, /1 iOS build\(s\) \+ 0 macOS build\(s\) inspected/);
 });
-test("shared: missing Mac app exits 2", () => {
+test("shared: missing paired app exits 2", () => {
   const missing = { prefix: "/v1/apps?filter[bundleId]=online.unknown.mac", body: { data: [] } };
-  const r = run(["next-shared-build", BUNDLE, "online.unknown.mac"], { routes: [missing, appsOk, builds()] });
-  assert.equal(r.rc, 2); assert.match(r.err, /mac app not found/);
+  const r = run(["next-shared-build", BUNDLE, "online.unknown.mac", "--merge-stamp", STAMP], { routes: [missing, appsOk, builds()] });
+  assert.equal(r.rc, 2); assert.match(r.err, /paired app not found/);
 });
-test("shared: iOS timestamp builds are ignored and counted", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("202610190645", "2394"), macBuilds()] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "2395");
-  assert.match(r.err, /ignored 1 iOS timestamp build\(s\)/);
-});
-test("shared: a macOS timestamp build cannot fit the four-digit range (exit 3)", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds(), macBuilds("202610190645")] });
-  assert.equal(r.rc, 3); assert.match(r.err, /four-digit build unavailable on macOS/);
-});
-test("shared: 9999 exhausts the range (exit 3)", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("9999"), macBuilds()] });
-  assert.equal(r.rc, 3); assert.match(r.err, /four-digit build range exhausted/);
+test("shared: no cap on large builds", () => {
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds("999999999999999999"), macBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "1000000000000000000");
 });
 test("shared: a malformed build stops the run (exit 3)", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, iosBuilds("1000", "NaN"), macBuilds()] });
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, iosBuilds("202610290001", "NaN"), macBuilds()] });
   assert.equal(r.rc, 3); assert.match(r.err, /malformed build inventory/);
 });
 test("shared: a build with no version attribute stops the run (exit 3)", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, { prefix: "/v1/builds?filter[app]=111", body: { data: [{ attributes: {} }] } }] });
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, { prefix: "/v1/builds?filter[app]=111", body: { data: [{ attributes: {} }] } }] });
   assert.equal(r.rc, 3);
 });
 test("shared: follows pagination and counts every page", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [
     appsOk,
-    { prefix: "/v1/builds?filter[app]=111&filter[preReleaseVersion.platform]=IOS", body: { data: [row("1100")], links: { next: "https://api.appstoreconnect.apple.com/v1/builds?page=2&platform=IOS" } } },
-    { prefix: "/v1/builds?page=2&platform=IOS", body: { data: [row("1200")] } },
+    { prefix: "/v1/builds?filter[app]=111&filter[preReleaseVersion.platform]=IOS", body: { data: [row("202610290001")], links: { next: "https://api.appstoreconnect.apple.com/v1/builds?page=2&platform=IOS" } } },
+    { prefix: "/v1/builds?page=2&platform=IOS", body: { data: [row("202610290003")] } },
     macBuilds(),
   ] });
-  assert.equal(r.rc, 0); assert.equal(r.out, "1201");
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290004");
 });
 test("shared: endless pagination refuses (exit 2)", () => {
-  const loop = { prefix: "/v1/builds?filter[app]=111", body: { data: [row("1100")], links: { next: "https://api.appstoreconnect.apple.com/v1/builds?filter[app]=111&x=1" } } };
-  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, loop] });
+  const loop = { prefix: "/v1/builds?filter[app]=111", body: { data: [row("202610290001")], links: { next: "https://api.appstoreconnect.apple.com/v1/builds?filter[app]=111&x=1" } } };
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, loop] });
   assert.equal(r.rc, 2);
 });
 test("shared: HTTP error on the builds query fails (nonzero, no output)", () => {
-  const r = run(["next-shared-build", BUNDLE], { routes: [appsOk, { prefix: "/v1/builds", status: 500, body: {} }] });
+  const r = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, { prefix: "/v1/builds", status: 500, body: {} }] });
   assert.notEqual(r.rc, 0); assert.equal(r.out, "");
 });
-test("shared: a floor that is not a non-negative safe integer exits 2", () => {
-  for (const args of [["next-shared-build", BUNDLE, "1500", "1.5"], ["next-shared-build", BUNDLE, "1500", "-1"], ["next-shared-build", BUNDLE, "99999999999999999999"]]) {
+test("shared: a floor that is not 1..18 digits exits 2", () => {
+  for (const args of [["next-shared-build", BUNDLE, "1500", "1.5", "--merge-stamp", STAMP], ["next-shared-build", BUNDLE, "1500", "-1", "--merge-stamp", STAMP], ["next-shared-build", BUNDLE, "9".repeat(19), "--merge-stamp", STAMP]]) {
     const r = run(args, { routes: [appsOk, builds()] });
     assert.equal(r.rc, 2, JSON.stringify(args));
   }
+});
+test("shared: missing or bad --merge-stamp exits 2", () => {
+  for (const args of [["next-shared-build", BUNDLE], ["next-shared-build", BUNDLE, "--merge-stamp", "1000"], ["next-shared-build", BUNDLE, "--merge-stamp", "099999999999"], ["plan-release-build", BUNDLE]]) {
+    const r = run(args, { routes: [appsOk, builds()] });
+    assert.equal(r.rc, 2, JSON.stringify(args));
+    assert.equal(r.out, "");
+  }
+});
+test("shared: --merge-stamp= form is accepted", () => {
+  const r = run(["next-shared-build", BUNDLE, `--merge-stamp=${STAMP}`], { routes: [appsOk, builds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, STAMP);
 });
 test("shared: missing bundle prints usage (exit 1, like every method)", () => {
   const r = run(["next-shared-build"], { routes: [appsOk, builds()] });
@@ -227,7 +245,7 @@ test("shared: missing bundle prints usage (exit 1, like every method)", () => {
 test("shared: queries both platforms on all trains (no version filter)", () => {
   const sc = join(dir, "q.json"), log = join(dir, "q.log");
   writeFileSync(sc, JSON.stringify({ routes: [appsOk, builds()] })); writeFileSync(log, "");
-  spawnSync(process.execPath, ["--import", stub, join(HERE, "asc-api.mjs"), "next-shared-build", BUNDLE], {
+  spawnSync(process.execPath, ["--import", stub, join(HERE, "asc-api.mjs"), "next-shared-build", BUNDLE, "--merge-stamp", STAMP], {
     encoding: "utf8", env: { PATH: process.env.PATH, HOME: dir, ASC_KEY_ID: "ABC123DEFG", ASC_ISSUER_ID: "00000000-0000-0000-0000-000000000000", ASC_KEY_P8: pk8, STUB_SCENARIO: sc, STUB_LOG: log },
   });
   const seen = execFileSync("cat", [log], { encoding: "utf8" });
@@ -235,13 +253,55 @@ test("shared: queries both platforms on all trains (no version filter)", () => {
   assert.match(seen, /filter\[preReleaseVersion\.platform\]=MAC_OS/);
   assert.doesNotMatch(seen, /filter\[preReleaseVersion\.version\]/);
 });
+test("plan: plan-release-build plans the same value as next-shared-build", () => {
+  const routes = [appsOk, iosBuilds("202610290001"), macBuilds("202610290003")];
+  const r1 = run(["plan-release-build", BUNDLE, "--merge-stamp", STAMP], { routes });
+  const r2 = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes });
+  assert.equal(r1.rc, 0); assert.equal(r1.out, "202610290004");
+  assert.equal(r2.rc, 0); assert.equal(r2.out, r1.out);
+  assert.match(r1.err, /plan-release-build: .* next is 202610290004/);
+});
+test("plan: plan-release-build with paired app and floor", () => {
+  const r = run(["plan-release-build", BUNDLE, MAC_BUNDLE, "202610290009", "--merge-stamp", STAMP], { routes: [macAppsOk, appsOk, iosBuilds("202610290001"), macBuilds(), macAppBuilds(), macAppIosBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290010");
+});
+
+// ---- max-platform-build -------------------------------------------------------
+test("max: empty platform prints 0", () => {
+  const r = run(["max-platform-build", BUNDLE, "IOS"], { routes: [appsOk, iosBuilds()] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "0");
+});
+test("max: prints the highest first component on that platform only", () => {
+  const r = run(["max-platform-build", BUNDLE, "IOS"], { routes: [appsOk, iosBuilds("202610290001", "202610290005", "2394"), macBuilds("209912312359")] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290005");
+  const r2 = run(["max-platform-build", BUNDLE, "MAC_OS"], { routes: [appsOk, iosBuilds("209912312359"), macBuilds("202610290003")] });
+  assert.equal(r2.rc, 0); assert.equal(r2.out, "202610290003");
+});
+test("max: dotted builds count by their first component", () => {
+  const r = run(["max-platform-build", BUNDLE, "IOS"], { routes: [appsOk, iosBuilds("202610290002.1")] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "202610290002");
+});
+test("max: malformed build stops the run (exit 3)", () => {
+  const r = run(["max-platform-build", BUNDLE, "IOS"], { routes: [appsOk, iosBuilds("202610290001", "NaN")] });
+  assert.equal(r.rc, 3); assert.match(r.err, /malformed build inventory/);
+});
+test("max: missing bundle or platform prints usage (exit 1 or 2)", () => {
+  const r = run(["max-platform-build"], { routes: [appsOk] });
+  assert.equal(r.rc, 1);
+  const r2 = run(["max-platform-build", BUNDLE], { routes: [appsOk] });
+  assert.equal(r2.rc, 2);
+});
+test("max: bad platform exits 2", () => {
+  const r = run(["max-platform-build", BUNDLE, "WATCH_OS"], { routes: [appsOk] });
+  assert.equal(r.rc, 2);
+});
 
 // ---- malformed answers (Kody 4383916249) and platform enum (4383917723) -----
 test("malformed list answers stop the run (exit 3)", () => {
   for (const bad of ["oops", { a: 1 }, null, [1], [[]], [null]]) {
     const r1 = run(["released-store-version", BUNDLE, "IOS"], { routes: [appsOk, { prefix: "/v1/apps/111/appStoreVersions", body: { data: bad } }] });
     assert.equal(r1.rc, 3, JSON.stringify(bad));
-    const r2 = run(["next-shared-build", BUNDLE], { routes: [appsOk, { prefix: "/v1/builds?filter[app]=111", body: { data: bad } }] });
+    const r2 = run(["next-shared-build", BUNDLE, "--merge-stamp", STAMP], { routes: [appsOk, { prefix: "/v1/builds?filter[app]=111", body: { data: bad } }] });
     assert.equal(r2.rc, 3, JSON.stringify(bad));
   }
 });
