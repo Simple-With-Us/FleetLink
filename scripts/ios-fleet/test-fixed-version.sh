@@ -17,6 +17,7 @@ GIT_COMMITTER_DATE="Thu Oct 29 00:00:00 2026 -0500" GIT_AUTHOR_DATE="Thu Oct 29 
 STAMP="$(cd "$GITREPO" && TZ=America/Chicago git show -s --format=%cd --date=format-local:%Y%m%d%H%M HEAD)"
 NEXT1="$(python3 -c 'import sys; print(int(sys.argv[1]) + 1)' "$STAMP")"
 BELOW="$(python3 -c 'import sys; print(int(sys.argv[1]) - 10000)' "$STAMP")"
+BELOW2="$(python3 -c 'import sys; print(int(sys.argv[1]) - 20000)' "$STAMP")"
 # Every stub call is recorded: a run that reaches ASC helpers without touching
 # the stub means the real node shadowed it (the ship script puts the Homebrew
 # paths first on PATH), and the test fails instead of passing on real output.
@@ -82,6 +83,8 @@ out="$(STUB_MAX=$STAMP run --build "$STAMP")"; rc=$?
 check "--build equal to this platform max is refused" nonzero "at or below the highest existing build $STAMP" "$out" $rc
 out="$(STUB_MAX=$NEXT1 run --build "$STAMP")"; rc=$?
 check "--build below this platform max is refused" nonzero "at or below the highest existing build $NEXT1" "$out" $rc
+out="$(STUB_MAX=$BELOW2 run --build "$BELOW")"; rc=$?
+check "--build below the ship HEAD merge stamp is refused" nonzero "below the merge stamp $STAMP" "$out" $rc
 out="$(STUB_MAX_FAIL=1 run --build "$STAMP")"; rc=$?
 check "unreadable this-platform inventory fails closed" nonzero "cannot verify the build against this platform" "$out" $rc
 # --build equal to the paired platform's build is accepted: the stub reports

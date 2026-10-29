@@ -1164,6 +1164,10 @@ sys.exit(0 if a>b else 1)' "$FIXED_MARKETING" "$_rel" \
   if [[ -n "$FORCE_BUILD" ]]; then
     [[ "$FORCE_BUILD" =~ ^[1-9][0-9]{11}$ ]] \
       || die "fixed mode requires a 12-digit merge-timestamp build ^[1-9][0-9]{11}$ (got '${FORCE_BUILD}').  Nothing was shipped."
+    _stamp="$(merge_stamp)" \
+      || die "cannot read the merge stamp of the HEAD being shipped for ${BUNDLE_ID}, so the requested build cannot be checked against it.  Nothing was shipped."
+    python3 -c 'import sys; sys.exit(0 if int(sys.argv[1]) >= int(sys.argv[2]) else 1)' "$FORCE_BUILD" "$_stamp" \
+      || die "requested build ${FORCE_BUILD} is below the merge stamp ${_stamp} of the HEAD being shipped.  Nothing was shipped."
     _this_max="$(asc_this_platform_max)" \
       || die "cannot verify the build against this platform for ${MARKETING}: App Store Connect could not be read.  Nothing was shipped or guessed."
     python3 -c 'import sys; sys.exit(0 if int(sys.argv[1]) > int(sys.argv[2]) else 1)' "$FORCE_BUILD" "$_this_max" \
