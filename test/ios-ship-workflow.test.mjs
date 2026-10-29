@@ -29,6 +29,19 @@ test("only main pushes, dispatches and a gated cron can start a ship", () => {
   assert.match(active, /steps\.gate\.outputs\.should_ship == '1'/);
 });
 
+test("plan-build is gated like ship, so idle cron ticks skip the ASC inventories", () => {
+  const planJob = active.slice(active.indexOf("plan-build:"), active.indexOf("\n  ship:\n"));
+  assert.ok(planJob.length > 0, "workflow has a plan-build job ahead of ship");
+  assert.match(planJob, /scripts\/ios-scheduled-ship-gate\.sh/, "plan-build runs the same scheduled gate as ship");
+  assert.match(planJob, /actions\/cache\/restore/, "plan-build restores the ship state the gate reads");
+  for (const name of ["Verify in-repo ios-fleet pin", "Install Node dependencies", "Load signing material from Infisical", "Plan the shared merge-timestamp build"]) {
+    const at = planJob.indexOf(`name: ${name}`);
+    assert.ok(at > -1, `plan-build still has step "${name}"`);
+    const step = planJob.slice(at).split("\n      - name:")[0];
+    assert.match(step, /if: steps\.gate\.outputs\.should_ship == '1'/, `"${name}" runs only when the gate votes ship`);
+  }
+});
+
 test("a ref other than main can only export, never upload", () => {
   assert.match(active, /\[ "\$REF" != "refs\/heads\/main" \]/);
   assert.match(active, /args="--export-only"/);
@@ -89,24 +102,19 @@ test("the fleet tooling pin matches the vendored files", () => {
   }
 });
 
-test("project.yml carries a 1.0.N placeholder, never a hand-set release train", () => {
+test("project.yml carries the fixed marketing version and a 12-digit build placeholder, never a hand-set release train", () => {
   const project = read("ios/project.yml");
+  const apps = JSON.parse(read("scripts/ios-fleet/apps.json")).apps.fleetlink;
   const marketing = [...project.matchAll(/MARKETING_VERSION: "([^"]+)"/g)].map((m) => m[1]);
   const build = [...project.matchAll(/CURRENT_PROJECT_VERSION: "([^"]+)"/g)].map((m) => m[1]);
   assert.equal(marketing.length, 2, "app and App Clip");
   assert.equal(new Set(marketing).size, 1, "app and App Clip share one version");
-  assert.match(marketing[0], /^1\.0\.\d+$/);
-  assert.equal(new Set(build).size, 1);
-  // CFBundleVersion is the commit count, so the two always describe the same
-  // number.  The old assertion demanded 12 digits, which enforced the retired
-  // YYYYMMDDHHMM timestamp; a plain integer is what the fleet scheme uses.
-  assert.match(build[0], /^\d+$/, "CFBundleVersion is a commit count, not a timestamp");
-  assert.doesNotMatch(build[0], /^\d{12}$/, "UTC timestamps are retired");
-  assert.equal(
-    marketing[0],
-    `1.0.${build[0]}`,
-    "marketing version and build number describe the same commit count",
-  );
+  assert.equal(marketing[0], apps.fixedMarketingVersion, "the placeholder tracks apps.json fixedMarketingVersion");
+  assert.equal(new Set(build).size, 1, "app and App Clip share one build");
+  // The ship overrides both on the xcodebuild command line with the fixed
+  // marketing version and the shared merge-timestamp build max(S, M + 1), so
+  // project.yml holds a same-shaped 12-digit placeholder for local builds.
+  assert.match(build[0], /^[1-9][0-9]{11}$/, "CURRENT_PROJECT_VERSION is a 12-digit merge-timestamp placeholder");
 });
 
 test("apps.json describes the same app project.yml builds", () => {
