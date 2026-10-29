@@ -1077,7 +1077,20 @@ async function main() {
           process.exit(2);
         }
         for (const b of ascListData(res, "next-shared-build")) out.push(b?.attributes?.version);
-        url = res.parsed.links?.next || "";
+        // ascListData has proved res.parsed is an object holding a data array;
+        // the pagination links are checked too, so a malformed links block is
+        // refused instead of being read as the last page.
+        const links = res.parsed.links;
+        if (links !== undefined && (links === null || typeof links !== "object" || Array.isArray(links))) {
+          console.error("next-shared-build: builds response has invalid links; not guessing");
+          process.exit(3);
+        }
+        const nextLink = links?.next;
+        if (nextLink !== undefined && nextLink !== null && typeof nextLink !== "string") {
+          console.error("next-shared-build: builds response has invalid links.next; not guessing");
+          process.exit(3);
+        }
+        url = typeof nextLink === "string" ? nextLink : "";
       }
       if (url) {
         console.error("next-shared-build: more than 10 pages of builds; refusing to guess");
