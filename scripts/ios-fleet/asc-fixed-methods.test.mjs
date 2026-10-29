@@ -56,6 +56,7 @@ const builds = (...v) => ({ prefix: "/v1/builds?filter[app]=111", body: { data: 
 const iosBuilds = (...v) => ({ prefix: "/v1/builds?filter[app]=111&filter[preReleaseVersion.platform]=IOS", body: { data: v.map(row) } });
 const macBuilds = (...v) => ({ prefix: "/v1/builds?filter[app]=111&filter[preReleaseVersion.platform]=MAC_OS", body: { data: v.map(row) } });
 const macAppBuilds = (...v) => ({ prefix: "/v1/builds?filter[app]=222&filter[preReleaseVersion.platform]=MAC_OS", body: { data: v.map(row) } });
+const macAppIosBuilds = (...v) => ({ prefix: "/v1/builds?filter[app]=222&filter[preReleaseVersion.platform]=IOS", body: { data: v.map(row) } });
 
 // ---- released-store-version ------------------------------------------------
 test("released: no versions prints nothing, exit 0", () => {
@@ -155,8 +156,14 @@ test("shared: a pure-integer second arg is an extra floor, not a Mac bundle", ()
   assert.equal(r2.rc, 0); assert.equal(r2.out, "1000");
 });
 test("shared: macBundleId adds the Mac app's builds to the counter", () => {
-  const r = run(["next-shared-build", BUNDLE, MAC_BUNDLE], { routes: [macAppsOk, appsOk, iosBuilds("1100"), macBuilds(), macAppBuilds("1200")] });
+  const r = run(["next-shared-build", BUNDLE, MAC_BUNDLE], { routes: [macAppsOk, appsOk, iosBuilds("1100"), macBuilds(), macAppBuilds("1200"), macAppIosBuilds()] });
   assert.equal(r.rc, 0); assert.equal(r.out, "1201");
+});
+test("shared: the paired app's iOS builds join the counter too", () => {
+  // A Mac app that points macBundleId at its iOS sibling must not plan below
+  // the sibling's iOS builds.
+  const r = run(["next-shared-build", BUNDLE, MAC_BUNDLE], { routes: [macAppsOk, appsOk, iosBuilds(), macBuilds("1100"), macAppBuilds(), macAppIosBuilds("2394")] });
+  assert.equal(r.rc, 0); assert.equal(r.out, "2395");
 });
 test("shared: macBundleId equal to the iOS bundle queries the Mac trains once", () => {
   const r = run(["next-shared-build", BUNDLE, BUNDLE], { routes: [appsOk, iosBuilds("1100"), macBuilds()] });
