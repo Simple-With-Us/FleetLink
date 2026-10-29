@@ -163,12 +163,7 @@ td .rowmenu { position: relative; }
 .rowmenu > summary:hover, .rowmenu[open] > summary { background: var(--soft); color: var(--ink); }
 .rowmenu .actions { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; flex-direction: column; flex-wrap: nowrap; align-items: stretch; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-lg); padding: 0.5rem; min-width: 150px; gap: 0.35rem; }
 .rowmenu .actions > * { width: 100%; justify-content: center; text-align: center; }
-@media (min-width: 641px) {
-  .rowmenu > summary { display: none; }
-  .rowmenu:not([open]) > .actions { display: flex; }
-  .rowmenu .actions { position: static; flex-direction: row; flex-wrap: wrap; background: none; border: 0; box-shadow: none; padding: 0; min-width: 0; }
-  .rowmenu .actions > * { width: auto; }
-}
+/* One row menu at every width: a closed <details> never renders its children in modern browsers, so the desktop inline-actions variant hid all row actions there. The summary menu stays visible and opens the same dropdown on desktop and mobile. */
 .table-wrap { overflow-x: auto; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 0.25rem 0.75rem; box-shadow: var(--shadow); margin-bottom: 1rem; }
 .table-wrap tr:last-child td { border-bottom: none; }
 .table-wrap td.day { white-space: nowrap; }
