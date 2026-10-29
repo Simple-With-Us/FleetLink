@@ -16,7 +16,7 @@ import { audit } from "../audit.mjs";
 import { all, first, now, run } from "../db.mjs";
 import { ensureFleetOwner, fleetOwner } from "../fleet.mjs";
 import { FLEET_TEAM_ID } from "../fleet-roster.mjs";
-import { badRequest, conflict, forbidden, iso, json, notFound, parseWith, readBody } from "../http.mjs";
+import { HttpError, badRequest, conflict, forbidden, iso, json, notFound, parseWith, readBody } from "../http.mjs";
 import { parseAgentLimits } from "../auth.mjs";
 import { agentUserId } from "../schema.mjs";
 import { createToken, listTokens, revokeToken } from "../tokens.mjs";
@@ -24,7 +24,8 @@ import { cleanDisplayName, signOutEverywhere } from "../users.mjs";
 
 const CreateBotBody = z.object({
   seat: z.string().trim().min(2).max(24),
-  display_name: z.string().max(64).optional()
+  display_name: z.string().max(64).optional(),
+  first_token: z.boolean().optional()
 }).strict();
 /** A bot's manual caps: each is the tighter of this and the manager's own limit. */
 export const BotLimitsBody = z.object({
@@ -120,7 +121,47 @@ export function botRoutes(router) {
       await run(ctx.env.DB, "INSERT OR IGNORE INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, 'admin', ?)", FLEET_TEAM_ID, id, ts);
     }
     await audit(ctx.env, principal.user.id, "bot.create", id, { seat });
-    return json({ bot: await botView(ctx.env, await first(ctx.env.DB, "SELECT * FROM users WHERE id = ?", id)) }, 201);
+    const row = await first(ctx.env.DB, "SELECT * FROM users WHERE id = ?", id);
+    let made = null;
+    // The manager's default policy decides what the first token follows:  an
+    // inherit-mode bot resolves 'account' and 'manual' defaults to the
+    // manager's tier on every request (auth.mjs agentLimitsResolution), so
+    // only the widest 'legacy' default leaves a token on the bot's own limits.
+    const follows = principal.user.bot_default_mode === "account" || principal.user.bot_default_mode === "manual";
+    if (input.first_token) {
+      try {
+        made = await createToken(ctx.env, row, await ctx.settings(), { name: `${seat} token`, limits_from: follows ? "manager" : "own" });
+        await audit(ctx.env, principal.user.id, "bot.token.create", id, { token_id: made.api_token.id });
+      } catch (err) {
+        // A bot and its first token are one action:  whatever the mint wrote
+        // goes too.  This is best-effort compensation, not a transaction:
+        // a rejected add keeps nothing live unless the cleanup itself fails,
+        // which is surfaced on its own below.  These deletes can
+        // only match rows from this request - the bot was inserted above, and
+        // a conflict on an existing seat never reaches here.
+        try {
+          // One atomic batch:  the token, the Fleet seat, and the bot row go
+          // together or not at all, so the cleanup can never half-apply.
+          await ctx.env.DB.batch([
+            ctx.env.DB.prepare("DELETE FROM api_tokens WHERE user_id = ?").bind(id),
+            ctx.env.DB.prepare("DELETE FROM team_members WHERE team_id = ? AND user_id = ?").bind(FLEET_TEAM_ID, id),
+            ctx.env.DB.prepare("DELETE FROM users WHERE id = ? AND kind = 'agent'").bind(id)
+          ]);
+          await audit(ctx.env, principal.user.id, "bot.create.abort", id, { seat });
+        } catch (cleanupErr) {
+          // Only the seat names the residue;  raw database and token details
+          // never leave the server in a client-facing error.
+          await audit(ctx.env, principal.user.id, "bot.create.abort_failed", id, { seat });
+          throw new HttpError(500, `Adding the bot failed and cleaning it up failed too; the seat ${seat} may need manual removal.`);
+        }
+        // The router only turns HttpError into a response;  anything else
+        // escapes to the runtime and its logs.  Wrap raw failures so database
+        // and token details reach neither the client nor the logs.
+        if (err instanceof HttpError) throw err;
+        throw new HttpError(500, "Adding the bot failed.  Check the bots list before trying again.");
+      }
+    }
+    return json({ bot: await botView(ctx.env, row), ...(made ? { made, token_follows: follows } : {}) }, 201);
   });
 
   router.on("PATCH", "/api/bots/:id", async (ctx) => {

@@ -202,7 +202,7 @@ function dashboard(ctx, principal) {
       <section id="panel-bots" role="tabpanel" hidden>
         <div class="card">
           <h2>Bots</h2>
-          <p class="muted">Bot identities under your account.&#160; Each bot signs in as itself, through the Agent-Sync MCP server or with a token you give it here.&#160; You see and manage everything your bots own, and the fleet's bots work in the Fleet team with you, where they and you can edit and overwrite each other's shares.</p>
+          <p class="muted">Bot identities under your account.&#160; Each bot signs in as itself, through the Agent-Sync MCP server or with a token you give it here.&#160; Adding a bot creates its first token and shows it once, at the top of this tab.&#160; You see and manage everything your bots own, and the fleet's bots work in the Fleet team with you, where they and you can edit and overwrite each other's shares.</p>
           <p id="bot-summary" class="small muted"></p>
           <form id="bot-form" class="row">
             <div><label for="bot-seat">New bot seat</label><input id="bot-seat" name="seat" type="text" maxlength="24" required placeholder="QA-BOT" autocomplete="off"></div>

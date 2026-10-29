@@ -863,6 +863,12 @@ export const DASHBOARD_JS = String.raw`
     renderBotDefaults();
   }
 
+  // The one place a bot token is ever shown:  once, at the top of the tab.
+  function showBotSecret(b, made, follow) {
+    document.getElementById("bot-secret").replaceChildren(h("div", { class: "notice ok" },
+      h("p", { class: "small", text: "Shown once.  It acts as " + b.display_name + (follow ? ", with your limits as they change." : ", with the bot's own limits.") }), FL.secretBox(b.seat + " token", made.token)));
+  }
+
   function botRow(b) {
     var active = b.status === "active";
     var base = "/api/bots/" + encodeURIComponent(b.id);
@@ -873,8 +879,7 @@ export const DASHBOARD_JS = String.raw`
       var follow = FL.confirm("Should this token follow your limits as they change?\n\nOK:  it always has your current file size, lifetime, and storage limits.\nCancel:  it keeps the bot's own, widest limits.");
       try {
         var made = await FL.api("POST", base + "/tokens", { name: name, limits_from: follow ? "manager" : "own" });
-        document.getElementById("bot-secret").replaceChildren(h("div", { class: "notice ok" },
-          h("p", { class: "small", text: "Shown once.  It acts as " + b.display_name + (follow ? ", with your limits as they change." : ", with the bot's own limits.") }), FL.secretBox(b.seat + " token", made.token)));
+        showBotSecret(b, made, follow);
         loadBots();
       } catch (err) { FL.fail(err); }
     } }));
@@ -904,7 +909,7 @@ export const DASHBOARD_JS = String.raw`
       h("td", { class: "hide-sm" }, b.usage.shares + " · " + FL.bytes(b.usage.bytes)),
       h("td", null, String(b.token_count), b.token_last_used_at ? h("div", { class: "small muted", text: "used " + FL.relative(b.token_last_used_at) }) : null),
       h("td", null, h("span", { class: "pill" + (active ? " green" : " red"), text: b.status })),
-      h("td", { class: "row-actions" }, rowMenu(actions)));
+      h("td", { class: "row-actions" }, h("button", { type: "button", class: "small secondary", text: "Rename", title: "Rename " + b.display_name, onclick: function () { openBotEditor(b, row); } }), rowMenu(actions)));
     return row;
   }
 
@@ -1045,6 +1050,8 @@ export const DASHBOARD_JS = String.raw`
         h("button", { type: "button", class: "secondary", text: "Cancel", onclick: function () { editorRow.remove(); } })));
     var editorRow = h("tr", { class: "bot-editor-row" }, h("td", { colspan: "5" }, h("div", { class: "card" }, h("h3", { text: "Edit " + b.display_name }), form)));
     row.after(editorRow);
+    var nameInput = editorRow.querySelector('input[name="display_name"]');
+    if (nameInput) { nameInput.focus(); nameInput.select(); }
   }
 
   async function saveBotEditor(e, b, editorRow, button) {
@@ -1085,9 +1092,24 @@ export const DASHBOARD_JS = String.raw`
   async function addBot(e) {
     e.preventDefault();
     var form = e.currentTarget, f = FL.form(form);
-    var body = { seat: f.seat };
+    var body = { seat: f.seat, first_token: true };
     if (f.display_name && f.display_name.trim()) body.display_name = f.display_name.trim();
-    try { await FL.api("POST", "/api/bots", body); form.reset(); FL.toast("Bot added."); loadBots(); } catch (err) { FL.fail(err); }
+    var addButton = form.querySelector('button[type="submit"]');
+    FL.busy(addButton, true);
+    try {
+      var created = await FL.api("POST", "/api/bots", body);
+      form.reset();
+      // The server made the bot and its first token as one action.
+      showBotSecret(created.bot, created.made, !!created.token_follows);
+      FL.toast("Bot added - its first token is shown once at the top of this tab.");
+    } catch (err) {
+      // A failed add keeps nothing on the server, but a lost response can
+      // leave both behind, so never claim either way:  the list says what exists.
+      FL.toast("Adding the bot failed: " + (err && err.message ? err.message : "unknown error") + "\u00a0 Check the list before trying again.", "error");
+    } finally {
+      FL.busy(addButton, false);
+      loadBots().catch(FL.fail);
+    }
   }
   document.getElementById("bot-form").addEventListener("submit", addBot);
 
@@ -1156,6 +1178,34 @@ export const DASHBOARD_JS = String.raw`
     if (item) { var own = item.closest("details.rowmenu"); if (own) own.open = false; }
     document.querySelectorAll("details.rowmenu[open]").forEach(function (d) { if (!d.contains(e.target)) d.open = false; });
   });
+  // An open row menu sits inside the table's horizontal scroll box, which
+  // clips it, so while it is open it is positioned against the viewport.
+  document.addEventListener("toggle", function (e) {
+    var d = e.target;
+    if (!d.matches || !d.matches("details.rowmenu")) return;
+    var actions = d.querySelector(".actions");
+    var summary = d.querySelector("summary");
+    if (!actions || !summary) return;
+    if (d.open) {
+      var r = summary.getBoundingClientRect();
+      var w = actions.offsetWidth, hgt = actions.offsetHeight;
+      var top = r.bottom + 4;
+      if (top + hgt > window.innerHeight - 8 && r.top - hgt - 4 > 8) top = r.top - hgt - 4;
+      var left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
+      actions.style.position = "fixed";
+      actions.style.top = top + "px";
+      actions.style.left = left + "px";
+      actions.style.right = "auto";
+    } else {
+      actions.style.position = "";
+      actions.style.top = "";
+      actions.style.left = "";
+      actions.style.right = "";
+    }
+  }, true);
+  window.addEventListener("scroll", function () {
+    document.querySelectorAll("details.rowmenu[open]").forEach(function (d) { d.open = false; });
+  }, true);
   loadMe().then(loadTeams).then(function () { return loadShares(false); }).catch(FL.fail);
   void show;
 })();
