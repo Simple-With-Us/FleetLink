@@ -507,3 +507,43 @@ test("adding a bot with first_token mints the token atomically, following the ma
   const plainTokens = await callJson(env, "GET", `/api/bots/${plain.data.bot.id}/tokens`, { auth: jay });
   assert.equal(plainTokens.data.tokens.length, 0);
 });
+
+test("a failed first-token mint keeps nothing: no bot, no token, no team seat", async () => {
+  const { env, jay } = await fleet();
+
+  // Make the token INSERT fail while every other statement behaves normally.
+  const bomb = () => Promise.reject(new Error("injected api_tokens failure"));
+  const db = new Proxy(env.DB, {
+    get(target, prop) {
+      if (prop !== "prepare") return Reflect.get(target, prop);
+      return (sql, ...args) => {
+        const stmt = target.prepare(sql, ...args);
+        if (!String(sql).includes("INSERT INTO api_tokens")) return stmt;
+        return new Proxy(stmt, {
+          get(st, p) {
+            if (p === "bind") return () => new Proxy(st, {
+              get(s2, p2) { return ["run", "first", "all", "raw"].includes(p2) ? bomb : Reflect.get(s2, p2); }
+            });
+            return ["run", "first", "all", "raw"].includes(p) ? bomb : Reflect.get(st, p);
+          }
+        });
+      };
+    }
+  });
+  const badEnv = new Proxy(env, { get(t, p) { return p === "DB" ? db : t[p]; } });
+
+  const res = await callJson(badEnv, "POST", "/api/bots", { auth: jay, json: { seat: "FT-ROLLBACK", first_token: true } });
+  assert.equal(res.status, 500);
+
+  // Nothing from the failed add survives:  no bot, no token, no Fleet seat.
+  assert.equal(await env.DB.prepare("SELECT id FROM users WHERE id = 'usr_agent_ft_rollback'").first(), null);
+  assert.equal(await env.DB.prepare("SELECT user_id FROM team_members WHERE team_id = 'team_fleet' AND user_id = 'usr_agent_ft_rollback'").first(), null);
+  assert.equal((await env.DB.prepare("SELECT id FROM api_tokens WHERE user_id = 'usr_agent_ft_rollback'").all()).results.length, 0);
+  const audits = (await env.DB.prepare("SELECT action FROM audit_events WHERE target = 'usr_agent_ft_rollback' ORDER BY rowid").all()).results.map((r) => r.action);
+  assert.deepEqual(audits, ["bot.create", "bot.create.abort"]);
+
+  // The seat is free to use again.
+  const retry = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-ROLLBACK", first_token: true } });
+  assert.equal(retry.status, 201);
+  assert.match(retry.data.made.token, /^fla_/);
+});

@@ -88,7 +88,9 @@ test("the server mints the first token atomically and rolls the bot back on fail
   const api = readFileSync(new URL("../worker/lib/api/bots.mjs", import.meta.url), "utf8");
   assert.match(api, /first_token: z\.boolean\(\)\.optional\(\)/, "creation accepts the first-token request");
   assert.match(api, /bot_default_mode === "account" \|\| .* === "manual"/, "the token's limits follow the manager's default policy");
+  assert.match(api, /DELETE FROM api_tokens WHERE user_id = \?/, "a failed mint removes any token it wrote");
   assert.match(api, /DELETE FROM users WHERE id = \? AND kind = 'agent'/, "a failed mint removes the bot it came with");
+  assert.match(api, /catch \(cleanupErr\)/, "a failed rollback never masks the original error");
   assert.match(api, /bot\.create\.abort/, "the rollback is audited");
   assert.match(api, /token_follows: follows/, "the response says what the token follows");
 });

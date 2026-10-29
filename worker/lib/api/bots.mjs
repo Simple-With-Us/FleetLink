@@ -16,7 +16,7 @@ import { audit } from "../audit.mjs";
 import { all, first, now, run } from "../db.mjs";
 import { ensureFleetOwner, fleetOwner } from "../fleet.mjs";
 import { FLEET_TEAM_ID } from "../fleet-roster.mjs";
-import { badRequest, conflict, forbidden, iso, json, notFound, parseWith, readBody } from "../http.mjs";
+import { HttpError, badRequest, conflict, forbidden, iso, json, notFound, parseWith, readBody } from "../http.mjs";
 import { parseAgentLimits } from "../auth.mjs";
 import { agentUserId } from "../schema.mjs";
 import { createToken, listTokens, revokeToken } from "../tokens.mjs";
@@ -133,11 +133,18 @@ export function botRoutes(router) {
         made = await createToken(ctx.env, row, await ctx.settings(), { name: `${seat} token`, limits_from: follows ? "manager" : "own" });
         await audit(ctx.env, principal.user.id, "bot.token.create", id, { token_id: made.api_token.id });
       } catch (err) {
-        // A bot and its first token are one action:  when the mint fails the
-        // bot it came with goes too, so a failed add keeps nothing.
-        await run(ctx.env.DB, "DELETE FROM team_members WHERE team_id = ? AND user_id = ?", FLEET_TEAM_ID, id);
-        await run(ctx.env.DB, "DELETE FROM users WHERE id = ? AND kind = 'agent'", id);
-        await audit(ctx.env, principal.user.id, "bot.create.abort", id, { seat });
+        // A bot and its first token are one action:  whatever the mint wrote
+        // goes too, so a rejected add keeps nothing live.  These deletes can
+        // only match rows from this request - the bot was inserted above, and
+        // a conflict on an existing seat never reaches here.
+        try {
+          await run(ctx.env.DB, "DELETE FROM api_tokens WHERE user_id = ?", id);
+          await run(ctx.env.DB, "DELETE FROM team_members WHERE team_id = ? AND user_id = ?", FLEET_TEAM_ID, id);
+          await run(ctx.env.DB, "DELETE FROM users WHERE id = ? AND kind = 'agent'", id);
+          await audit(ctx.env, principal.user.id, "bot.create.abort", id, { seat });
+        } catch (cleanupErr) {
+          throw new HttpError(500, `Adding the bot failed (${err.message}) and removing it failed too (${cleanupErr.message}); the seat ${seat} may need manual removal.`);
+        }
         throw err;
       }
     }
