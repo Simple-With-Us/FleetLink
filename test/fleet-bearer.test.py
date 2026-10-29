@@ -93,6 +93,26 @@ class FleetTests(unittest.TestCase):
                 self.assertEqual(factory.return_value.open.call_count, 1)
         self.assertEqual(F.canonical_hint("Grok (Build)"), "GROK")
 
+    def test_bool_numeric_values_refused_before_gateway_call(self):
+        with patch.object(self.api, "tool") as tool:
+            for value in (True, False):
+                for path, method, body in (("/api/shares", "POST", {"days": value}), ("/api/shares/demo/renew", "POST", {"days": value}), ("/api/links", "POST", {"days": value})):
+                    with self.assertRaises(F.CliError):
+                        self.api.request(method, path, body)
+                with self.assertRaises(F.CliError):
+                    self.api.number(value, int, "limit")
+            tool.assert_not_called()
+
+    def test_alias_spelling_is_not_a_different_valid_bearer_identity(self):
+        self.path.write_text("sbt_instinct_" + "x" * 43)
+        client = F.Client(self.path)
+        with patch.object(client, "rpc", return_value={"structuredContent": {"seat": "WISE", "authenticated_seat": "WISE"}}) as rpc:
+            with self.assertRaises(F.FleetError):
+                client.call("fleetlink_whoami", {})
+            self.assertEqual(rpc.call_count, 1)
+        with self.assertRaises(F.FleetError):
+            F.Client(self.path, identity_env={"AGENT_SEAT": "WISE"})
+
     def test_same_client_private_file_behavior(self):
         self.assertEqual(self.api.client.seat, "CODEX")
         self.path.chmod(0o644)

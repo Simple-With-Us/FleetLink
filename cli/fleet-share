@@ -405,6 +405,8 @@ class FleetApi:
     @staticmethod
     def number(value, convert, name):
         try:
+            if isinstance(value, bool):
+                raise ValueError
             out = convert(value)
             if not math.isfinite(out):
                 raise ValueError
