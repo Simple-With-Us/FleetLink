@@ -356,10 +356,13 @@ public struct CreateSlugView: View {
         }
     }
 
-    private var slugPreview: String {
-        let slug = customSlug.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var normalizedSlug: String {
+        customSlug.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
-        return slug.isEmpty ? "<automatic-slug>" : slug
+    }
+
+    private var slugPreview: String {
+        normalizedSlug.isEmpty ? "<automatic-slug>" : normalizedSlug
     }
 
     private var buttonTitle: String {
@@ -387,7 +390,7 @@ public struct CreateSlugView: View {
         errorMessage = nil
         createdURLString = nil
 
-        let slugToUse = customSlug.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : customSlug.trimmingCharacters(in: .whitespacesAndNewlines)
+        let slugToUse = normalizedSlug.isEmpty ? nil : normalizedSlug
         let passToUse = password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : password.trimmingCharacters(in: .whitespacesAndNewlines)
         let titleToUse = titleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : titleText.trimmingCharacters(in: .whitespacesAndNewlines)
         let descriptionToUse = descriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)

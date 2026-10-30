@@ -24,3 +24,9 @@ test('success hides the editor and cannot publish twice; in-flight edits and exi
   assert.match(view, /guard !isSubmitting, createdURLString == nil, isFormValid else \{ return \}/);
   assert.equal((view.match(/\.disabled\(isSubmitting\)/g) ?? []).length, 2);
 });
+
+test('preview and submission share one normalized slug', () => {
+  assert.match(view, /private var normalizedSlug: String/);
+  assert.match(view, /normalizedSlug.isEmpty \? "<automatic-slug>" : normalizedSlug/);
+  assert.match(view, /let slugToUse = normalizedSlug.isEmpty \? nil : normalizedSlug/);
+});
