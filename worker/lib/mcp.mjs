@@ -9,7 +9,7 @@ import { HttpError } from "./http.mjs";
 import { loadSettings } from "./settings.mjs";
 import { shareAccess } from "./policy.mjs";
 import {
-  cleanPath, createShare, deleteShare, deleteShareFile, fileByteLimit, fullLimits, getShareBySlug, LIMITS, listShares, loadShareFor,
+  cleanPath, createShare, deleteShare, deleteShareFile, fileByteLimit, fullLimits, getShareBySlug, isExpired, LIMITS, listShares, loadShareFor,
   makePersonal, publicShare, purgeShare, putShareFile, renewShare, shareFiles, shareToTeam, tier, updateShare
 } from "./shares.mjs";
 import { getObject } from "./storage.mjs";
@@ -30,6 +30,8 @@ const READ_TEXT_MAX = 1024 * 1024;
 const READ_BINARY_MAX = 512 * 1024;
 
 const CreateShareSchema = z.object({
+  empty: z.boolean().optional(),
+  reuse: z.boolean().optional(),
   content: z.string().min(1).max(MAX_BASE64_CHARS).optional(),
   filename: z.string().trim().min(1).max(200).optional(),
   content_type: oneLine(200).optional(),
@@ -48,6 +50,11 @@ const CreateShareSchema = z.object({
 function oneBody(nameKey) {
   return (value, ctx) => {
     const modes = ["content", "text", "markdown"].filter((key) => value[key] != null);
+    if (value.empty === true) {
+      if (modes.length !== 0) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "An empty share cannot include a body." });
+      return;
+    }
+    if (value.reuse === true) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "reuse requires empty: true." });
     if (modes.length !== 1) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Provide exactly one of content, text, or markdown." });
     if (value.content != null && (!value[nameKey] || !value.content_type)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Base64 content requires ${nameKey} and content_type.` });
@@ -97,6 +104,7 @@ const AddFileSchema = z.object({
 }).strict().superRefine(oneBody("path"));
 const FilePathSchema = z.object({ slug: slugRequired, path: pathRequired }).strict();
 const UploadUrlSchema = z.object({
+  password: oneLine(256).optional(),
   slug: z.string().trim().min(1).max(80).optional(),
   path: pathRequired,
   content_type: oneLine(200).optional(),
@@ -141,6 +149,8 @@ const TOOLS = [
       type: "object",
       additionalProperties: false,
       properties: {
+        empty: { type: "boolean", description: "Prepare an empty file share for streamed uploads." },
+        reuse: { type: "boolean", description: "Reuse an existing slug only when this account can edit it." },
         content: { type: "string", description: "Base64 file bytes.  Use instead of text or markdown." },
         filename: { type: "string", description: "File name.  Required with content.  Notes default to note.txt or note.md." },
         content_type: { type: "string", description: "Content type for content, such as image/png." },
@@ -317,6 +327,7 @@ const TOOLS = [
         slug: { type: "string", description: "An existing share, or a new name.  Omit for a new share with a random name." },
         path: { type: "string", description: "File path inside the share." },
         content_type: { type: "string" },
+        password: { type: "string" },
         max_bytes: { type: "integer", minimum: 1, description: "Largest upload to allow.  Defaults to your per-file limit." },
         ttl_seconds: { type: "integer", minimum: 30, maximum: UPLOAD_TTL_MAX_SECONDS },
         days: daysSchema,
@@ -388,6 +399,16 @@ function toolResult(payload, isError = false) {
 }
 
 async function toolCreateShare(data, ctx) {
+  if (data.empty === true) {
+    let share = data.slug && data.reuse ? await getShareBySlug(ctx.env, data.slug) : null;
+    if (share && !isExpired(share)) {
+      ({ share } = await loadShareFor(ctx.env, ctx.principal, data.slug, "edit"));
+      if (share.kind !== "files") throw new HttpError(400, "Short links do not hold files.");
+      return toolResult({ share: await shareView(ctx, share), reused: true });
+    }
+    share = await createShare(ctx.env, ctx.principal, { ...data, kind: "files", source: "mcp", settings: ctx.settings });
+    return toolResult({ share: await shareView(ctx, share), reused: false });
+  }
   const { bytes, contentType, filename } = bodyBytes(data, data.filename);
   const share = await createShare(ctx.env, ctx.principal, { ...data, kind: "files", source: "mcp", settings: ctx.settings });
   try {
@@ -491,7 +512,7 @@ async function toolUploadUrl(data, ctx) {
     ({ share } = await loadShareFor(ctx.env, ctx.principal, data.slug, "edit"));
   } else {
     share = await createShare(ctx.env, ctx.principal, {
-      kind: "files", slug: data.slug, days: data.days, title: data.title, team_id: data.team_id, team_access: data.team_access, personal: data.personal, source: "mcp", settings: ctx.settings
+      kind: "files", password: data.password, slug: data.slug, days: data.days, title: data.title, team_id: data.team_id, team_access: data.team_access, personal: data.personal, source: "mcp", settings: ctx.settings
     });
     created = true;
   }
