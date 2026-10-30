@@ -15,7 +15,7 @@ trap 'xcrun simctl shutdown "$udid" || true; xcrun simctl delete "$udid" || true
 xcrun simctl boot "$udid"
 xcrun simctl bootstatus "$udid" -b
 xcrun simctl install "$udid" "$out/build/Build/Products/Debug-iphonesimulator/FleetLink.app"
-for fixture in redirect files uploading error; do
+for fixture in redirect files uploading error create-redirect create-note create-files create-success; do
   SIMCTL_CHILD_FLEETLINK_FIXTURE="$fixture" xcrun simctl launch "$udid" online.fleetlink.ios
   sleep 5
   xcrun simctl io "$udid" screenshot "$out/screenshots/$fixture.png"
