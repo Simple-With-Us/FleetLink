@@ -109,31 +109,37 @@ export async function accountSummary(env, user, settings) {
  * to the next member or go.
  */
 export async function closeAccount(env, userId, actorId, { shares = "expire", transferTo = null, action = "account.delete", detail = null } = {}) {
+  if (!["expire", "transfer"].includes(shares)) throw badRequest("Unknown shares mode.");
   const user = await getUser(env.DB, userId);
   if (!user || user.status === "deleted") return false;
   if (user.is_system) throw badRequest("The operator account cannot be deleted.");
-  if (shares === "transfer" && !transferTo) throw badRequest("A share transfer needs a new owner.");
+  if (shares === "transfer") {
+    const target = typeof transferTo === "string" && transferTo !== userId ? await getUser(env.DB, transferTo) : null;
+    if (!target || target.status !== "active") throw badRequest("A share transfer needs an active new owner.");
+  }
   const ts = now();
   // Team hand-over runs before the batch:  it reads then writes per team, so
   // it cannot join the batch.  If the batch then fails, the account is still
   // active and the hand-over is simply already done - nothing is lost.
   await handOverTeams(env, userId);
-  const statements = [
-    env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
-    env.DB.prepare("DELETE FROM api_tokens WHERE user_id = ?").bind(userId),
-    env.DB.prepare("DELETE FROM passkeys WHERE user_id = ?").bind(userId),
-    env.DB.prepare("DELETE FROM team_members WHERE user_id = ?").bind(userId)
-  ];
+  // Every statement is fenced by the live status inside one atomic batch.
+  // A concurrent loser cannot delete credentials or transfer shares again.
+  const active = "EXISTS (SELECT 1 FROM users WHERE id = ? AND status != 'deleted')";
+  const statements = ["sessions", "api_tokens", "passkeys", "team_members"].map(
+    (table) => env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ? AND ${active}`).bind(userId, userId)
+  );
   // A closing person's shares expire so the sweep reclaims their objects.  A
   // deleted bot's shares MOVE to its manager instead:  serving stops for any
   // non-active owner (serve.mjs), so preserving the fleet's access - public
   // links included - means the shares need a living owner, not a tombstone.
-  if (shares === "expire") statements.push(env.DB.prepare("UPDATE shares SET expires_at = ?, updated_at = ? WHERE owner_id = ?").bind(ts - 1, ts, userId));
-  else statements.push(env.DB.prepare("UPDATE shares SET owner_id = ?, updated_at = ? WHERE owner_id = ?").bind(transferTo, ts, userId));
+  if (shares === "expire") statements.push(env.DB.prepare("UPDATE shares SET expires_at = ?, updated_at = ? WHERE owner_id = ? AND " + active).bind(ts - 1, ts, userId, userId));
+  else if (shares === "transfer") statements.push(env.DB.prepare("UPDATE shares SET owner_id = ?, updated_at = ? WHERE owner_id = ? AND " + active).bind(transferTo, ts, userId, userId));
   statements.push(env.DB.prepare(
-    "UPDATE users SET status = 'deleted', email = NULL, display_name = 'Deleted account', updated_at = ? WHERE id = ?"
+    "UPDATE users SET status = 'deleted', email = NULL, display_name = 'Deleted account', updated_at = ? WHERE id = ? AND status != 'deleted'"
   ).bind(ts, userId));
-  await env.DB.batch(statements);
+  const results = await env.DB.batch(statements);
+  if (Number(results.at(-1)?.meta?.changes ?? 0) === 0) return false;
+  if (shares === "transfer" && detail) detail.shares_transferred = Number(results.at(-2)?.meta?.changes ?? 0);
   await audit(env, actorId, action, userId, detail ?? undefined);
   return true;
 }

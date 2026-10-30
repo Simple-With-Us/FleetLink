@@ -108,6 +108,7 @@ test("every bot row's menu ends in a Delete that confirms the real consequences"
   assert.match(block, /b\.manager_status === "active" && b\.manager_id !== meId/, "the destination words follow the route's resolution: active manager, else the person deleting");
   assert.match(block, /public links included/, "the confirm states public links keep working");
   assert.match(block, /cannot be undone/, "the confirm states irreversibility");
+  assert.match(block, /good\?\\u00a0 /, "confirmation sentence gap matches the existing dashboard style");
   assert.match(block, /FL\.api\("DELETE", base, \{ confirm: "delete " \+ b\.seat \}\)/, "the request carries the typed-seat confirmation");
   assert.match(block, /loadBots\(\)/, "the list refreshes after the delete");
 });

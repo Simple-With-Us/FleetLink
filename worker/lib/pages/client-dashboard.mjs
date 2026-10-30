@@ -900,7 +900,7 @@ export const DASHBOARD_JS = String.raw`
     actions.append(h("button", { type: "button", class: "small danger", text: "Delete", onclick: async function () {
       var meId = state.me && state.me.user && state.me.user.id;
       var toManager = b.manager_id && b.manager_status === "active" && b.manager_id !== meId;
-      if (!FL.confirm("Delete " + b.display_name + " (" + b.seat + ") for good?  Its tokens and sessions die now, it leaves your teams, and it disappears from this list.  Its " + b.usage.shares + " share" + (b.usage.shares === 1 ? "" : "s") + " move to " + (toManager ? "its owner's account" : "your account") + " and keep working, public links included.  This cannot be undone.")) return;
+      if (!FL.confirm("Delete " + b.display_name + " (" + b.seat + ") for good?\u00a0 Its tokens and sessions die now, it leaves your teams, and it disappears from this list.\u00a0 Its " + b.usage.shares + " share" + (b.usage.shares === 1 ? "" : "s") + " move to " + (toManager ? "its owner's account" : "your account") + " and keep working, public links included.\u00a0 This cannot be undone.")) return;
       try {
         await FL.api("DELETE", base, { confirm: "delete " + b.seat });
         FL.toast(b.display_name + " deleted.");

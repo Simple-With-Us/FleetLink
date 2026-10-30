@@ -51,32 +51,34 @@ const AgentTokenBody = z.object({
 }).strict();
 
 /**
- * Usage and token counts for a set of bots, in two grouped queries whatever
- * the number of bots (not two per bot).
+ * Usage, token counts and distinct manager statuses in bounded grouped queries,
+ * regardless of the number of bots.
  */
-async function botStats(env, ids) {
-  if (!ids.length) return { usage: new Map(), tokens: new Map() };
+async function botStats(env, rows) {
+  const ids = rows.map((row) => row.id);
+  const managerIds = [...new Set(rows.map((row) => row.manager_id).filter(Boolean))];
+  if (!ids.length) return { usage: new Map(), tokens: new Map(), managers: new Map() };
   const marks = ids.map(() => "?").join(", ");
-  const [usage, tokens] = await Promise.all([
+  const [usage, tokens, managers] = await Promise.all([
     all(env.DB, `SELECT owner_id, COUNT(*) AS shares, COALESCE(SUM(total_bytes), 0) AS bytes FROM shares
                   WHERE owner_id IN (${marks}) AND (expires_at IS NULL OR expires_at > ?) GROUP BY owner_id`, ...ids, now()),
-    all(env.DB, `SELECT user_id, COUNT(*) AS n, MAX(last_used_at) AS last_used FROM api_tokens WHERE user_id IN (${marks}) GROUP BY user_id`, ...ids)
+    all(env.DB, `SELECT user_id, COUNT(*) AS n, MAX(last_used_at) AS last_used FROM api_tokens WHERE user_id IN (${marks}) GROUP BY user_id`, ...ids),
+    managerIds.length ? all(env.DB, `SELECT id, status FROM users WHERE id IN (${managerIds.map(() => "?").join(", ")})`, ...managerIds) : []
   ]);
-  return { usage: new Map(usage.map((r) => [r.owner_id, r])), tokens: new Map(tokens.map((r) => [r.user_id, r])) };
+  return { usage: new Map(usage.map((r) => [r.owner_id, r])), tokens: new Map(tokens.map((r) => [r.user_id, r])), managers: new Map(managers.map((r) => [r.id, r.status])) };
 }
 
 async function botView(env, row, stats = null) {
-  const { usage: usageMap, tokens: tokenMap } = stats ?? (await botStats(env, [row.id]));
+  const { usage: usageMap, tokens: tokenMap, managers } = stats ?? (await botStats(env, [row]));
   const usage = usageMap.get(row.id);
   const tokens = tokenMap.get(row.id);
-  const manager = row.manager_id ? await first(env.DB, "SELECT status FROM users WHERE id = ?", row.manager_id) : null;
   return {
     id: row.id,
     seat: row.agent_seat,
     display_name: row.display_name,
     status: row.status,
     manager_id: row.manager_id ?? null,
-    manager_status: manager?.status ?? null,
+    manager_status: managers.get(row.manager_id) ?? null,
     created_at: iso(row.created_at),
     usage: { shares: Number(usage?.shares ?? 0), bytes: Number(usage?.bytes ?? 0) },
     token_count: Number(tokens?.n ?? 0),
@@ -99,7 +101,7 @@ export function botRoutes(router) {
     await ensureFleetOwner(ctx.env);
     const rows = await all(ctx.env.DB, "SELECT * FROM users WHERE kind = 'agent' AND manager_id = ? AND status != 'deleted' ORDER BY agent_seat", principal.user.id);
     const owner = await fleetOwner(ctx.env);
-    const stats = await botStats(ctx.env, rows.map((row) => row.id));
+    const stats = await botStats(ctx.env, rows);
     return json({ bots: await Promise.all(rows.map((row) => botView(ctx.env, row, stats))), fleet_owner: owner?.id === principal.user.id, fleet_team_id: FLEET_TEAM_ID });
   });
 
@@ -220,17 +222,17 @@ export function botRoutes(router) {
     // person deleting (necessarily active:  they hold a live session).
     const manager = bot.manager_id ? await first(ctx.env.DB, "SELECT id, status FROM users WHERE id = ?", bot.manager_id) : null;
     const target = manager?.status === "active" ? manager.id : principal.user.id;
-    const owned = await first(ctx.env.DB, "SELECT COUNT(*) AS n FROM shares WHERE owner_id = ?", bot.id);
-    const shares_transferred = Number(owned?.n ?? 0);
+    const detail = { seat: bot.agent_seat, shares_transferred: 0 };
     try {
-      await closeAccount(ctx.env, bot.id, principal.user.id, { shares: "transfer", transferTo: target, action: "bot.delete", detail: { seat: bot.agent_seat, shares_transferred } });
+      const closed = await closeAccount(ctx.env, bot.id, principal.user.id, { shares: "transfer", transferTo: target, action: "bot.delete", detail });
+      if (!closed) throw notFound("Bot not found.");
     } catch (err) {
       // Same rule as the mint path:  only HttpError becomes a client response;
       // anything raw is wrapped so database details reach neither.
       if (err instanceof HttpError) throw err;
       throw new HttpError(500, "Deleting the bot failed.  Check the bots list before trying again.");
     }
-    return json({ ok: true, deleted: true, seat: bot.agent_seat, shares_transferred });
+    return json({ ok: true, deleted: true, seat: bot.agent_seat, shares_transferred: detail.shares_transferred });
   });
 
   router.on("GET", "/api/bots/:id/tokens", async (ctx) => {

@@ -707,3 +707,52 @@ test("a failing delete batch keeps the bot, its credentials, and its shares unto
   const me = await callJson(env, "GET", "/api/me", { auth: { token } });
   assert.equal(me.status, 200, "the bot's token still works");
 });
+
+test("bot list batches distinct manager statuses instead of one lookup per bot", async () => {
+  const { env, jay } = await fleet();
+  const sql = [];
+  const db = Object.create(env.DB);
+  db.prepare = (query) => { sql.push(query); return env.DB.prepare(query); };
+  const result = await callJson({ ...env, DB: db }, "GET", "/api/bots", { auth: jay });
+  assert.equal(result.status, 200);
+  assert.ok(result.data.bots.length >= 30);
+  assert.ok(result.data.bots.every(b => b.manager_status === "active"));
+  assert.equal(sql.filter(q => /^SELECT id, status FROM users WHERE id IN/.test(q)).length, 1);
+  assert.equal(sql.filter(q => q === "SELECT status FROM users WHERE id = ?").length, 0);
+});
+
+test("unknown share modes and invalid transfer destinations fail before account mutation", async () => {
+  const { closeAccount } = await import("../worker/lib/users.mjs");
+  const { env, jay } = await fleet();
+  const id = "usr_agent_ft_invalid";
+  await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-INVALID" } });
+  for (const options of [{ shares: "typo" }, { shares: "transfer" }, { shares: "transfer", transferTo: id }, { shares: "transfer", transferTo: "missing" }]) {
+    await assert.rejects(closeAccount(env, id, jay.user.id, options));
+    assert.equal((await env.DB.prepare("SELECT status FROM users WHERE id = ?").bind(id).first()).status, "active");
+  }
+});
+
+test("concurrent closure loser returns false and cannot move winner shares or duplicate audit", async () => {
+  const { closeAccount } = await import("../worker/lib/users.mjs");
+  const { env, jay } = await fleet();
+  const created = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-RACE" } });
+  const id = created.data.bot.id;
+  const original = env.DB.batch.bind(env.DB);
+  let blocked, release;
+  const entered = new Promise(resolve => { blocked = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  let first = true;
+  const db = Object.create(env.DB);
+  db.batch = async statements => {
+    if (first && statements.some(s => s.sql.includes("UPDATE users SET status = 'deleted'"))) {
+      first = false; blocked(); await gate;
+    }
+    return original(statements);
+  };
+  const loser = closeAccount({ ...env, DB: db }, id, jay.user.id, { action: "race.delete" });
+  await entered;
+  assert.equal(await closeAccount(env, id, jay.user.id, { action: "race.delete" }), true);
+  release();
+  assert.equal(await loser, false);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'race.delete'").first()).n, 1);
+});
