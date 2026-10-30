@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 public struct CreateSlugView: View {
     @ObservedObject var portalManager: PortalManager
     var onSelectArtifact: (URL) -> Void
+    var onClose: () -> Void
 
     @EnvironmentObject private var session: SessionManager
     @AppStorage("fleetlink_server_host") private var serverHost: String = "https://fleetlink.online"
@@ -70,9 +71,10 @@ public struct CreateSlugView: View {
         TTLOption(label: "Until you delete it", seconds: 0)
     ]
 
-    public init(portalManager: PortalManager, onSelectArtifact: @escaping (URL) -> Void) {
+    public init(portalManager: PortalManager, onClose: @escaping () -> Void, onSelectArtifact: @escaping (URL) -> Void) {
         self.portalManager = portalManager
         self.onSelectArtifact = onSelectArtifact
+        self.onClose = onClose
     }
 
     public var body: some View {
@@ -144,147 +146,176 @@ public struct CreateSlugView: View {
                     }
                 }
 
-                Section("What to share") {
-                    Picker("What to share", selection: $creationMode) {
-                        ForEach(CreationMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: creationMode) { _, newMode in
-                        if newMode == .redirect {
-                            selectedTTLSeconds = 15552000
-                        } else if selectedTTLSeconds == 15552000 || selectedTTLSeconds == 2592000 {
-                            selectedTTLSeconds = 259200
-                        }
-                    }
-                }
-
-                if creationMode == .redirect {
-                    Section("Web address") {
-                        TextField("https://example.com", text: $targetURL)
-                            .keyboardType(.URL)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .accessibilityLabel("Web address to open")
-                    }
-                } else if creationMode == .note {
-                    Section("File name") {
-                        TextField("notes.md", text: $textFileName)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                    }
-                    Section("Note") {
-                        TextEditor(text: $textContent)
-                            .frame(minHeight: 160)
-                            .font(.system(.body, design: .monospaced))
-                    }
-                } else {
-                    Section("Files") {
-                        PhotosPicker(selection: $photoItems, maxSelectionCount: 20, matching: .images) {
-                            Label("Choose photos", systemImage: "photo.on.rectangle")
-                        }
-                        Button {
-                            showFileImporter = true
-                        } label: {
-                            Label("Choose files", systemImage: "folder")
-                        }
-                        if pendingFiles.isEmpty {
-                            Text("Add one or more files.\u{00A0} A sign-in code in Settings is required to publish.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        } else {
-                            ForEach(pendingFiles) { file in
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(file.name)
-                                            .lineLimit(1)
-                                        Text(ByteCountFormatter.string(fromByteCount: Int64(file.data.count), countStyle: .file))
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    Button(role: .destructive) {
-                                        pendingFiles.removeAll { $0.id == file.id }
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(.secondary)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Remove \(file.name)")
+                Group {
+                    if createdURLString == nil {
+                        Section("What to share") {
+                            Picker("What to share", selection: $creationMode) {
+                                ForEach(CreationMode.allCases) { mode in
+                                    Text(mode.rawValue).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: creationMode) { _, newMode in
+                                if newMode == .redirect {
+                                    selectedTTLSeconds = 15552000
+                                } else if selectedTTLSeconds == 15552000 || selectedTTLSeconds == 2592000 {
+                                    selectedTTLSeconds = 259200
                                 }
                             }
                         }
-                    }
-                }
 
-                Section("Preview") {
-                    TextField("Title (optional)", text: $titleText)
-                        .autocorrectionDisabled()
-                    TextField("Description (optional)", text: $descriptionText)
-                        .autocorrectionDisabled()
-                    if creationMode != .redirect {
-                        PhotosPicker(selection: $previewItem, matching: .images) {
-                            Label(previewFile == nil ? "Preview picture (optional)" : "Preview: \(previewFile?.name ?? "image")", systemImage: "photo")
+                        Section {
+                            TextField("Slug (optional)", text: $customSlug)
+                                .accessibilityLabel("Link slug (optional)")
+                                .accessibilityHint("The name at the end of your link. Leave blank for an automatic slug.")
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                            Text("https://\(selectedDomain)/\(slugPreview)")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        } header: {
+                            Text("Link slug")
+                        } footer: {
+                            Text("The slug is the name after the domain, not the preview title or file name. Leave blank for an automatic slug. Use letters, numbers, dots, dashes or underscores (4-64 characters; account owners may use shorter slugs).")
                         }
-                        if previewFile != nil {
-                            Button("Remove preview picture", role: .destructive) {
-                                previewFile = nil
-                                previewItem = nil
+
+                        if creationMode == .redirect {
+                            Section("Web address") {
+                                TextField("https://example.com", text: $targetURL)
+                                    .keyboardType(.URL)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                                    .accessibilityLabel("Web address to open")
+                            }
+                        } else if creationMode == .note {
+                            Section("File name") {
+                                TextField("notes.md", text: $textFileName)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                            }
+                            Section("Note") {
+                                TextEditor(text: $textContent)
+                                    .frame(minHeight: 160)
+                                    .font(.system(.body, design: .monospaced))
+                            }
+                        } else {
+                            Section("Files") {
+                                PhotosPicker(selection: $photoItems, maxSelectionCount: 20, matching: .images) {
+                                    Label("Choose photos", systemImage: "photo.on.rectangle")
+                                }
+                                Button {
+                                    showFileImporter = true
+                                } label: {
+                                    Label("Choose files", systemImage: "folder")
+                                }
+                                if pendingFiles.isEmpty {
+                                    Text("Add one or more files.\u{00A0} A sign-in code in Settings is required to publish.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    ForEach(pendingFiles) { file in
+                                        HStack {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(file.name)
+                                                    .lineLimit(1)
+                                                Text(ByteCountFormatter.string(fromByteCount: Int64(file.data.count), countStyle: .file))
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            Spacer()
+                                            Button(role: .destructive) {
+                                                pendingFiles.removeAll { $0.id == file.id }
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Remove \(file.name)")
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-                }
 
-                Section {
-                    TextField("Short name (optional)", text: $customSlug)
-                        .accessibilityLabel("Short name")
-                        .accessibilityHint("Leave blank and FleetLink picks a name.")
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-
-                    Picker("How long it stays up", selection: $selectedTTLSeconds) {
-                        ForEach((creationMode == .redirect ? redirectTTLs : uploadTTLs).filter { $0.seconds > 0 || session.user?.isAdmin == true }) { opt in
-                            Text(opt.label).tag(opt.seconds)
-                        }
-                    }
-
-                    SecureField("Password (optional)", text: $password)
-                        .accessibilityHint("Leave blank if anyone with the link may open it.")
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-
-                    Picker("Domain", selection: $selectedDomain) {
-                        Text("fleetlink.online").tag("fleetlink.online")
-                        Text("fleetlink.app").tag("fleetlink.app")
-                    }
-                } header: {
-                    Text("Options")
-                } footer: {
-                    Text("Publishing uses the sign-in code in Settings.\u{00A0} A custom name on a file share needs an account-owner sign-in.\u{00A0} Short links can use a custom name with either sign-in.\u{00A0} Until you delete it is kept only for an account owner.")
-                        .font(.caption)
-                }
-
-                Section {
-                    Button {
-                        submit()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if isSubmitting {
-                                ProgressView()
-                                    .padding(.trailing, 4)
+                        Section("Preview") {
+                            TextField("Preview title (optional)", text: $titleText)
+                                .autocorrectionDisabled()
+                            TextField("Description (optional)", text: $descriptionText)
+                                .autocorrectionDisabled()
+                            if creationMode != .redirect {
+                                PhotosPicker(selection: $previewItem, matching: .images) {
+                                    Label(previewFile == nil ? "Preview picture (optional)" : "Preview: \(previewFile?.name ?? "image")", systemImage: "photo")
+                                }
+                                if previewFile != nil {
+                                    Button("Remove preview picture", role: .destructive) {
+                                        previewFile = nil
+                                        previewItem = nil
+                                    }
+                                }
                             }
-                            Text(buttonTitle)
-                                .bold()
-                            Spacer()
+                        }
+
+                        Section {
+                            Picker("How long it stays up", selection: $selectedTTLSeconds) {
+                                ForEach((creationMode == .redirect ? redirectTTLs : uploadTTLs).filter { $0.seconds > 0 || session.user?.isAdmin == true }) { opt in
+                                    Text(opt.label).tag(opt.seconds)
+                                }
+                            }
+
+                            SecureField("Password (optional)", text: $password)
+                                .accessibilityHint("Leave blank if anyone with the link may open it.")
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+
+                            Picker("Domain", selection: $selectedDomain) {
+                                Text("fleetlink.online").tag("fleetlink.online")
+                                Text("fleetlink.app").tag("fleetlink.app")
+                            }
+                        } header: {
+                            Text("Options")
+                        } footer: {
+                            Text("Publishing uses the sign-in code in Settings.\u{00A0} A custom name on a file share needs an account-owner sign-in.\u{00A0} Short links can use a custom name with either sign-in.\u{00A0} Until you delete it is kept only for an account owner.")
+                                .font(.caption)
+                        }
+
+                        Section {
+                            Button {
+                                submit()
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    if isSubmitting {
+                                        ProgressView()
+                                            .padding(.trailing, 4)
+                                    }
+                                    Text(buttonTitle)
+                                        .bold()
+                                    Spacer()
+                                }
+                            }
+                            .disabled(isSubmitting || !isFormValid)
                         }
                     }
-                    .disabled(isSubmitting || !isFormValid)
+                }
+                .disabled(isSubmitting)
+            }
+            .navigationTitle(createdURLString == nil ? "New link" : "Link ready")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(createdURLString == nil ? "Cancel" : "Done") {
+                        onClose()
+                    }
+                    .disabled(isSubmitting)
                 }
             }
-            .navigationTitle("New link")
             .onAppear {
+                #if FLEETLINK_VISUAL_FIXTURE
+                let fixture = ProcessInfo.processInfo.environment["FLEETLINK_FIXTURE"] ?? ""
+                if fixture == "create-note" { creationMode = .note }
+                if fixture == "create-files" { creationMode = .files }
+                if fixture == "create-success" { createdURLString = "https://fleetlink.online/trip-notes" }
+                #endif
                 if let host = URL(string: serverHost)?.host {
                     selectedDomain = host
                 }
@@ -325,6 +356,12 @@ public struct CreateSlugView: View {
         }
     }
 
+    private var slugPreview: String {
+        let slug = customSlug.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
+        return slug.isEmpty ? "<automatic-slug>" : slug
+    }
+
     private var buttonTitle: String {
         switch creationMode {
         case .redirect: return "Create short link"
@@ -345,6 +382,7 @@ public struct CreateSlugView: View {
     }
 
     private func submit() {
+        guard !isSubmitting, createdURLString == nil, isFormValid else { return }
         isSubmitting = true
         errorMessage = nil
         createdURLString = nil

@@ -13,11 +13,17 @@ struct FleetLinkApp: App {
     @StateObject private var session = SessionManager()
     @State private var inputURLString = "https://fleetlink.online"
     @State private var selectedTab = 0
+    @State private var creationID = UUID()
 
     var body: some Scene {
         WindowGroup {
             #if FLEETLINK_VISUAL_FIXTURE
-            ShareManagementVisualFixture()
+            if ProcessInfo.processInfo.environment["FLEETLINK_FIXTURE"]?.hasPrefix("create-") == true {
+                CreateSlugView(portalManager: portalManager, onClose: {}) { _ in }
+                    .environmentObject(session)
+            } else {
+                ShareManagementVisualFixture()
+            }
             #else
             TabView(selection: $selectedTab) {
                 // Tab 0: Portal & Analytics
@@ -34,13 +40,18 @@ struct FleetLinkApp: App {
                 .tag(0)
 
                 // Tab 1: New link
-                CreateSlugView(portalManager: portalManager) { targetURL in
+                CreateSlugView(portalManager: portalManager, onClose: {
+                    selectedTab = 0
+                    creationID = UUID()
+                }) { targetURL in
+                    creationID = UUID()
                     inputURLString = targetURL.absoluteString
                     selectedTab = 2
                     Task {
                         await loader.load(url: targetURL)
                     }
                 }
+                .id(creationID)
                 .tabItem {
                     Label("New link", systemImage: "plus.circle.fill")
                 }
