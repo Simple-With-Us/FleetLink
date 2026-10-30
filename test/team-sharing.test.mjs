@@ -207,8 +207,8 @@ test("agent seats act through the Agent-Sync server credential with their own ac
   const jay = await signUp(env, "Jay");
   await makeAdmin(env, jay);
   const all = await callJson(env, "GET", "/api/admin/teams", { auth: jay });
-  // The operator and the 37 fleet bots (JET and GROK-WEB among them).
-  assert.deepEqual(all.data.teams.map((t) => [t.id, t.members, t.shares, t.my_role]), [["team_fleet", 38, 1, null]]);
+  // The operator and the 36 fleet bots (JET and GROK-WEB among them).
+  assert.deepEqual(all.data.teams.map((t) => [t.id, t.members, t.shares, t.my_role]), [["team_fleet", 37, 1, null]]);
   assert.equal((await callJson(env, "POST", "/api/admin/teams/team_fleet/join", { auth: jay })).status, 200);
   assert.equal((await callJson(env, "POST", "/api/admin/teams/team_nope/join", { auth: jay })).status, 404);
   assert.equal((await callJson(env, "GET", "/api/shares?scope=team&team_id=team_fleet", { auth: jay })).data.shares.length, 1);

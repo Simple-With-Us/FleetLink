@@ -43,7 +43,7 @@ test('real staged upgrade: schema7 rows -> immutable 139 v8 -> 141 v9, fresh ins
  const snapshot=(await db.prepare('SELECT * FROM users ORDER BY id').all()).results;
  await migrate(db); assert.deepEqual((await db.prepare('SELECT * FROM users ORDER BY id').all()).results,snapshot);
  const fresh=await memoryD1(); await migrate(fresh); await migrate(fresh);
- assert.equal((await fresh.prepare('SELECT MAX(version) AS v FROM schema_migrations').first()).v,9);
+ assert.equal((await fresh.prepare('SELECT MAX(version) AS v FROM schema_migrations').first()).v,10);
 });
 
 test('request dispatch migrates v8 before the new bot INSERT writes its v9 flag', async()=>{
@@ -56,5 +56,5 @@ test('request dispatch migrates v8 before the new bot INSERT writes its v9 flag'
  assert.equal(res.status,200);
  assert.ok(res.data.result && !res.data.result.isError);
  assert.equal((await read(db,'usr_agent_rollout')).agent_inherits_defaults,1);
- assert.equal((await db.prepare('SELECT MAX(version) AS v FROM schema_migrations').first()).v,9);
+ assert.equal((await db.prepare('SELECT MAX(version) AS v FROM schema_migrations').first()).v,10);
 });

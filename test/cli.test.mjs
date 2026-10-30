@@ -249,7 +249,7 @@ test("bots and admin fleet commands", async () => {
     const op = { ...f.base, FLEET_ADMIN_SECRET: "test-operator-secret-value" };
     const fleet = await run(["admin", "fleet"], { env: op });
     assert.equal(fleet.status, 0, fleet.stderr);
-    assert.match(fleet.stdout, /Fleet owner: none\.  37 bots, 37 without a manager\./);
+    assert.match(fleet.stdout, /Fleet owner: none\.  36 bots, 36 without a manager\./);
     const teams = await run(["admin", "teams"], { env: op });
     assert.match(teams.stdout, /team_fleet\s+Fleet/);
     const added = await run(["bots", "add", "QA-BOT", "--name", "QA"], { env: op });

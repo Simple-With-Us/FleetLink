@@ -36,7 +36,7 @@ test("migrations replace the old account tables and seed the operator account", 
   // A second run is a no-op.
   assert.equal(await migrate(db), MIGRATIONS.at(-1).version);
   assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM users WHERE kind = 'person'").first()).n, 1);
-  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM users WHERE kind = 'agent'").first()).n, 37);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM users WHERE kind = 'agent'").first()).n, 36);
 });
 
 test("ensureSchema runs once per binding and retries after a failure", async () => {

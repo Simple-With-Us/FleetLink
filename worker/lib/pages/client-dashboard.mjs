@@ -897,6 +897,16 @@ export const DASHBOARD_JS = String.raw`
       if (active && !FL.confirm("Disable " + b.display_name + "?  It stops working everywhere until you enable it.")) return;
       try { await FL.api("PATCH", base, { status: active ? "disabled" : "active" }); loadBots(); } catch (err) { FL.fail(err); }
     } }));
+    actions.append(h("button", { type: "button", class: "small danger", text: "Delete", onclick: async function () {
+      var meId = state.me && state.me.user && state.me.user.id;
+      var toManager = b.manager_id && b.manager_status === "active" && b.manager_id !== meId;
+      if (!FL.confirm("Delete " + b.display_name + " (" + b.seat + ") for good?\u00a0 Its tokens and sessions die now, it leaves your teams, and it disappears from this list.\u00a0 Its " + b.usage.shares + " share" + (b.usage.shares === 1 ? "" : "s") + " move to " + (toManager ? "its owner's account" : "your account") + " and keep working, public links included.\u00a0 This cannot be undone.")) return;
+      try {
+        await FL.api("DELETE", base, { confirm: "delete " + b.seat });
+        FL.toast(b.display_name + " deleted.");
+        loadBots();
+      } catch (err) { FL.fail(err); }
+    } }));
     var limitNote = b.limit_mode === "manual"
       ? h("div", { class: "small muted", text: "Manual maxes: " + botCapsText(b.limits || {}) })
       : b.limit_mode === "account"
