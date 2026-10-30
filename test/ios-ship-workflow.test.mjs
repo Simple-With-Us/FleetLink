@@ -29,14 +29,14 @@ function pushPathsList() {
 }
 
 function extractPushPaths(text) {
-  return [...text.matchAll(/^\s+-\s+['"]?([^'"\s]+)['"]?\s*$/gm)].map((m) => m[1]);
+  return [...text.matchAll(/^\s+-\s+['"]?([^'"\s]+)['"]?\s*(?:#.*)?$/gm)].map((m) => m[1]);
 }
 
 // Only the scheduled gate step/call block the script name was split from,
 // never an unrelated list item or another --path-prefix use.
 function extractGatePrefixes(call) {
   const block = call.split(/\n\s+-\s+(?:name|uses):/)[0];
-  return [...block.matchAll(/--path-prefix\s+(?:'([^']+)'|"([^"]+)"|([^\s'"\\]+))/g)].map(
+  return [...block.matchAll(/--path-prefix\s+(?:'([^']+)'|"([^"]+)"|([^\s'"\\]+))\s*(?:#.*)?/g)].map(
     (m) => m[1] ?? m[2] ?? m[3],
   );
 }
@@ -64,10 +64,10 @@ test("the scheduled gate watches every push path, so a missed push still ships",
 });
 
 test("the coverage extractors accept single, double and unquoted values", () => {
-  const pushSample = `      - 'ios/**'\n      - "scripts/ios-*"\n      - scripts/ios-fleet/**\n`;
-  assert.deepEqual(extractPushPaths(pushSample), ["ios/**", "scripts/ios-*", "scripts/ios-fleet/**"]);
-  const gateSample = `run: gate.sh \\\n  --path-prefix 'ios/**' \\\n  --path-prefix "scripts/ios-*" \\\n  --path-prefix scripts/ios-fleet/** \\\n`;
-  assert.deepEqual(extractGatePrefixes(gateSample), ["ios/**", "scripts/ios-*", "scripts/ios-fleet/**"]);
+  const pushSample = `      - 'ios/**'\n      - "scripts/ios-*"\n      - scripts/ios-fleet/**\n      - 'extra/**' # reason\n`;
+  assert.deepEqual(extractPushPaths(pushSample), ["ios/**", "scripts/ios-*", "scripts/ios-fleet/**", "extra/**"]);
+  const gateSample = `run: gate.sh \\\n  --path-prefix 'ios/**' \\\n  --path-prefix "scripts/ios-*" \\\n  --path-prefix scripts/ios-fleet/** \\\n  --path-prefix 'extra/**' # reason \\\n`;
+  assert.deepEqual(extractGatePrefixes(gateSample), ["ios/**", "scripts/ios-*", "scripts/ios-fleet/**", "extra/**"]);
 });
 
 test("plan-build is gated like ship, so idle cron ticks skip the ASC inventories", () => {
