@@ -118,51 +118,38 @@ export async function closeAccount(env, userId, actorId, { shares = "expire", tr
     if (!target || target.status !== "active") throw badRequest("A share transfer needs an active new owner.");
   }
   const ts = now();
-  // Team hand-over runs before the batch:  it reads then writes per team, so
-  // it cannot join the batch.  If the batch then fails, the account is still
-  // active and the hand-over is simply already done - nothing is lost.
-  await handOverTeams(env, userId);
   // Every statement is fenced by the live status inside one atomic batch.
   // A concurrent loser cannot delete credentials or transfer shares again.
   const active = "EXISTS (SELECT 1 FROM users WHERE id = ? AND status != 'deleted')";
-  const statements = ["sessions", "api_tokens", "passkeys", "team_members"].map(
-    (table) => env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ? AND ${active}`).bind(userId, userId)
-  );
+  const targetActive = shares === "transfer" ? " AND EXISTS (SELECT 1 FROM users WHERE id = ? AND status = 'active')" : "";
+  const fence = active + targetActive;
+  const fenceArgs = shares === "transfer" ? [userId, transferTo] : [userId];
+  const statements = [
+    env.DB.prepare(`UPDATE team_members SET role = 'owner' WHERE user_id != ?
+      AND team_id IN (SELECT team_id FROM team_members WHERE user_id = ? AND role = 'owner')
+      AND NOT EXISTS (SELECT 1 FROM team_members o WHERE o.team_id = team_members.team_id AND o.role = 'owner' AND o.user_id != ?)
+      AND user_id = (SELECT h.user_id FROM team_members h WHERE h.team_id = team_members.team_id AND h.user_id != ?
+        ORDER BY CASE h.role WHEN 'admin' THEN 0 ELSE 1 END, h.created_at, h.user_id LIMIT 1)
+      AND ${fence}`).bind(userId, userId, userId, userId, ...fenceArgs),
+    env.DB.prepare(`DELETE FROM teams WHERE id IN (SELECT team_id FROM team_members WHERE user_id = ? AND role = 'owner')
+      AND NOT EXISTS (SELECT 1 FROM team_members o WHERE o.team_id = teams.id AND o.user_id != ?) AND ${fence}`).bind(userId, userId, ...fenceArgs),
+    ...["sessions", "api_tokens", "passkeys", "team_members"].map(
+    (table) => env.DB.prepare(`DELETE FROM ${table} WHERE user_id = ? AND ${fence}`).bind(userId, ...fenceArgs)
+  )];
   // A closing person's shares expire so the sweep reclaims their objects.  A
   // deleted bot's shares MOVE to its manager instead:  serving stops for any
   // non-active owner (serve.mjs), so preserving the fleet's access - public
   // links included - means the shares need a living owner, not a tombstone.
-  if (shares === "expire") statements.push(env.DB.prepare("UPDATE shares SET expires_at = ?, updated_at = ? WHERE owner_id = ? AND " + active).bind(ts - 1, ts, userId, userId));
-  else if (shares === "transfer") statements.push(env.DB.prepare("UPDATE shares SET owner_id = ?, updated_at = ? WHERE owner_id = ? AND " + active).bind(transferTo, ts, userId, userId));
+  if (shares === "expire") statements.push(env.DB.prepare("UPDATE shares SET expires_at = ?, updated_at = ? WHERE owner_id = ? AND " + fence).bind(ts - 1, ts, userId, ...fenceArgs));
+  else if (shares === "transfer") statements.push(env.DB.prepare("UPDATE shares SET owner_id = ?, updated_at = ? WHERE owner_id = ? AND " + fence).bind(transferTo, ts, userId, ...fenceArgs));
   statements.push(env.DB.prepare(
-    "UPDATE users SET status = 'deleted', email = NULL, display_name = 'Deleted account', updated_at = ? WHERE id = ? AND status != 'deleted'"
-  ).bind(ts, userId));
+    "UPDATE users SET status = 'deleted', email = NULL, display_name = 'Deleted account', updated_at = ? WHERE id = ? AND status != 'deleted'" + targetActive
+  ).bind(ts, userId, ...(shares === "transfer" ? [transferTo] : [])));
   const results = await env.DB.batch(statements);
   if (Number(results.at(-1)?.meta?.changes ?? 0) === 0) return false;
   if (shares === "transfer" && detail) detail.shares_transferred = Number(results.at(-2)?.meta?.changes ?? 0);
   await audit(env, actorId, action, userId, detail ?? undefined);
   return true;
-}
-
-async function handOverTeams(env, userId) {
-  const owned = await all(
-    env.DB,
-    `SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ? AND tm.role = 'owner'
-       AND NOT EXISTS (SELECT 1 FROM team_members o WHERE o.team_id = tm.team_id AND o.role = 'owner' AND o.user_id != ?)`,
-    userId,
-    userId
-  );
-  for (const { team_id: teamId } of owned) {
-    const heir = await first(
-      env.DB,
-      `SELECT user_id FROM team_members WHERE team_id = ? AND user_id != ?
-        ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, created_at LIMIT 1`,
-      teamId,
-      userId
-    );
-    if (heir) await run(env.DB, "UPDATE team_members SET role = 'owner' WHERE team_id = ? AND user_id = ?", teamId, heir.user_id);
-    else await run(env.DB, "DELETE FROM teams WHERE id = ?", teamId);
-  }
 }
 
 export async function signOutEverywhere(env, userId) {

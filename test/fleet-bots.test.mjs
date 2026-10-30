@@ -756,3 +756,27 @@ test("concurrent closure loser returns false and cannot move winner shares or du
   assert.equal(await loser, false);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'race.delete'").first()).n, 1);
 });
+
+test("transfer fences a destination deleted after validation and leaves source and shares intact", async () => {
+  const { closeAccount } = await import("../worker/lib/users.mjs");
+  const { env, jay } = await fleet();
+  const created = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "FT-TARGET-RACE" } });
+  const id = created.data.bot.id;
+  await env.DB.prepare("INSERT INTO api_tokens (id,user_id,name,token_hash,token_prefix,created_at) VALUES ('race-token',?,'old','hash-race','fla_test',1)").bind(id).run();
+  await env.DB.prepare("INSERT INTO shares (id,slug,kind,title,owner_id,created_at,updated_at) VALUES ('race-share','race-share','link','work',?,1,1)").bind(id).run();
+  const original = env.DB.batch.bind(env.DB);
+  const db = Object.create(env.DB);
+  let intercepted = false;
+  db.batch = async statements => {
+    if (!intercepted && statements.some(s => s.sql.includes("UPDATE users SET status = 'deleted'"))) {
+      intercepted = true;
+      await env.DB.prepare("UPDATE users SET status='deleted' WHERE id=?").bind(jay.user.id).run();
+    }
+    return original(statements);
+  };
+  assert.equal(await closeAccount({ ...env, DB: db }, id, jay.user.id, { shares: "transfer", transferTo: jay.user.id, action: "target-race.delete" }), false);
+  assert.equal((await env.DB.prepare("SELECT status FROM users WHERE id=?").bind(id).first()).status,"active");
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id=?").bind(id).first()).n,1);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='target-race.delete'").first()).n,0);
+  assert.equal((await env.DB.prepare("SELECT owner_id FROM shares WHERE id='race-share'").first()).owner_id,id);
+});

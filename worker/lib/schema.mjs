@@ -307,7 +307,8 @@ export const MIGRATIONS = [
 UPDATE shares SET owner_id = COALESCE(
   (SELECT m.id FROM users b JOIN users m ON m.id = b.manager_id WHERE b.id = shares.owner_id AND m.status = 'active' AND m.id != b.id),
   (SELECT u.id FROM meta JOIN users u ON u.id = meta.value WHERE meta.key = 'fleet_owner_id' AND u.status = 'active' AND u.kind = 'person'),
-  (SELECT id FROM users WHERE id = '${OPERATOR_USER_ID}' AND status = 'active')
+  (SELECT id FROM users WHERE id = '${OPERATOR_USER_ID}' AND status = 'active'),
+  owner_id
 ) WHERE owner_id IN (SELECT id FROM users WHERE kind = 'agent' AND agent_seat = 'BF-BUILDER');
 DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE kind = 'agent' AND agent_seat = 'BF-BUILDER');
 DELETE FROM api_tokens WHERE user_id IN (SELECT id FROM users WHERE kind = 'agent' AND agent_seat = 'BF-BUILDER');
