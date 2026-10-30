@@ -22,17 +22,23 @@
 # TestFlight-spam source, not an edge case.
 #
 # The owner does not want TestFlight spammed, so the scheduled path ships only
-# when the app's own source tree actually changed since its last successful
-# ship. Push and workflow_dispatch bypass this entirely: a push already passed
-# the workflow's `paths:` filter, and a dispatch is an explicit instruction.
+# when one of the workflow's own push paths actually changed since its last
+# successful ship. Push and workflow_dispatch bypass this entirely: a push
+# already passed the workflow's `paths:` filter, and a dispatch is an explicit
+# instruction.
 #
 # Usage:
-#   ios-scheduled-ship-gate.sh --path-prefix <dir/> [options] <key> [key...]
-#   (this repo ships one app: `socratic`, from ios/)
+#   ios-scheduled-ship-gate.sh --path-prefix <glob> [--path-prefix <glob>...] [options] <key> [key...]
+#   (this repo ships one app: `fleetlink`)
 #
 # Options:
-#   --path-prefix P   Repo-relative path prefix that counts as app source
-#                     (required; e.g. clients/ios/ or ios/)
+#   --path-prefix P   One GitHub on.push.paths entry to watch (required,
+#                     repeatable; e.g. ios/** or scripts/ios-*).  Pass the
+#                     workflow's full push-paths list so a missed push still
+#                     ships.  A single --path-prefix 'ios/' still works.
+#                     Supports '*', '**', '?', '[...]', a trailing '/' as a
+#                     directory prefix, and a leading '!' exclusion, evaluated
+#                     in order like push (last match wins).
 #   --event NAME      GitHub event name (default: $GITHUB_EVENT_NAME).
 #                     Anything other than "schedule" votes ship=1 for every
 #                     app: a push already passed the workflow's paths filter,
@@ -53,7 +59,7 @@
 
 set -uo pipefail
 
-PATH_PREFIX=""
+PATH_PREFIXES=()
 EVENT="${GITHUB_EVENT_NAME:-}"
 REPO_ROOT=""
 STATE_DIR="${IOS_FLEET_STATE_DIR:-${HOME}/.cache/ios-fleet}"
@@ -64,7 +70,13 @@ log() { echo "[ship-gate] $*"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --path-prefix) PATH_PREFIX="${2:-}"; shift 2 ;;
+    --path-prefix)
+      [[ $# -ge 2 ]] || die "--path-prefix needs a value"
+      [[ -n "${2:-}" ]] || die "--path-prefix needs a non-empty value"
+      PATH_PREFIXES+=("$2"); shift 2 ;;
+    --path-prefix=*)
+      [[ -n "${1#--path-prefix=}" ]] || die "--path-prefix needs a non-empty value"
+      PATH_PREFIXES+=("${1#--path-prefix=}"); shift ;;
     --event) EVENT="${2:-}"; shift 2 ;;
     --repo-root) REPO_ROOT="${2:-}"; shift 2 ;;
     --state-dir) STATE_DIR="${2:-}"; shift 2 ;;
@@ -74,7 +86,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$PATH_PREFIX" ]] || die "--path-prefix is required"
+[[ "${#PATH_PREFIXES[@]}" -gt 0 ]] || die "--path-prefix is required"
 [[ -n "${APPS// /}" ]] || die "at least one app key is required"
 
 if [[ -z "$REPO_ROOT" ]]; then REPO_ROOT="$(pwd)"; fi
@@ -93,12 +105,123 @@ out_key() {
   printf 'ship_%s' "$(printf '%s' "$1" | tr '-' '_')"
 }
 
+regex_escape() {
+  # Escape every regex special in $1 so a literal path matches exactly.
+  local s="$1" out="" i=0 c
+  while [[ $i -lt ${#s} ]]; do
+    c="${s:$i:1}"
+    case "$c" in
+      '.'|'^'|'$'|'+'|'('|')'|'|'|'\\'|'{'|'}') out="${out}\\${c}" ;;
+      *) out="${out}${c}" ;;
+    esac
+    i=$((i + 1))
+  done
+  printf '%s' "$out"
+}
+
+glob_body_to_regex() {
+  # A GitHub paths glob (leading '!' already stripped) as a regex body.
+  # '*' stays inside one segment, '**' crosses '/', '?' is one non-'/' char.
+  local g="$1" out="" i=0 c j cls n
+  n=${#g}
+  while [[ $i -lt $n ]]; do
+    if [[ "${g:$i:3}" == "**/" ]]; then
+      out="${out}(.*/)?"
+      i=$((i + 3))
+    elif [[ "${g:$i:2}" == "**" ]]; then
+      out="${out}.*"
+      i=$((i + 2))
+    else
+      c="${g:$i:1}"
+      case "$c" in
+        '*') out="${out}[^/]*" ;;
+        '?') out="${out}[^/]" ;;
+        '[')
+          j=$((i + 1)); cls=""
+          if [[ "${g:$j:1}" == "!" ]]; then cls="^"; j=$((j + 1)); fi
+          while [[ $j -lt $n && "${g:$j:1}" != "]" ]]; do
+            cls="${cls}${g:$j:1}"
+            j=$((j + 1))
+          done
+          if [[ $j -lt $n ]]; then
+            cls="${cls//\\/\\\\}"
+            out="${out}[${cls}]"
+            i=$((j + 1))
+            continue
+          else
+            out="${out}\\[" # unterminated '[', match it literally
+          fi
+          ;;
+        '.'|'^'|'$'|'+'|'('|')'|'|'|'\\'|'{'|'}') out="${out}\\${c}" ;;
+        *) out="${out}${c}" ;;
+      esac
+      i=$((i + 1))
+    fi
+  done
+  printf '%s' "$out"
+}
+
+pattern_to_regex() {
+  # One --path-prefix value as an anchored regex.  A trailing '/' is the
+  # legacy directory prefix (everything beneath it); a plain path is the file
+  # itself or anything beneath it; anything with a glob char is a glob.
+  local pat="$1"
+  if [[ "$pat" == */ ]]; then
+    printf '^%s.*$' "$(regex_escape "$pat")"
+    return
+  fi
+  case "$pat" in
+    *'*'*|*'?'*|*'['*) printf '^%s$' "$(glob_body_to_regex "$pat")" ;;
+    *) printf '^%s(/.*)?$' "$(regex_escape "$pat")" ;;
+  esac
+}
+
+file_is_wanted() {
+  # file_is_wanted <repo-relative path>; true when the push-paths list wants it.
+  # Patterns apply in order and the last match wins, as with push: a later
+  # '!...' excludes, and a still-later positive re-includes.
+  local f="$1" i=0 matched=0 re
+  while [[ $i -lt ${#PAT_RES[@]} ]]; do
+    re="${PAT_RES[$i]}"
+    if [[ "$f" =~ $re ]]; then
+      if [[ "${PAT_NEG[$i]}" == "1" ]]; then matched=0; else matched=1; fi
+    fi
+    i=$((i + 1))
+  done
+  [[ "$matched" == "1" ]]
+}
+
+filter_wanted() {
+  # stdin: one repo-relative path per line; stdout: the wanted ones.
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    if file_is_wanted "$f"; then printf '%s\n' "$f"; fi
+  done
+  return 0
+}
+
 if [[ "$EVENT" != "schedule" ]]; then
   log "event='${EVENT}': not the scheduled backstop, so intent is already explicit."
   for app in $APPS; do emit "$(out_key "$app")" 1; done
   emit should_ship 1
   exit 0
 fi
+
+PAT_RES=()
+PAT_NEG=()
+for ppat in "${PATH_PREFIXES[@]}"; do
+  if [[ "$ppat" == "!"* ]]; then
+    pbody="${ppat:1}"
+    [[ -n "$pbody" ]] || die "empty '!' exclusion in --path-prefix"
+    PAT_NEG+=(1)
+    PAT_RES+=("$(pattern_to_regex "$pbody")")
+  else
+    PAT_NEG+=(0)
+    PAT_RES+=("$(pattern_to_regex "$ppat")")
+  fi
+done
+log "schedule backstop; watching ${#PATH_PREFIXES[@]} push path(s): ${PATH_PREFIXES[*]}"
 
 HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
 if [[ -z "$HEAD_SHA" ]]; then
@@ -147,9 +270,13 @@ for app in $APPS; do
         log "[${app}] last shipped sha ${last_sha} is unreachable from HEAD (shipped from another worktree/branch, or history was rewritten)."
         last_ts="$(awk 'NR==1{print $1}' "$state" 2>/dev/null || true)"
         if [[ "${last_ts:-}" =~ ^[0-9]+$ ]]; then
-          since_changed="$(git -C "$REPO_ROOT" log --since="@${last_ts}" --format= --name-only -- "$PATH_PREFIX" 2>/dev/null | sed '/^$/d' | sort -u | head -20)"
+          all_since="$(git -C "$REPO_ROOT" log --since="@${last_ts}" --format= --name-only 2>/dev/null | sed '/^$/d' | sort -u || true)"
+          since_changed=""
+          if [[ -n "$all_since" ]]; then
+            since_changed="$(printf '%s\n' "$all_since" | filter_wanted | head -20)"
+          fi
           if [[ -n "$since_changed" ]]; then
-            log "[${app}] falling back to time: ${PATH_PREFIX} changed after the last ship:"
+            log "[${app}] falling back to time: ship paths changed after the last ship:"
             # Line-by-line, NOT `printf ... $var`: Socratic-Trade's iOS path is
             # "ios/Socratic Trade.xcodeproj/...", and unquoted word-splitting
             # printed that one file as two bogus lines. Decision logic is
@@ -157,7 +284,7 @@ for app in $APPS; do
             printf '%s\n' "$since_changed" | while IFS= read -r f; do echo "  $f"; done
             decision=1
           else
-            log "[${app}] falling back to time: no ${PATH_PREFIX} commits since the last ship; skip."
+            log "[${app}] falling back to time: no ship-path commits since the last ship; skip."
           fi
         else
           log "[${app}] state has no usable timestamp either; letting ship-testflight.sh decide."
@@ -170,16 +297,22 @@ for app in $APPS; do
 
     if [[ "$decision" -eq -1 ]]; then
       # Reachable range: the only case where a real diff is meaningful.
-      # Captured into a variable, not piped into `grep -q`: under pipefail an
-      # early-exiting grep SIGPIPEs git and the pipeline reports failure even
-      # though it matched.
-      changed="$(git -C "$REPO_ROOT" diff --name-only "$last_sha" HEAD -- "$PATH_PREFIX" 2>/dev/null | head -20)"
+      # The full name list is filtered in bash against every push path
+      # (globs and '!' exclusions included), because one git pathspec cannot
+      # express the workflow's whole paths list.  Captured into variables,
+      # not piped into `grep -q`: under pipefail an early-exiting grep
+      # SIGPIPEs git and the pipeline reports failure even though it matched.
+      all_changed="$(git -C "$REPO_ROOT" diff --name-only "$last_sha" HEAD 2>/dev/null || true)"
+      changed=""
+      if [[ -n "$all_changed" ]]; then
+        changed="$(printf '%s\n' "$all_changed" | filter_wanted | head -20)"
+      fi
       if [[ -n "$changed" ]]; then
-        log "[${app}] ${PATH_PREFIX} changed since ${last_sha}:"
+        log "[${app}] ship paths changed since ${last_sha}:"
         printf '%s\n' "$changed" | while IFS= read -r f; do echo "  $f"; done
         decision=1
       else
-        log "[${app}] no ${PATH_PREFIX} changes since ${last_sha}; skip (TestFlight is not a commit log)."
+        log "[${app}] no ship-path changes since ${last_sha}; skip (TestFlight is not a commit log)."
         decision=0
       fi
     fi
