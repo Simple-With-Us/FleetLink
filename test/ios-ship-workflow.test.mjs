@@ -18,6 +18,29 @@ function triggerBlock() {
   return match[1];
 }
 
+// Only the on.push.paths list, never paths-ignore, branches or other lists.
+function pushPathsList() {
+  const triggers = triggerBlock();
+  const push = triggers.match(/(?:^|\n)  push:\n([\s\S]*?)(?=\n  \w|$)/);
+  assert.ok(push, "workflow has an on.push block");
+  const paths = push[1].match(/\n    paths:\n((?:\s+-\s+[^\n]*\n?)+)/);
+  assert.ok(paths, "the push trigger lists watched paths");
+  return paths[1];
+}
+
+function extractPushPaths(text) {
+  return [...text.matchAll(/^\s+-\s+['"]?([^'"\s]+)['"]?\s*$/gm)].map((m) => m[1]);
+}
+
+// Only the scheduled gate step/call block the script name was split from,
+// never an unrelated list item or another --path-prefix use.
+function extractGatePrefixes(call) {
+  const block = call.split(/\n\s+-\s+(?:name|uses):/)[0];
+  return [...block.matchAll(/--path-prefix\s+(?:'([^']+)'|"([^"]+)"|([^\s'"\\]+))/g)].map(
+    (m) => m[1] ?? m[2] ?? m[3],
+  );
+}
+
 test("only main pushes, dispatches and a gated cron can start a ship", () => {
   const triggers = triggerBlock();
   assert.doesNotMatch(triggers, /pull_request/, "a pull request must never upload to TestFlight");
@@ -30,15 +53,21 @@ test("only main pushes, dispatches and a gated cron can start a ship", () => {
 });
 
 test("the scheduled gate watches every push path, so a missed push still ships", () => {
-  const triggers = triggerBlock();
-  const pushPaths = [...triggers.matchAll(/-\s+"([^"]+)"/g)].map((m) => m[1]);
+  const pushPaths = extractPushPaths(pushPathsList());
   assert.ok(pushPaths.length > 0, "the push trigger lists watched paths");
   const gateCalls = active.split("ios-scheduled-ship-gate.sh").slice(1);
   assert.equal(gateCalls.length, 2, "plan-build and ship each run the scheduled gate");
   for (const call of gateCalls) {
-    const prefixes = [...call.slice(0, 800).matchAll(/--path-prefix '([^']+)'/g)].map((m) => m[1]);
+    const prefixes = extractGatePrefixes(call);
     assert.deepEqual([...prefixes].sort(), [...pushPaths].sort(), "the gate watches exactly the workflow's push paths");
   }
+});
+
+test("the coverage extractors accept single, double and unquoted values", () => {
+  const pushSample = `      - 'ios/**'\n      - "scripts/ios-*"\n      - scripts/ios-fleet/**\n`;
+  assert.deepEqual(extractPushPaths(pushSample), ["ios/**", "scripts/ios-*", "scripts/ios-fleet/**"]);
+  const gateSample = `run: gate.sh \\\n  --path-prefix 'ios/**' \\\n  --path-prefix "scripts/ios-*" \\\n  --path-prefix scripts/ios-fleet/** \\\n`;
+  assert.deepEqual(extractGatePrefixes(gateSample), ["ios/**", "scripts/ios-*", "scripts/ios-fleet/**"]);
 });
 
 test("plan-build is gated like ship, so idle cron ticks skip the ASC inventories", () => {
