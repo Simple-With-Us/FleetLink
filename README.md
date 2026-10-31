@@ -78,3 +78,7 @@ npm run bundle     # dist/fleetlink-api.mjs, the module the deploy uploads
 - User files carry `Content-Security-Policy: sandbox` (PDF excepted) and `nosniff`.  Rendered Markdown runs only nonce'd scripts and sanitizes the HTML it produces.
 - Cookie-authenticated writes need a same-origin `Origin`.  Sessions, tokens, and invite codes are stored as peppered hashes.
 - workers.dev and preview URLs are off.  Workers Logs observability is off, because share passwords can appear in URLs.
+
+### Request hardening
+
+`/health` keeps its deep R2/schema check. `GET /health?check=live` is the explicit storage-free liveness check. Warm isolates use fresh cached settings to apply existing per-IP limits and reject invalid API routes before schema/usage/settings SQL. Cold or expired settings still load normally; no new rates or valve thresholds are introduced.

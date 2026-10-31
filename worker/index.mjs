@@ -22,7 +22,7 @@ import { handleUnlock, notFoundPage, serveShare } from "./lib/serve.mjs";
 import {
   beginWorkerTrace, captureWorkerException, finishWorkerTrace, recordWorkerSpan, workerRelease
 } from "./lib/sentry-scrub.mjs";
-import { loadSettings } from "./lib/settings.mjs";
+import { cachedSettings, loadSettings } from "./lib/settings.mjs";
 import { shortcutResponse } from "./lib/shortcut.mjs";
 import { getObject } from "./lib/storage.mjs";
 import { sweep } from "./lib/sweep.mjs";
@@ -166,7 +166,11 @@ function floodCheck(request, path, subdomain, settings) {
 export async function handleRequest(request, env, exec, deps = {}) {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (path === "/health" || path === "/health/") return health(env);
+  if (path === "/health" || path === "/health/") {
+    // Explicit opt-in leaves existing deep storage/schema probes unchanged.
+    if (url.searchParams.get("check") === "live") return json({ ok: true });
+    return health(env);
+  }
   if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/") return handleOAuthProtectedResource(request);
   if (path === "/.well-known/apple-app-site-association" || path === "/apple-app-site-association") return aasaResponse(env);
   if (path.startsWith("/assets/media/")) return (await siteMedia(request, env, path.slice("/assets/media/".length))) || text("Not found.\n", 404);
@@ -178,6 +182,28 @@ export async function handleRequest(request, env, exec, deps = {}) {
     return json({ error: "The X-Fleet-Auth header is retired.  Send an API token as Authorization: Bearer fla_…." }, 401);
   }
 
+  // No router or share handler accepts these methods.
+  if (!["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"].includes(request.method))
+    return json({ error: "Method not allowed." }, 405);
+  const cached = cachedSettings(env);
+  let rateChecked = false;
+  if (cached) {
+    const { subdomain } = shareHostMatch(url.hostname, cached.share_hosts);
+    if (!subdomain && path.startsWith("/api/")) {
+      const match = router.match(request.method, path);
+      if (!match) return json({ error: "Not found." }, 404);
+      if (match.methodNotAllowed) return json({ error: "Method not allowed." }, 405);
+    }
+    const mcp = path === "/mcp" || path === "/mcp/";
+    if (mcp) {
+      const wait = rateLimit(request, "mcp", cached.rate_mcp_per_ip_minute);
+      if (wait) return json({ error: "Too many requests.  Slow down and try again shortly.", retry_after_seconds: wait }, 429, { "Retry-After": String(wait) });
+    } else {
+      const limited = floodCheck(request, path, subdomain, cached);
+      if (limited) return limited;
+    }
+    rateChecked = true;
+  }
   await ensureSchema(env.DB);
   recordUsage(env, exec, { requests: 1 });
   const settings = await loadSettings(env);
@@ -186,13 +212,13 @@ export async function handleRequest(request, env, exec, deps = {}) {
 
   if (path === "/mcp" || path === "/mcp/") {
     recordWorkerSpan(request, "mcp", path);
-    const wait = rateLimit(request, "mcp", settings.rate_mcp_per_ip_minute);
+    const wait = rateChecked ? 0 : rateLimit(request, "mcp", settings.rate_mcp_per_ip_minute);
     if (wait) return json({ error: "Too many requests.  Slow down and try again shortly.", retry_after_seconds: wait }, 429, { "Retry-After": String(wait) });
     return handleMcp(request, env, shareOrigin, exec);
   }
 
   const ctx = requestContext(request, env, exec, deps);
-  const limited = floodCheck(request, path, subdomain, settings);
+  const limited = rateChecked ? null : floodCheck(request, path, subdomain, settings);
   if (limited) return limited;
   if (!subdomain) {
     const match = router.match(request.method, path);
