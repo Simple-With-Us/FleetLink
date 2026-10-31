@@ -259,6 +259,12 @@ export function resolve(env, stored) {
   return { values, sources };
 }
 
+// Only fresh, already-resolved settings may steer a storage-free early gate.
+export function cachedSettings(env) {
+  const hit = env?.DB && cache.get(env.DB);
+  return hit && Date.now() - hit.at < CACHE_MS ? hit.values : null;
+}
+
 export async function loadSettings(env) {
   const hit = env?.DB && cache.get(env.DB);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.values;
