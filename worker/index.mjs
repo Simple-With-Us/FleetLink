@@ -182,6 +182,9 @@ export async function handleRequest(request, env, exec, deps = {}) {
     return json({ error: "The X-Fleet-Auth header is retired.  Send an API token as Authorization: Bearer fla_…." }, 401);
   }
 
+  // No router or share handler accepts these methods.
+  if (!["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"].includes(request.method))
+    return json({ error: "Method not allowed." }, 405);
   const cached = cachedSettings(env);
   let rateChecked = false;
   if (cached) {
@@ -201,9 +204,6 @@ export async function handleRequest(request, env, exec, deps = {}) {
     }
     rateChecked = true;
   }
-  // No router or share handler accepts these methods.
-  if (!["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"].includes(request.method))
-    return json({ error: "Method not allowed." }, 405);
   await ensureSchema(env.DB);
   recordUsage(env, exec, { requests: 1 });
   const settings = await loadSettings(env);
