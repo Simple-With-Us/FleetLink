@@ -38,7 +38,7 @@ test("warm per-IP gate rejects floods before schema, counters or settings SQL",a
 
 test("invalid methods never consume a warm MCP rate budget",async()=>{
   const {resetRateLimits,rateLimit}=await import("../worker/lib/valve.mjs");resetRateLimits();
-  const env={RATE_MCP_PER_IP_MINUTE:"1",DB:{prepare(){return {async all(){return {results:[]};}};}}};
+  const env={RATE_MCP_PER_IP_MINUTE:"1",DB:{prepare(){return {bind(){return this;},async all(){return {results:[]};}};}}};
   await loadSettings(env);
   const headers={"cf-connecting-ip":"198.51.100.88"};
   assert.equal((await handleRequest(new Request("https://fleetlink.online/mcp",{method:"PROPFIND",headers}),env,{})).status,405);
