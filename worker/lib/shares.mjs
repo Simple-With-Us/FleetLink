@@ -538,8 +538,10 @@ export async function updateShare(env, principal, slug, body) {
     sets.push("password_hash = ?");
     args.push(pw ? await hashSharePassword(pw) : null);
   }
+  let effectiveTeamId = share.team_id ?? null;
   if (input.team_id !== undefined) {
     const teamId = input.team_id ? await resolveTeam(env, principal, input.team_id) : null;
+    effectiveTeamId = teamId;
     if (teamId !== (share.team_id ?? null)) {
       need("owner");
       const movePolicy = await botTeamPolicy(env, principal);
@@ -562,7 +564,7 @@ export async function updateShare(env, principal, slug, body) {
     need("edit");
     if (share.kind !== "link") throw badRequest("Only short links have a destination.");
     requireLinksAllowed(principal);
-    await requireTeamVisibleForBotWrite(env, principal, share);
+    await requireTeamVisibleForBotWrite(env, principal, { ...share, team_id: effectiveTeamId });
     sets.push("target_url = ?");
     args.push(normalizeTargetUrl(input.url ?? input.target_url));
   }

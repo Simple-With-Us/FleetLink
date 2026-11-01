@@ -112,7 +112,7 @@ test("team-only bot sharing: the fleet owner and new accounts default on, bots c
   const { env, jay } = await fleet();
   const me = await callJson(env, "GET", "/api/me", { auth: jay });
   assert.equal(me.data.bot_defaults.team_only, true);
-  // The operator owns the Fleet team until the owner claims it, so the backfill keeps it team-only too.
+  // The operator owns the Fleet team until the owner claims it, and the default turns the policy on for it too.
   const op = await env.DB.prepare("SELECT bot_team_only FROM users WHERE id = ?").bind(OPERATOR_USER_ID).first();
   assert.equal(op.bot_team_only, 1);
   // An account created after the migration gets the new default.
@@ -172,6 +172,13 @@ test("team-only bots cannot write files or links into personal shares until the 
   await env.DB.prepare("UPDATE users SET manager_id = NULL WHERE id = ?").bind(patBot.id).run();
   assert.match((await rpcTool(env, as, "fleetlink_update_share", { slug: "pat-link", url: "https://b.example" })).error, /no active main account/);
   assert.equal((await rpcTool(env, as, "fleetlink_add_file", { slug: "pat-files", path: "c.md", markdown: "c" })).error, null);
+  // Manager back:  an atomic move-to-team plus link edit in one update succeeds - the guard sees the post-move team.
+  await env.DB.prepare("UPDATE users SET manager_id = ? WHERE id = ?").bind(pat.user.id, patBot.id).run();
+  await env.DB.prepare("INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, 'member', 0)").bind(team.id, patBot.id).run();
+  const atomic = await callJson(env, "PATCH", "/api/shares/pat-link", { auth: as.auth, json: { team_id: team.id, url: "https://b.example" } });
+  assert.equal(atomic.status, 200);
+  assert.equal(atomic.data.share.target_url, "https://b.example/");
+  assert.equal(atomic.data.share.team.id, team.id);
 });
 
 test("team-only enforcement fails closed when the manager is missing or disabled, and an opted-out manager is respected", async () => {
