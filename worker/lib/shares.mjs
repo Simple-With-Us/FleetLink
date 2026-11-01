@@ -229,6 +229,22 @@ function noActiveManager() {
   return forbidden("This bot has no active main account, so its sharing policy cannot be checked.  Share writes are refused until one owns it again.");
 }
 
+/**
+ * A bot whose creator requires team sharing cannot write files or a link
+ * destination into a share the team cannot see:  the main account must
+ * move the share into a team first (or opt the bot out).  An unknown
+ * policy fails closed the same way.  Team-visible shares are writable
+ * under every policy, and people are unaffected.
+ */
+async function requireTeamVisibleForBotWrite(env, principal, share) {
+  if (share.team_id) return;
+  const policy = await botTeamPolicy(env, principal);
+  if (policy.state === "unknown") throw noActiveManager();
+  if (policy.state === "enforced") {
+    throw forbidden("Your account requires its bots to keep their shares in a team.  This share is personal, so the main account must move it to a team before the bot can change its files or link.");
+  }
+}
+
 export const CreateShareBody = z.object({
   kind: z.enum(["files", "link"]).optional(),
   slug: z.string().max(80).nullable().optional(),
@@ -420,6 +436,7 @@ export async function assertCanStore(env, principal, share, { path, size, settin
 /** Write one file into a share and record it.  The caller has checked access. */
 export async function putShareFile(env, principal, share, { path, body, size, contentType, settings }) {
   const clean = cleanPath(path);
+  await requireTeamVisibleForBotWrite(env, principal, share);
   await assertValveOpen(env, "upload", settings);
   await assertCanStore(env, principal, share, { path: clean, size, settings });
   const key = objectKey(share.id, clean);
@@ -545,6 +562,7 @@ export async function updateShare(env, principal, slug, body) {
     need("edit");
     if (share.kind !== "link") throw badRequest("Only short links have a destination.");
     requireLinksAllowed(principal);
+    await requireTeamVisibleForBotWrite(env, principal, share);
     sets.push("target_url = ?");
     args.push(normalizeTargetUrl(input.url ?? input.target_url));
   }
