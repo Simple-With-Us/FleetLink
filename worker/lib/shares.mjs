@@ -210,15 +210,23 @@ async function resolveTeam(env, principal, requested) {
 }
 
 /**
- * True when the principal is a bot whose manager requires team sharing:
- * the bot's new files and links always land in a team and the bot cannot
- * take a share personal.  A missing or inactive manager cannot enforce the
- * policy, so the bot keeps the ordinary default.
+ * The creator's sharing policy for a bot, resolved live from its manager:
+ * "enforced" when the manager requires team sharing, "relaxed" when the
+ * manager opted out, "unknown" when the bot has no active manager, and
+ * "person" for everyone else.  An unknown policy fails closed:  the bot's
+ * share writes are refused until a person owns it again - never relaxed
+ * to personal, never pushed wider into a team.
  */
-async function botTeamOnly(env, principal) {
-  if (principal.user?.kind !== "agent" || !principal.user.manager_id) return false;
+async function botTeamPolicy(env, principal) {
+  if (principal.user?.kind !== "agent") return { state: "person" };
+  if (!principal.user.manager_id) return { state: "unknown" };
   const manager = await first(env.DB, "SELECT bot_team_only FROM users WHERE id = ? AND status = 'active'", principal.user.manager_id);
-  return manager?.bot_team_only === 1;
+  if (!manager) return { state: "unknown" };
+  return { state: manager.bot_team_only === 1 ? "enforced" : "relaxed" };
+}
+
+function noActiveManager() {
+  return forbidden("This bot has no active main account, so its sharing policy cannot be checked.  Share writes are refused until one owns it again.");
 }
 
 export const CreateShareBody = z.object({
@@ -245,7 +253,9 @@ export const CreateShareBody = z.object({
  * the share always lands in a team.
  */
 async function defaultTeam(env, principal, input) {
-  if (await botTeamOnly(env, principal)) {
+  const teamPolicy = await botTeamPolicy(env, principal);
+  if (teamPolicy.state === "unknown") throw noActiveManager();
+  if (teamPolicy.state === "enforced") {
     if ([true, "true", "1"].includes(input.personal) || input.team_id === "" || input.team_id === null) {
       throw badRequest("Your account requires its bots to share new posts with a team, so a personal share is not allowed.  The main account can change this in its bot settings.");
     }
@@ -513,11 +523,13 @@ export async function updateShare(env, principal, slug, body) {
   }
   if (input.team_id !== undefined) {
     const teamId = input.team_id ? await resolveTeam(env, principal, input.team_id) : null;
-    if (teamId === null && (await botTeamOnly(env, principal))) {
-      throw forbidden("Your account requires its bots to keep their shares in a team.  The main account can change this in its bot settings.");
-    }
     if (teamId !== (share.team_id ?? null)) {
       need("owner");
+      const movePolicy = await botTeamPolicy(env, principal);
+      if (movePolicy.state === "unknown") throw noActiveManager();
+      if (teamId === null && movePolicy.state === "enforced") {
+        throw forbidden("Your account requires its bots to keep their shares in a team.  The main account can change this in its bot settings.");
+      }
       sets.push("team_id = ?");
       args.push(teamId);
       changes.team_id = teamId;

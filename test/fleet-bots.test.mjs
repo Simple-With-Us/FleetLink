@@ -138,6 +138,44 @@ test("team-only bot sharing: the fleet owner and new accounts default on, bots c
   assert.equal(free.data.share.visibility, "personal");
 });
 
+test("team-only enforcement fails closed when the manager is missing or disabled, and an opted-out manager is respected", async () => {
+  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const pat = await signUp(env, "Pat", { email: "pat-orphan@example.com" });
+  const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-orph" } })).data.bot;
+  const tok = (await callJson(env, "POST", `/api/bots/${patBot.id}/tokens`, { auth: pat, json: { name: "t" } })).data.token;
+  const as = { auth: { token: tok } };
+  // Active manager with the default-on policy:  the personal ask is refused.
+  const refused = await rpcTool(env, as, "fleetlink_create_share", { text: "x", slug: "orph-1", personal: true });
+  assert.match(refused.error, /requires its bots to share new posts with a team/);
+  // Disabled manager:  the policy cannot be checked, so the write is refused and nothing is created.
+  await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(pat.user.id).run();
+  const closed = await rpcTool(env, as, "fleetlink_create_share", { text: "x", slug: "orph-2" });
+  assert.match(closed.error, /no active main account/);
+  assert.equal((await callJson(env, "GET", "/api/shares/orph-2", { auth: { operator: true } })).status, 404);
+  // Missing manager:  same, for a personal ask and an ordinary post alike.
+  await env.DB.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(pat.user.id).run();
+  await env.DB.prepare("UPDATE users SET manager_id = NULL WHERE id = ?").bind(patBot.id).run();
+  const closed2 = await rpcTool(env, as, "fleetlink_create_share", { text: "x", slug: "orph-3", personal: true });
+  assert.match(closed2.error, /no active main account/);
+  assert.equal((await callJson(env, "GET", "/api/shares/orph-3", { auth: { operator: true } })).status, 404);
+
+  // A valid manager who opted out keeps personal posting...
+  const eve = await signUp(env, "Eve", { email: "eve-optout@example.com" });
+  await callJson(env, "PATCH", "/api/me", { auth: eve, json: { bot_team_only: false } });
+  const eveBot = (await callJson(env, "POST", "/api/bots", { auth: eve, json: { seat: "eve-bot" } })).data.bot;
+  const eveTok = (await callJson(env, "POST", `/api/bots/${eveBot.id}/tokens`, { auth: eve, json: { name: "t" } })).data.token;
+  const asEve = { auth: { token: eveTok } };
+  const free = await rpcTool(env, asEve, "fleetlink_create_share", { text: "x", slug: "eve-pers", personal: true });
+  assert.equal(free.error, null);
+  assert.equal(free.data.share.visibility, "personal");
+  // ...and losing that manager closes team moves too, without touching the share.
+  await env.DB.prepare("INSERT INTO team_members (team_id, user_id, role, created_at) VALUES ('team_fleet', ?, 'member', 0)").bind(eveBot.id).run();
+  await env.DB.prepare("UPDATE users SET manager_id = NULL WHERE id = ?").bind(eveBot.id).run();
+  const move = await rpcTool(env, asEve, "fleetlink_share_to_team", { slug: "eve-pers", team_id: "team_fleet" });
+  assert.match(move.error, /no active main account/);
+  assert.equal((await callJson(env, "GET", "/api/shares/eve-pers", { auth: { operator: true } })).data.share.visibility, "personal");
+});
+
 test("bots work with the widest limits:  admin file sizes, any lifetime, no storage quota", async () => {
   const { env } = await fleet();
   const who = await rpcTool(env, bot("MA"), "fleetlink_whoami");
