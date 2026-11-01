@@ -176,6 +176,11 @@ test("agent seats act through the Agent-Sync server credential with their own ac
   assert.equal((await callJson(env, "POST", "/api/tokens", { headers: agent("JET"), json: { name: "x" } })).status, 403);
   assert.equal((await callJson(env, "POST", "/api/teams", { headers: agent("JET"), json: { name: "x" } })).status, 403);
 
+  // Bots post only under an active main account:  give JET one, opted out of team-only sharing.
+  const boss = await signUp(env, "Boss", { email: "boss@example.com" });
+  await callJson(env, "PATCH", "/api/me", { auth: boss, json: { bot_team_only: false } });
+  await env.DB.prepare("UPDATE users SET manager_id = ? WHERE id = 'usr_agent_jet'").bind(boss.user.id).run();
+
   // Asked for personal: GROK-WEB cannot see JET's share until JET shares it to the team.
   const made = await tool(env, { headers: agent("JET") }, "fleetlink_create_share", { markdown: "# Findings", slug: "jet-findings", personal: true });
   assert.equal(made.data.share.visibility, "personal");
@@ -224,6 +229,10 @@ test("agent seats act through the Agent-Sync server credential with their own ac
 
 test("MCP upload_url creates a share when needed and a curl PUT lands the file", async () => {
   const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  // Bots post only under an active main account:  give JET one, opted out of team-only sharing.
+  const boss = await signUp(env, "Boss", { email: "boss@example.com" });
+  await callJson(env, "PATCH", "/api/me", { auth: boss, json: { bot_team_only: false } });
+  await env.DB.prepare("UPDATE users SET manager_id = ? WHERE id = 'usr_agent_jet'").bind(boss.user.id).run();
   const jet = { headers: agent("JET") };
   const fresh = await tool(env, jet, "fleetlink_upload_url", { path: "dist/build.tar.gz", title: "Nightly build", team_id: "team_fleet", team_access: "view" });
   assert.equal(fresh.error, null);

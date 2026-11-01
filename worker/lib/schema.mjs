@@ -315,6 +315,15 @@ DELETE FROM api_tokens WHERE user_id IN (SELECT id FROM users WHERE kind = 'agen
 DELETE FROM passkeys WHERE user_id IN (SELECT id FROM users WHERE kind = 'agent' AND agent_seat = 'BF-BUILDER');
 DELETE FROM team_members WHERE user_id IN (SELECT id FROM users WHERE kind = 'agent' AND agent_seat = 'BF-BUILDER');
 UPDATE users SET status = 'deleted', role = 'user', email = NULL, display_name = 'Deleted account' WHERE kind = 'agent' AND agent_seat = 'BF-BUILDER';
+` },
+  // A creator's sharing policy for their bots:  when on, a bot's new files
+  // and links always land in a team and the bot cannot take a share
+  // personal.  The column default turns it on for every account, existing
+  // and new;  each main account can turn it off in its bot settings, and
+  // existing shares keep their current visibility until the owner moves
+  // them (no retroactive resharing).
+  { version: 11, name: "bot_team_only", sql: `
+ALTER TABLE users ADD COLUMN bot_team_only INTEGER NOT NULL DEFAULT 1 CHECK (bot_team_only IN (0, 1));
 ` }
 ];
 

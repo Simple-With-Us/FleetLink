@@ -20,7 +20,8 @@ const UpdateMeBody = z.object({
   email: z.string().max(254).nullable().optional(),
   default_team_id: z.string().max(64).nullable().optional(),
   bot_default_mode: z.enum(["legacy", "account", "manual"]).optional(),
-  bot_default_limits: BotLimitsBody.nullable().optional()
+  bot_default_limits: BotLimitsBody.nullable().optional(),
+  bot_team_only: z.boolean().optional()
 }).strict();
 
 const DeleteMeBody = z.object({ confirm: z.literal("delete my account") }).strict();
@@ -32,7 +33,7 @@ async function principalSummary(ctx, principal) {
     const bots = await first(ctx.env.DB, "SELECT COUNT(*) AS n FROM users WHERE kind = 'agent' AND manager_id = ? AND status != 'deleted'", principal.user.id);
     summary.bots = { count: Number(bots?.n ?? 0), fleet_owner: ownerId === principal.user.id };
     const mode = ["account", "manual"].includes(principal.user.bot_default_mode) ? principal.user.bot_default_mode : "legacy";
-    summary.bot_defaults = { mode, limits: mode === "manual" ? parseAgentLimits(principal.user.bot_default_limits) : null };
+    summary.bot_defaults = { mode, limits: mode === "manual" ? parseAgentLimits(principal.user.bot_default_limits) : null, team_only: principal.user.bot_team_only === 1 };
   }
   summary.auth = { kind: principal.kind };
   // A token that follows its manager reports the manager's current quotas.
@@ -113,6 +114,10 @@ export function accountRoutes(router) {
         sets.push("bot_default_limits = ?");
         args.push(null);
       }
+    }
+    if (input.bot_team_only !== undefined) {
+      sets.push("bot_team_only = ?");
+      args.push(input.bot_team_only ? 1 : 0);
     }
     if (sets.length) {
       try {

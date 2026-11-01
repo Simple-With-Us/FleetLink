@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { FLEET_BOTS } from "../worker/lib/fleet-roster.mjs";
+import { OPERATOR_USER_ID } from "../worker/lib/schema.mjs";
 import { call, callJson, makeAdmin, makeEnv, signUp } from "./helpers/harness.mjs";
 
 const AGENT_SECRET = `fls_${"cd".repeat(32)}`;
@@ -80,8 +81,9 @@ test("bots and the owner edit and overwrite each other's team work;  the owner m
   assert.equal(jayPriv.error, null);
   assert.equal(jayPriv.data.share.can_edit, true);
   assert.equal(jayPriv.data.share.can_manage, false);
-  assert.equal((await rpcTool(env, bot("CODEX"), "fleetlink_add_file", { slug: "jay-private", path: "agent.md", markdown: "from bot" })).error, null);
-  assert.equal(await (await call(env, "GET", "/jay-private/agent.md?raw=1")).text(), "from bot");
+  // Team-only is on for the fleet owner, so the bot can read but not write into the personal share.
+  assert.match((await rpcTool(env, bot("CODEX"), "fleetlink_add_file", { slug: "jay-private", path: "agent.md", markdown: "from bot" })).error, /move it to a team/);
+  assert.equal((await callJson(env, "GET", "/api/shares/jay-private", { auth: jay })).data.share.file_count, 0);
   const eve = await signUp(env, "Eve Out", { email: "eveout@example.com" });
   assert.equal((await callJson(env, "GET", "/api/shares/jay-private", { auth: eve })).status, 404);
   assert.equal((await callJson(env, "GET", "/api/shares?scope=manager", { auth: eve })).status, 403);
@@ -89,7 +91,11 @@ test("bots and the owner edit and overwrite each other's team work;  the owner m
   assert.equal(mgrList.status, 200);
   assert.ok(mgrList.data.shares.some((s) => s.slug === "jay-private"));
 
-  // A bot's personal share is hidden from the other bots, but its manager sees and manages it.
+  // The fleet owner requires team sharing, so a bot's personal ask is refused.
+  const refused = await rpcTool(env, bot("AG"), "fleetlink_create_share", { text: "draft", slug: "ag-draft", personal: true });
+  assert.match(refused.error, /requires its bots to share new posts with a team/);
+  // With the policy off, a bot's personal share is hidden from the other bots, but its manager sees and manages it.
+  assert.equal((await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_team_only: false } })).data.bot_defaults.team_only, false);
   const secret = await rpcTool(env, bot("AG"), "fleetlink_create_share", { text: "draft", slug: "ag-draft", personal: true });
   assert.equal(secret.data.share.visibility, "personal");
   assert.equal((await rpcTool(env, bot("CODEX"), "fleetlink_get_share", { slug: "ag-draft" })).error, "Share not found.");
@@ -97,6 +103,120 @@ test("bots and the owner edit and overwrite each other's team work;  the owner m
   assert.deepEqual(mine.data.shares.map((s) => [s.slug, s.owner.is_bot, s.can_manage]).sort(), [["ag-draft", true, true], ["codex-plan", true, true]]);
   assert.equal((await callJson(env, "PATCH", "/api/shares/ag-draft", { auth: jay, json: { team_id: "team_fleet" } })).status, 200);
   assert.equal((await callJson(env, "DELETE", "/api/shares/ag-draft", { auth: jay })).status, 200);
+  // With the policy off the bot writes into Jay's personal share again.
+  assert.equal((await rpcTool(env, bot("CODEX"), "fleetlink_add_file", { slug: "jay-private", path: "agent.md", markdown: "from bot" })).error, null);
+  assert.equal(await (await call(env, "GET", "/jay-private/agent.md?raw=1")).text(), "from bot");
+});
+
+test("team-only bot sharing: the fleet owner and new accounts default on, bots cannot post or make personal", async () => {
+  const { env, jay } = await fleet();
+  const me = await callJson(env, "GET", "/api/me", { auth: jay });
+  assert.equal(me.data.bot_defaults.team_only, true);
+  // The operator owns the Fleet team until the owner claims it, and the default turns the policy on for it too.
+  const op = await env.DB.prepare("SELECT bot_team_only FROM users WHERE id = ?").bind(OPERATOR_USER_ID).first();
+  assert.equal(op.bot_team_only, 1);
+  // An account created after the migration gets the new default.
+  const eve = await signUp(env, "Eve", { email: "eve-teamonly@example.com" });
+  assert.equal((await callJson(env, "GET", "/api/me", { auth: eve })).data.bot_defaults.team_only, true);
+
+  // An ordinary bot post lands in the Fleet team as before; an explicit personal ask is refused and creates nothing.
+  const made = await rpcTool(env, bot("CODEX"), "fleetlink_create_share", { markdown: "v1", slug: "teamonly-plan" });
+  assert.equal(made.error, null);
+  assert.deepEqual(made.data.share.team, { id: "team_fleet", name: "Fleet", access: "edit" });
+  const refused = await rpcTool(env, bot("CODEX"), "fleetlink_create_share", { text: "mine", slug: "teamonly-secret", personal: true });
+  assert.match(refused.error, /requires its bots to share new posts with a team/);
+  assert.equal((await rpcTool(env, bot("CODEX"), "fleetlink_get_share", { slug: "teamonly-secret" })).error, "Share not found.");
+  const raw = await call(env, "PUT", "/teamonly-raw/note.md", { ...bot("CLAUDE"), body: "v1", headers: { ...bot("CLAUDE").headers, "x-fleet-personal": "1", accept: "application/json" } });
+  assert.equal(raw.status, 400);
+  assert.equal((await callJson(env, "GET", "/api/shares/teamonly-raw", { auth: jay })).status, 404);
+
+  // A bot cannot take its own share out of the team; the manager still can.
+  assert.match((await rpcTool(env, bot("CODEX"), "fleetlink_make_personal", { slug: "teamonly-plan" })).error, /requires its bots to keep their shares in a team/);
+  const personal = await callJson(env, "PATCH", "/api/shares/teamonly-plan", { auth: jay, json: { team_id: null } });
+  assert.equal(personal.data.share.visibility, "personal");
+
+  // The manager turns the policy off and the bot posts personal again.
+  assert.equal((await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_team_only: false } })).data.bot_defaults.team_only, false);
+  const free = await rpcTool(env, bot("CODEX"), "fleetlink_create_share", { text: "mine", slug: "teamonly-secret", personal: true });
+  assert.equal(free.error, null);
+  assert.equal(free.data.share.visibility, "personal");
+});
+
+test("team-only bots cannot write files or links into personal shares until the main account moves them to a team", async () => {
+  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const pat = await signUp(env, "Pat", { email: "pat-writes@example.com" });
+  const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-w" } })).data.bot;
+  const tok = (await callJson(env, "POST", `/api/bots/${patBot.id}/tokens`, { auth: pat, json: { name: "t" } })).data.token;
+  const as = { auth: { token: tok } };
+  // Policy off:  the bot builds a personal file share and a personal link.
+  await callJson(env, "PATCH", "/api/me", { auth: pat, json: { bot_team_only: false } });
+  await rpcTool(env, as, "fleetlink_create_share", { text: "x", slug: "pat-files", personal: true });
+  await rpcTool(env, as, "fleetlink_create_link", { url: "https://a.example", slug: "pat-link", personal: true });
+  assert.equal((await rpcTool(env, as, "fleetlink_add_file", { slug: "pat-files", path: "a.md", markdown: "a" })).error, null);
+  // Policy on:  bot writes into a team-less share are refused and nothing changes...
+  await callJson(env, "PATCH", "/api/me", { auth: pat, json: { bot_team_only: true } });
+  assert.match((await rpcTool(env, as, "fleetlink_add_file", { slug: "pat-files", path: "b.md", markdown: "b" })).error, /move it to a team/);
+  assert.match((await rpcTool(env, as, "fleetlink_update_share", { slug: "pat-link", url: "https://b.example" })).error, /move it to a team/);
+  const grant = await rpcTool(env, as, "fleetlink_upload_url", { slug: "pat-files", path: "c.md" });
+  assert.equal((await call(env, "PUT", grant.data.upload.upload_url, { body: "c", headers: { "content-type": "text/markdown" } })).status, 403);
+  assert.equal((await callJson(env, "GET", "/api/shares/pat-files", { auth: pat })).data.share.file_count, 2);
+  assert.equal((await callJson(env, "GET", "/api/shares/pat-link", { auth: pat })).data.share.target_url, "https://a.example/");
+  // ...while reads stay open to the manager's bot.
+  assert.equal((await rpcTool(env, as, "fleetlink_get_share", { slug: "pat-files" })).error, null);
+  // The main account moves the share into its own team:  writes open up.
+  const team = (await callJson(env, "POST", "/api/teams", { auth: pat, json: { name: "Pat Team" } })).data.team;
+  const moved = await callJson(env, "PATCH", "/api/shares/pat-files", { auth: pat, json: { team_id: team.id } });
+  assert.equal(moved.data.share.team.id, team.id);
+  assert.equal((await rpcTool(env, as, "fleetlink_add_file", { slug: "pat-files", path: "b.md", markdown: "b" })).error, null);
+  // A missing manager closes writes into the personal link, but team-visible writes still work.
+  await env.DB.prepare("UPDATE users SET manager_id = NULL WHERE id = ?").bind(patBot.id).run();
+  assert.match((await rpcTool(env, as, "fleetlink_update_share", { slug: "pat-link", url: "https://b.example" })).error, /no active main account/);
+  assert.equal((await rpcTool(env, as, "fleetlink_add_file", { slug: "pat-files", path: "c.md", markdown: "c" })).error, null);
+  // Manager back:  an atomic move-to-team plus link edit in one update succeeds - the guard sees the post-move team.
+  await env.DB.prepare("UPDATE users SET manager_id = ? WHERE id = ?").bind(pat.user.id, patBot.id).run();
+  await env.DB.prepare("INSERT INTO team_members (team_id, user_id, role, created_at) VALUES (?, ?, 'member', 0)").bind(team.id, patBot.id).run();
+  const atomic = await callJson(env, "PATCH", "/api/shares/pat-link", { auth: as.auth, json: { team_id: team.id, url: "https://b.example" } });
+  assert.equal(atomic.status, 200);
+  assert.equal(atomic.data.share.target_url, "https://b.example/");
+  assert.equal(atomic.data.share.team.id, team.id);
+});
+
+test("team-only enforcement fails closed when the manager is missing or disabled, and an opted-out manager is respected", async () => {
+  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const pat = await signUp(env, "Pat", { email: "pat-orphan@example.com" });
+  const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-orph" } })).data.bot;
+  const tok = (await callJson(env, "POST", `/api/bots/${patBot.id}/tokens`, { auth: pat, json: { name: "t" } })).data.token;
+  const as = { auth: { token: tok } };
+  // Active manager with the default-on policy:  the personal ask is refused.
+  const refused = await rpcTool(env, as, "fleetlink_create_share", { text: "x", slug: "orph-1", personal: true });
+  assert.match(refused.error, /requires its bots to share new posts with a team/);
+  // Disabled manager:  the policy cannot be checked, so the write is refused and nothing is created.
+  await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(pat.user.id).run();
+  const closed = await rpcTool(env, as, "fleetlink_create_share", { text: "x", slug: "orph-2" });
+  assert.match(closed.error, /no active main account/);
+  assert.equal((await callJson(env, "GET", "/api/shares/orph-2", { auth: { operator: true } })).status, 404);
+  // Missing manager:  same, for a personal ask and an ordinary post alike.
+  await env.DB.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(pat.user.id).run();
+  await env.DB.prepare("UPDATE users SET manager_id = NULL WHERE id = ?").bind(patBot.id).run();
+  const closed2 = await rpcTool(env, as, "fleetlink_create_share", { text: "x", slug: "orph-3", personal: true });
+  assert.match(closed2.error, /no active main account/);
+  assert.equal((await callJson(env, "GET", "/api/shares/orph-3", { auth: { operator: true } })).status, 404);
+
+  // A valid manager who opted out keeps personal posting...
+  const eve = await signUp(env, "Eve", { email: "eve-optout@example.com" });
+  await callJson(env, "PATCH", "/api/me", { auth: eve, json: { bot_team_only: false } });
+  const eveBot = (await callJson(env, "POST", "/api/bots", { auth: eve, json: { seat: "eve-bot" } })).data.bot;
+  const eveTok = (await callJson(env, "POST", `/api/bots/${eveBot.id}/tokens`, { auth: eve, json: { name: "t" } })).data.token;
+  const asEve = { auth: { token: eveTok } };
+  const free = await rpcTool(env, asEve, "fleetlink_create_share", { text: "x", slug: "eve-pers", personal: true });
+  assert.equal(free.error, null);
+  assert.equal(free.data.share.visibility, "personal");
+  // ...and losing that manager closes team moves too, without touching the share.
+  await env.DB.prepare("INSERT INTO team_members (team_id, user_id, role, created_at) VALUES ('team_fleet', ?, 'member', 0)").bind(eveBot.id).run();
+  await env.DB.prepare("UPDATE users SET manager_id = NULL WHERE id = ?").bind(eveBot.id).run();
+  const move = await rpcTool(env, asEve, "fleetlink_share_to_team", { slug: "eve-pers", team_id: "team_fleet" });
+  assert.match(move.error, /no active main account/);
+  assert.equal((await callJson(env, "GET", "/api/shares/eve-pers", { auth: { operator: true } })).data.share.visibility, "personal");
 });
 
 test("bots work with the widest limits:  admin file sizes, any lifetime, no storage quota", async () => {
@@ -171,6 +291,8 @@ test("a site admin can claim the fleet when no email matches", async () => {
 test("a bot token can follow its manager's limits live:  nothing is copied, so a change to the manager reaches it at once", async () => {
   const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
   const pat = await signUp(env, "Pat");
+  // This test exercises limits, not sharing:  Pat's bot is in no team, so opt out of the team-only default.
+  await callJson(env, "PATCH", "/api/me", { auth: pat, json: { bot_team_only: false } });
   const botUser = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-bot" } })).data.bot;
   const follow = await callJson(env, "POST", `/api/bots/${botUser.id}/tokens`, { auth: pat, json: { name: "follows", limits_from: "manager" } });
   assert.equal(follow.status, 201);
@@ -299,6 +421,8 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
 
   // Account mode tracks the manager live.  Pat is a regular person with their own bot:
   const pat = await signUp(env, "Pat", { email: "pat@example.com" });
+  // Limits, not sharing:  Pat's bot is in no team, so opt out of the team-only default.
+  await callJson(env, "PATCH", "/api/me", { auth: pat, json: { bot_team_only: false } });
   const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-acct" } })).data.bot;
   const setMode = (mode) => callJson(env, "PATCH", `/api/bots/${patBot.id}`, { auth: pat, json: { limit_mode: mode } });
   await setMode("account");
@@ -332,6 +456,8 @@ test("an 'inherit' bot tracks its manager's account-wide default live, explicit 
   await callJson(env, "GET", "/api/me", { auth: jay });
 
   const pat = await signUp(env, "Pat", { email: "pat@example.com" });
+  // Limits, not sharing:  Pat's bot is in no team, so opt out of the team-only default.
+  await callJson(env, "PATCH", "/api/me", { auth: pat, json: { bot_team_only: false } });
   const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-inh" } })).data.bot;
   // The API surface for 'inherit' and account defaults lands with the UI stage;
   // these tests set the columns directly to pin the resolution layer.
@@ -382,16 +508,16 @@ test("an 'inherit' bot tracks its manager's account-wide default live, explicit 
 test("the account-wide bot default:  set on /api/me, exposed there, and new bots start on 'inherit'", async () => {
   const { env, jay } = await fleet();
   const me0 = await callJson(env, "GET", "/api/me", { auth: jay });
-  assert.deepEqual(me0.data.bot_defaults, { mode: "legacy", limits: null });
+  assert.deepEqual(me0.data.bot_defaults, { mode: "legacy", limits: null, team_only: true });
 
   const set = await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_default_mode: "manual", bot_default_limits: { max_file_mb: 5 } } });
   assert.equal(set.status, 200);
-  assert.deepEqual(set.data.bot_defaults, { mode: "manual", limits: { max_file_mb: 5 } });
+  assert.deepEqual(set.data.bot_defaults, { mode: "manual", limits: { max_file_mb: 5 }, team_only: true });
 
   // A bad mode is rejected;  leaving manual clears the stored caps.
   assert.equal((await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_default_mode: "inherit" } })).status, 400);
   const back = await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_default_mode: "account" } });
-  assert.deepEqual(back.data.bot_defaults, { mode: "account", limits: null });
+  assert.deepEqual(back.data.bot_defaults, { mode: "account", limits: null, team_only: true });
 
   // A bot added through the API starts on 'inherit';  the seeded fleet bots stay 'legacy'.
   const made = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "fresh-inh" } });

@@ -861,6 +861,7 @@ export const DASHBOARD_JS = String.raw`
     data.bots.forEach(function (b) { body.append(botRow(b)); });
     document.getElementById("bot-empty").hidden = data.bots.length > 0;
     renderBotDefaults();
+    renderBotTeamOnly();
   }
 
   // The one place a bot token is ever shown:  once, at the top of the tab.
@@ -975,6 +976,38 @@ export const DASHBOARD_JS = String.raw`
       h("h3", { text: "Default limits for your bots" }),
       h("p", { class: "small muted", text: "Bots set to follow the account default resolve this policy live.  Changing it reaches them at once;  a bot with its own mode keeps that instead.  Existing bots never change on their own." }),
       form));
+  }
+
+  // The account-wide team-only policy for bot posts, saved on /api/me.
+  function renderBotTeamOnly() {
+    var box = document.getElementById("bot-team-only");
+    if (!box) return;
+    var on = !!(state.me && state.me.bot_defaults && state.me.bot_defaults.team_only);
+    var checkbox = h("input", { type: "checkbox", name: "bot_team_only", checked: on });
+    var form = h("form", { onsubmit: saveBotTeamOnly },
+      h("label", null, checkbox, " My bots always share new posts with a team"),
+      h("div", { class: "small muted", text: "New files and links from your bots land in a team (the Fleet team by default), and a bot's personal post is refused.  Existing shares never change, and you can always move a share yourself.  Turn this off to let your bots post personal shares again." }),
+      h("div", { class: "actions mt" }, h("button", { type: "submit", text: "Save Sharing" })));
+    box.replaceChildren(h("div", { class: "card" },
+      h("h3", { text: "Team sharing for your bots" }),
+      form));
+  }
+
+  async function saveBotTeamOnly(e) {
+    e.preventDefault();
+    var form = e.currentTarget;
+    var checked = form.querySelector("input[name=bot_team_only]").checked;
+    var button = form.querySelector("button[type=submit]");
+    FL.busy(button, true);
+    try {
+      var data = await FL.api("PATCH", "/api/me", { bot_team_only: checked });
+      state.me = Object.assign({}, state.me, { bot_defaults: data.bot_defaults });
+      FL.toast("Bot sharing saved.");
+    } catch (err) {
+      FL.fail(err);
+    } finally {
+      FL.busy(button, false);
+    }
   }
 
   async function saveBotDefaults(e) {

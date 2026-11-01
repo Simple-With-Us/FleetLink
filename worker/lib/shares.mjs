@@ -209,6 +209,42 @@ async function resolveTeam(env, principal, requested) {
   return teamId;
 }
 
+/**
+ * The creator's sharing policy for a bot, resolved live from its manager:
+ * "enforced" when the manager requires team sharing, "relaxed" when the
+ * manager opted out, "unknown" when the bot has no active manager, and
+ * "person" for everyone else.  An unknown policy fails closed:  the bot's
+ * share writes are refused until a person owns it again - never relaxed
+ * to personal, never pushed wider into a team.
+ */
+async function botTeamPolicy(env, principal) {
+  if (principal.user?.kind !== "agent") return { state: "person" };
+  if (!principal.user.manager_id) return { state: "unknown" };
+  const manager = await first(env.DB, "SELECT bot_team_only FROM users WHERE id = ? AND status = 'active'", principal.user.manager_id);
+  if (!manager) return { state: "unknown" };
+  return { state: manager.bot_team_only === 1 ? "enforced" : "relaxed" };
+}
+
+function noActiveManager() {
+  return forbidden("This bot has no active main account, so its sharing policy cannot be checked.  Share writes are refused until one owns it again.");
+}
+
+/**
+ * A bot whose creator requires team sharing cannot write files or a link
+ * destination into a share the team cannot see:  the main account must
+ * move the share into a team first (or opt the bot out).  An unknown
+ * policy fails closed the same way.  Team-visible shares are writable
+ * under every policy, and people are unaffected.
+ */
+async function requireTeamVisibleForBotWrite(env, principal, share) {
+  if (share.team_id) return;
+  const policy = await botTeamPolicy(env, principal);
+  if (policy.state === "unknown") throw noActiveManager();
+  if (policy.state === "enforced") {
+    throw forbidden("Your account requires its bots to keep their shares in a team.  This share is personal, so the main account must move it to a team before the bot can change its files or link.");
+  }
+}
+
 export const CreateShareBody = z.object({
   kind: z.enum(["files", "link"]).optional(),
   slug: z.string().max(80).nullable().optional(),
@@ -228,9 +264,22 @@ export const CreateShareBody = z.object({
 /**
  * A bot's new share lands in the Fleet team with edit access, so the other
  * bots and the fleet owner can change it, unless it asks for a personal one
- * or names another team.  People's shares stay personal by default.
+ * or names another team.  People's shares stay personal by default.  When
+ * the bot's manager requires team sharing, a personal ask is refused and
+ * the share always lands in a team.
  */
 async function defaultTeam(env, principal, input) {
+  const teamPolicy = await botTeamPolicy(env, principal);
+  if (teamPolicy.state === "unknown") throw noActiveManager();
+  if (teamPolicy.state === "enforced") {
+    if ([true, "true", "1"].includes(input.personal) || input.team_id === "" || input.team_id === null) {
+      throw badRequest("Your account requires its bots to share new posts with a team, so a personal share is not allowed.  The main account can change this in its bot settings.");
+    }
+    if (input.team_id !== undefined) return input.team_id;
+    if (principal.token?.team_id) return principal.token.team_id;
+    if (await membership(env, FLEET_TEAM_ID, principal.user.id)) return FLEET_TEAM_ID;
+    throw badRequest("Your account requires its bots to share new posts with a team, but this bot is in no team yet.  Add it to one, then post again.");
+  }
   if (input.team_id === "" || input.team_id === null) return null;
   if (input.team_id !== undefined) return input.team_id;
   if ([true, "true", "1"].includes(input.personal)) return null;
@@ -387,6 +436,7 @@ export async function assertCanStore(env, principal, share, { path, size, settin
 /** Write one file into a share and record it.  The caller has checked access. */
 export async function putShareFile(env, principal, share, { path, body, size, contentType, settings }) {
   const clean = cleanPath(path);
+  await requireTeamVisibleForBotWrite(env, principal, share);
   await assertValveOpen(env, "upload", settings);
   await assertCanStore(env, principal, share, { path: clean, size, settings });
   const key = objectKey(share.id, clean);
@@ -488,10 +538,17 @@ export async function updateShare(env, principal, slug, body) {
     sets.push("password_hash = ?");
     args.push(pw ? await hashSharePassword(pw) : null);
   }
+  let effectiveTeamId = share.team_id ?? null;
   if (input.team_id !== undefined) {
     const teamId = input.team_id ? await resolveTeam(env, principal, input.team_id) : null;
+    effectiveTeamId = teamId;
     if (teamId !== (share.team_id ?? null)) {
       need("owner");
+      const movePolicy = await botTeamPolicy(env, principal);
+      if (movePolicy.state === "unknown") throw noActiveManager();
+      if (teamId === null && movePolicy.state === "enforced") {
+        throw forbidden("Your account requires its bots to keep their shares in a team.  The main account can change this in its bot settings.");
+      }
       sets.push("team_id = ?");
       args.push(teamId);
       changes.team_id = teamId;
@@ -507,6 +564,7 @@ export async function updateShare(env, principal, slug, body) {
     need("edit");
     if (share.kind !== "link") throw badRequest("Only short links have a destination.");
     requireLinksAllowed(principal);
+    await requireTeamVisibleForBotWrite(env, principal, { ...share, team_id: effectiveTeamId });
     sets.push("target_url = ?");
     args.push(normalizeTargetUrl(input.url ?? input.target_url));
   }
