@@ -254,7 +254,8 @@ function legacyShape(origin, share) {
  * Share settings for a new share come from headers: X-Expire-Days,
  * X-Fleet-Password, X-Fleet-Title, X-Fleet-Description, X-Fleet-Team,
  * X-Fleet-Team-Access (view or edit), X-Fleet-Personal (1 keeps a bot's share
- * out of the Fleet team), and
+ * out of the Fleet team, refused when the bot's account requires team
+ * sharing), and
  * X-Fleet-Redirect for a short link.
  */
 export async function rawWrite(ctx, slug, rest) {

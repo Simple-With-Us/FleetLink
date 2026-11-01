@@ -209,6 +209,18 @@ async function resolveTeam(env, principal, requested) {
   return teamId;
 }
 
+/**
+ * True when the principal is a bot whose manager requires team sharing:
+ * the bot's new files and links always land in a team and the bot cannot
+ * take a share personal.  A missing or inactive manager cannot enforce the
+ * policy, so the bot keeps the ordinary default.
+ */
+async function botTeamOnly(env, principal) {
+  if (principal.user?.kind !== "agent" || !principal.user.manager_id) return false;
+  const manager = await first(env.DB, "SELECT bot_team_only FROM users WHERE id = ? AND status = 'active'", principal.user.manager_id);
+  return manager?.bot_team_only === 1;
+}
+
 export const CreateShareBody = z.object({
   kind: z.enum(["files", "link"]).optional(),
   slug: z.string().max(80).nullable().optional(),
@@ -228,9 +240,20 @@ export const CreateShareBody = z.object({
 /**
  * A bot's new share lands in the Fleet team with edit access, so the other
  * bots and the fleet owner can change it, unless it asks for a personal one
- * or names another team.  People's shares stay personal by default.
+ * or names another team.  People's shares stay personal by default.  When
+ * the bot's manager requires team sharing, a personal ask is refused and
+ * the share always lands in a team.
  */
 async function defaultTeam(env, principal, input) {
+  if (await botTeamOnly(env, principal)) {
+    if ([true, "true", "1"].includes(input.personal) || input.team_id === "" || input.team_id === null) {
+      throw badRequest("Your account requires its bots to share new posts with a team, so a personal share is not allowed.  The main account can change this in its bot settings.");
+    }
+    if (input.team_id !== undefined) return input.team_id;
+    if (principal.token?.team_id) return principal.token.team_id;
+    if (await membership(env, FLEET_TEAM_ID, principal.user.id)) return FLEET_TEAM_ID;
+    throw badRequest("Your account requires its bots to share new posts with a team, but this bot is in no team yet.  Add it to one, then post again.");
+  }
   if (input.team_id === "" || input.team_id === null) return null;
   if (input.team_id !== undefined) return input.team_id;
   if ([true, "true", "1"].includes(input.personal)) return null;
@@ -490,6 +513,9 @@ export async function updateShare(env, principal, slug, body) {
   }
   if (input.team_id !== undefined) {
     const teamId = input.team_id ? await resolveTeam(env, principal, input.team_id) : null;
+    if (teamId === null && (await botTeamOnly(env, principal))) {
+      throw forbidden("Your account requires its bots to keep their shares in a team.  The main account can change this in its bot settings.");
+    }
     if (teamId !== (share.team_id ?? null)) {
       need("owner");
       sets.push("team_id = ?");

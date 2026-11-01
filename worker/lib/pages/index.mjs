@@ -212,6 +212,7 @@ function dashboard(ctx, principal) {
           <div id="bot-secret"></div>
         </div>
         <div id="bot-defaults"></div>
+        <div id="bot-team-only"></div>
         ${table("bot-rows", [["Bot"], ["Shares", "hide-sm"], ["Tokens"], ["Status"], [""]])}
         <p id="bot-empty" class="empty" hidden>No bots under your account yet.</p>
       </section>
