@@ -12,7 +12,7 @@ function receipt() {
     return { text: readFileSync(state, 'utf8'), identity: `${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}` };
   } catch (error) {
     // Observation must not prevent the ship command from running.
-    return null;
+    return error.code === 'ENOENT' ? null : { unreadable: true };
   }
 }
 const [command, ...args] = process.argv.slice(2);
@@ -21,8 +21,8 @@ const before = receipt();
 const result = spawnSync(command, args, { stdio: 'inherit' });
 const after = receipt();
 const head = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
-const record = after?.text.match(/^([0-9]+) ([0-9a-f]{40})\s*$/);
-const uploaded = result.status === 0 && !result.error && head.status === 0 &&
+const record = after?.text?.match(/^([0-9]+) ([0-9a-f]{40})\s*$/);
+const uploaded = result.status === 0 && !result.error && head.status === 0 && !before?.unreadable &&
   record?.[2] === head.stdout.trim() && after.identity !== before?.identity;
 if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `uploaded=${Boolean(uploaded)}\n`);
 const message = uploaded
