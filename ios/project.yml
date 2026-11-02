@@ -131,7 +131,45 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-
+  FleetLinkTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests/Unit]
+    dependencies:
+      - target: FleetLink
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios.Tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/FleetLink.app/FleetLink"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  FleetLinkHarness:
+    type: application
+    platform: iOS
+    dependencies:
+      - package: sentry-cocoa
+        product: Sentry
+    sources:
+      - path: Tests/Harness
+      - path: App/PortalView.swift
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios.TestHarness
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        CODE_SIGNING_ALLOWED: NO
+  FleetLinkUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests/UI]
+    dependencies:
+      - target: FleetLinkHarness
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios.UITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: FleetLinkHarness
 schemes:
   FleetLink:
     build:
@@ -140,8 +178,22 @@ schemes:
         FleetLinkClip: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - name: FleetLinkTests
+          parallelizable: false
     archive:
       config: Release
+  FleetLinkQualification:
+    build:
+      targets:
+        FleetLinkHarness: all
+    test:
+      config: Debug
+      targets:
+        - name: FleetLinkUITests
+          parallelizable: false
   FleetLinkClip:
     build:
       targets:
