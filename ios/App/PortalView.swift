@@ -49,6 +49,8 @@ public struct PortalView: View {
         self.onSelectArtifact = onSelectArtifact
     }
 
+    private var activeToken: String { tokenProvider?() ?? session.apiToken }
+
     var filteredShares: [PortalShare] {
         let rows = portalManager.shares.filter { share in
             let matchesSearch = searchText.isEmpty ||
@@ -84,6 +86,65 @@ public struct PortalView: View {
 
     public var body: some View {
         NavigationStack {
+            portalList
+                .toolbar { toolbarContent }
+            .confirmationDialog("Delete this link?", isPresented: $showDeleteConfirmation,
+                                titleVisibility: .visible, presenting: shareToDelete) { share in
+                deleteActions(share)
+            } message: { share in
+                Text("Delete \(share.slug)? This cannot be undone.")
+            }
+            .alert("Rename Link", isPresented: $showRenameAlert) {
+                renameAlertContent
+            } message: {
+                Text("Enter a new link name (slug).\u{00A0} Links using the old name will stop working.")
+            }
+            .confirmationDialog("Extend Expiration", isPresented: $showExtendDialog,
+                                titleVisibility: .visible, presenting: shareToExtend) { share in
+                extendActions(share)
+            } message: { _ in
+                Text("Choose a duration from today.")
+            }
+            .sheet(isPresented: $showManageSheet) {
+                if let share = shareToManage {
+                    ShareManageSheet(
+                        share: share,
+                        portalManager: portalManager,
+                        serverHost: serverHost,
+                        token: activeToken,
+                        onDismiss: { showManageSheet = false }
+                    )
+                }
+            }
+            .task {
+                if portalManager.shares.isEmpty {
+                    await portalManager.fetchShares(host: serverHost, token: activeToken)
+                }
+                await portalManager.fetchTeams(host: serverHost, token: activeToken)
+            }
+            .onChange(of: portalManager.scope) { _, _ in
+                Task { await portalManager.fetchShares(host: serverHost, token: activeToken) }
+            }
+            .onChange(of: session.user) { _, _ in
+                Task { await portalManager.fetchShares(host: serverHost, token: activeToken) }
+            }
+        }
+    }
+
+    @ViewBuilder private func deleteActions(_ share: PortalShare) -> some View {
+        Button("Delete '\(share.slug)'", role: .destructive) {
+            Task { _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: activeToken) }
+        }
+        Button("Cancel", role: .cancel) {}
+    }
+    @ViewBuilder private func extendActions(_ share: PortalShare) -> some View {
+        ForEach(["3", "7", "30", "90", "180"], id: \.self) { days in
+            Button("Extend by \(days) days") { extendShare(share, days: days) }
+        }
+        Button("Cancel", role: .cancel) {}
+    }
+
+    private var portalList: some View {
             List {
                 errorMessageBanner
                 Section {
@@ -103,71 +164,9 @@ public struct PortalView: View {
             }
             .searchable(text: $searchText, prompt: "Search by name or address")
             .refreshable {
-                await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken)
+                await portalManager.fetchShares(host: serverHost, token: activeToken)
             }
             .navigationTitle("Links")
-            .toolbar {
-                toolbarContent
-            }
-            .confirmationDialog(
-                "Delete this link?",
-                isPresented: $showDeleteConfirmation,
-                titleVisibility: .visible,
-                presenting: shareToDelete
-            ) { share in
-                Button("Delete '\(share.slug)'", role: .destructive) {
-                    Task {
-                        _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: tokenProvider?() ?? session.apiToken)
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: { share in
-                Text("Delete \(share.slug)?\u{00A0} This cannot be undone.")
-            }
-            .alert("Rename Link", isPresented: $showRenameAlert) {
-                renameAlertContent
-            } message: {
-                Text("Enter a new link name (slug).\u{00A0} Links using the old name will stop working.")
-            }
-            .confirmationDialog(
-                "Extend Expiration",
-                isPresented: $showExtendDialog,
-                titleVisibility: .visible,
-                presenting: shareToExtend
-            ) { share in
-                Button("Extend by 3 days") { extendShare(share, days: "3") }
-                Button("Extend by 7 days") { extendShare(share, days: "7") }
-                Button("Extend by 30 days") { extendShare(share, days: "30") }
-                Button("Extend by 90 days") { extendShare(share, days: "90") }
-                Button("Extend by 180 days") { extendShare(share, days: "180") }
-                Button("Cancel", role: .cancel) {}
-            } message: { share in
-                Text("Extend \(share.slug) from today.\u{00A0} Choose a duration.")
-            }
-            .sheet(isPresented: $showManageSheet) {
-                if let share = shareToManage {
-                    ShareManageSheet(
-                        share: share,
-                        portalManager: portalManager,
-                        serverHost: serverHost,
-                        token: tokenProvider?() ?? session.apiToken,
-                        onDismiss: { showManageSheet = false }
-                    )
-                }
-            }
-            .task {
-                if portalManager.shares.isEmpty {
-                    await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken)
-                }
-                await portalManager.fetchTeams(host: serverHost, token: tokenProvider?() ?? session.apiToken)
-            }
-            .onChange(of: portalManager.scope) { _, _ in
-                Task { await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken) }
-            }
-            .onChange(of: session.user) { _, _ in
-                Task { await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken) }
-            }
-        }
     }
 
     // MARK: - Subviews
@@ -361,7 +360,7 @@ public struct PortalView: View {
         ToolbarItem(placement: .navigationBarTrailing) {
             Button {
                 Task {
-                    await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken)
+                    await portalManager.fetchShares(host: serverHost, token: activeToken)
                 }
             } label: {
                 Image(systemName: "arrow.clockwise")
@@ -379,7 +378,7 @@ public struct PortalView: View {
             if let share = shareToRename, !renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let target = renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 Task {
-                    _ = await portalManager.renameShare(slug: share.slug, newSlug: target, host: serverHost, token: tokenProvider?() ?? session.apiToken)
+                    _ = await portalManager.renameShare(slug: share.slug, newSlug: target, host: serverHost, token: activeToken)
                 }
             }
         }
@@ -414,7 +413,7 @@ public struct PortalView: View {
     private func renewShare(_ share: PortalShare) {
         isRenewing[share.slug] = true
         Task {
-            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: tokenProvider?() ?? session.apiToken)
+            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: activeToken)
             isRenewing[share.slug] = false
         }
     }
@@ -422,7 +421,7 @@ public struct PortalView: View {
     private func extendShare(_ share: PortalShare, days: String) {
         isRenewing[share.slug] = true
         Task {
-            _ = await portalManager.extendShare(slug: share.slug, days: days, host: serverHost, token: tokenProvider?() ?? session.apiToken)
+            _ = await portalManager.extendShare(slug: share.slug, days: days, host: serverHost, token: activeToken)
             isRenewing[share.slug] = false
         }
     }
