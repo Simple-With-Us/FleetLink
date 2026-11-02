@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import CryptoKit
 
 public struct PortalShare: Identifiable, Codable, Hashable, Sendable {
     public var id: String { slug }
@@ -297,6 +298,7 @@ private struct ApiShareEnvelope: Decodable { let share: ApiShare }
 public final class PortalManager: ObservableObject {
     @Published public var scope: PortalShareScope = .mine
     private var sharesRequestID = UUID()
+    private var loadedSharesContext: String?
     @Published public private(set) var shares: [PortalShare] = []
     @Published public private(set) var teams: [PortalTeam] = []
     @Published public private(set) var isLoading: Bool = false
@@ -329,8 +331,12 @@ public final class PortalManager: ObservableObject {
         let requestedScope = scope
         isLoading = true
         errorMessage = nil
-        shares = []
-        computeAnalytics()
+        let context = requestedScope.rawValue + normalizedHost(host) + SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
+        // Retain cached rows only within the same account, host and scope.
+        if loadedSharesContext != context || token.isEmpty {
+            shares = []
+            computeAnalytics()
+        }
         defer { if sharesRequestID == requestID { isLoading = false } }
         guard !token.isEmpty else {
             errorMessage = "Sign in with your passkey in Settings to see your links."
@@ -341,7 +347,12 @@ public final class PortalManager: ObservableObject {
             var seenCursors = Set<String>()
             var loaded: [PortalShare] = []
             var seenSlugs = Set<String>()
+            var pageCount = 0
             repeat {
+                pageCount += 1
+                guard pageCount <= 100 else {
+                    throw PortalError.serverError("This list is too large to load safely in the app. Use the web dashboard to view all links.")
+                }
                 try Task.checkCancellation()
                 guard sharesRequestID == requestID else { return }
                 guard var components = URLComponents(string: "\(normalizedHost(host))/api/shares") else {
@@ -354,6 +365,9 @@ public final class PortalManager: ObservableObject {
                 let (data, http) = try await send(authorizedRequest(url: url, method: "GET", token: token))
                 guard sharesRequestID == requestID else { return }
                 if http.statusCode == 401 || http.statusCode == 403 {
+                    shares = []
+                    loadedSharesContext = nil
+                    computeAnalytics()
                     errorMessage = "Your sign-in has ended.\u{00A0} Sign in again in Settings."
                     return
                 }
@@ -372,7 +386,11 @@ public final class PortalManager: ObservableObject {
             } while cursor != nil
             guard sharesRequestID == requestID else { return }
             shares = loaded
+            loadedSharesContext = context
             computeAnalytics()
+        } catch let error as PortalError {
+            guard sharesRequestID == requestID else { return }
+            errorMessage = error.errorDescription
         } catch is CancellationError {
             // A cancelled view must not publish an incomplete list as complete.
         } catch {

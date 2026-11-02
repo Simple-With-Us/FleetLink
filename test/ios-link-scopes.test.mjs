@@ -30,3 +30,11 @@ test('team rows fail closed on missing permissions and gate destructive menus', 
   assert.ok((view.match(/if share.can_manage == true/g) ?? []).length >= 4);
   assert.match(view, /if share.can_edit == true \|\| share.can_manage == true/);
 });
+
+test('refresh retains only same-context cache, bounds pages and preserves domain errors', () => {
+ assert.match(model, /loadedSharesContext != context \|\| token.isEmpty/);
+ assert.match(model, /SHA256.hash/);
+ assert.match(model, /pageCount <= 100/);
+ assert.match(model, /catch let error as PortalError/);
+ assert.match(model, /errorMessage = error.errorDescription/);
+});
