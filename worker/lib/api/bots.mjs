@@ -6,7 +6,7 @@
  * itself.  The manager already has the owner's rights on the bot's shares
  * (policy.mjs).  Site admins can act on any bot.
  *
- * The Agent-Sync server credential can also mint a token for the seat it acts
+ * The simple-tools server credential can also mint a token for the seat it acts
  * as (POST /api/agent/token), which is how the fleet's per-seat tokens are
  * provisioned into Infisical without a person in the loop.
  */
@@ -255,17 +255,17 @@ export function botRoutes(router) {
     return json({ ok: true });
   });
 
-  // The Agent-Sync server, acting as one seat, gets an API token for that seat.
+  // The simple-tools server, acting as one seat, gets an API token for that seat.
   router.on("POST", "/api/agent/token", async (ctx) => {
     const principal = await ctx.auth();
-    if (principal.kind !== "agent") throw forbidden("Only the Agent-Sync server credential can do that.");
+    if (principal.kind !== "agent") throw forbidden("Only the simple-tools server credential can do that.");
     const input = parseWith(AgentTokenBody, await readBody(ctx.request));
     const made = await createToken(ctx.env, principal.user, await ctx.settings(), {
-      name: input.name || `${principal.seat} via Agent-Sync`,
+      name: input.name || `${principal.seat} via simple-tools`,
       expires_in_days: input.expires_in_days ?? null,
       limits_from: input.limits_from ?? "own"
     });
-    await audit(ctx.env, principal.user.id, "bot.token.create", principal.user.id, { token_id: made.api_token.id, via: "agent-sync" });
+    await audit(ctx.env, principal.user.id, "bot.token.create", principal.user.id, { token_id: made.api_token.id, via: "simple-tools" });
     return json({ ...made, seat: principal.seat, user_id: principal.user.id }, 201);
   });
 }

@@ -1,8 +1,8 @@
 // The pin that keeps fleet-share as capable as the MCP server:  every MCP tool
 // has a named CLI command (or is reachable through `fleet-share tool NAME`,
 // which proxies any tool), and a new MCP tool fails this test until the table
-// below names its CLI command.  The Agent-Sync MCP mirrors the same tool list
-// (AI-Fleet-Coordinator scripts/agent-sync-mcp/src/fleetlink.js), pinned by
+// below names its CLI command.  The simple-tools MCP mirrors the same tool list
+// (the FleetLink adapter in AI-Fleet-Coordinator), pinned by
 // docs/mcp-tools.json, which this test also keeps current.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -49,7 +49,7 @@ test("every FleetLink MCP tool has a fleet-share command, and `tool` proxies any
   }
 });
 
-test("docs/mcp-tools.json is the served tool list (names and input schemas), for the Agent-Sync mirror", async () => {
+test("docs/mcp-tools.json is the served tool list (names and input schemas), for the simple-tools mirror", async () => {
   const tools = await servedTools();
   const served = tools.map(({ name, inputSchema }) => ({ name, properties: Object.keys(inputSchema.properties ?? {}).sort(), required: inputSchema.required ?? [] }));
   const pinned = JSON.parse(readFileSync(join(repo, "docs/mcp-tools.json"), "utf8"));

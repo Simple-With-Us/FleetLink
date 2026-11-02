@@ -1,5 +1,5 @@
 // Writes docs/mcp-tools.json:  the MCP tools FleetLink serves (names, argument
-// names, required arguments).  The Agent-Sync MCP pins its FleetLink tools to
+// names, required arguments).  The simple-tools MCP pins its FleetLink tools to
 // this file;  test/cli-mcp-parity.test.mjs fails when it is stale.
 import { writeFileSync } from "node:fs";
 import { z } from "zod";
