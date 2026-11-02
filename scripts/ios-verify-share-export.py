@@ -8,17 +8,23 @@ require(roots, 'No export output found')
 root = pathlib.Path(roots[-1])
 app = root / 'FleetLink.xcarchive/Products/Applications/FleetLink.app'
 share = app / 'PlugIns/FleetLinkShare.appex'
+clip = app / 'AppClips/FleetLinkClip.app'
 require(app.is_dir() and share.is_dir(), 'Containing app or embedded Share extension missing')
 subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
-for item, bundle in [(app, 'online.fleetlink.ios'), (share, 'online.fleetlink.ios.Share')]:
+for item, bundle in [(app, 'online.fleetlink.ios'), (share, 'online.fleetlink.ios.Share'), (clip, 'online.fleetlink.ios.Clip')]:
     info = plistlib.loads((item / 'Info.plist').read_bytes())
+    for key in ['CFBundleName', 'CFBundleIdentifier', 'CFBundleExecutable', 'CFBundlePackageType', 'CFBundleShortVersionString', 'CFBundleVersion']:
+        value = info.get(key)
+        require(isinstance(value, str) and value.strip() and '$(' not in value, 'Missing or unresolved bundle key: ' + bundle + ' ' + key)
+    require(info['CFBundlePackageType'] == ('XPC!' if item == share else 'APPL'), 'Wrong bundle package type')
     require(info['CFBundleIdentifier'] == bundle, "Signed archive verification failed: info['CFBundleIdentifier'] == bundle")
     result = subprocess.run(['codesign', '-d', '--entitlements', ':-', str(item)], check=True, capture_output=True)
     raw = result.stdout
     if b'<?xml' not in raw: raw = result.stderr
     ent = plistlib.loads(raw[raw.index(b'<?xml'):])
     require(ent['application-identifier'] == 'CC8UTF7ATG.' + bundle, "Signed archive verification failed: ent['application-identifier'] == 'CC8UTF7ATG.' + bundle")
-    require('CC8UTF7ATG.online.fleetlink.ios' in ent['keychain-access-groups'], "Signed archive verification failed: 'CC8UTF7ATG.online.fleetlink.ios' in ent['keychain-access-groups']")
+    if item != clip:
+        require('CC8UTF7ATG.online.fleetlink.ios' in ent['keychain-access-groups'], 'Shared keychain group missing')
     require(ent.get('get-task-allow') is not True, "Signed archive verification failed: ent.get('get-task-allow') is not True")
     if item == share: require(info['NSExtension']['NSExtensionPointIdentifier'] == 'com.apple.share-services', "Signed archive verification failed: info['NSExtension']['NSExtensionPointIdentifier'] == 'com.apple.share-services'")
     print('Verified', bundle, info['CFBundleShortVersionString'], info['CFBundleVersion'], 'signed shared-keychain entitlement')

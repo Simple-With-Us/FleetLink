@@ -44,3 +44,14 @@ test('share credential binds validated host and text is bounded before copying',
  assert.doesNotMatch(session.match(/public var passkeyBearer[\s\S]*?public func adoptBearerToken/)[0],/ShareSession.save/);
  assert.match(read('ios/Shared/ShareSession.swift'),/allowedOrigin/);
 });
+
+test('all three shipped bundles have install-required name and extension generator preserves it', () => {
+ for (const path of ['ios/App/Info.plist', 'ios/Clip/Info.plist', 'ios/ShareExtension/Info.plist']) {
+  assert.match(read(path), /<key>CFBundleName<\/key>\s*<string>\$\(PRODUCT_NAME\)<\/string>/);
+ }
+ assert.match(read('ios/project.yml'), /CFBundleName: \$\(PRODUCT_NAME\)/);
+ const verify=read('scripts/ios-verify-share-export.py');
+ assert.match(verify, /CFBundleName/); assert.match(verify, /CFBundleExecutable/);
+ assert.match(verify, /AppClips\/FleetLinkClip.app/);
+ assert.doesNotMatch(verify,/\bassert /);
+});

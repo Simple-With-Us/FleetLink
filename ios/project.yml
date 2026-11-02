@@ -163,6 +163,7 @@ targets:
       path: ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: FleetLink
+        CFBundleName: $(PRODUCT_NAME)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         FleetLinkSharedKeychainGroup: $(AppIdentifierPrefix)online.fleetlink.ios
