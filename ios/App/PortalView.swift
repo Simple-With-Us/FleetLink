@@ -581,22 +581,29 @@ private struct ShareRowView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("View \(share.slug)")
 
+                if share.can_manage == true || share.can_edit == true {
                 Menu {
-                    Button(action: onRename) {
-                        Label("Rename", systemImage: "pencil")
+                    if share.can_manage == true {
+                        Button(action: onRename) {
+                            Label("Rename", systemImage: "pencil")
+                        }
                     }
-                    Button(action: onExtend) {
-                        Label("Extend Expiry…", systemImage: "clock.arrow.circlepath")
+                    if share.can_edit == true || share.can_manage == true {
+                        Button(action: onExtend) {
+                            Label("Extend Expiry…", systemImage: "clock.arrow.circlepath")
+                        }
+                        Button(action: onRenew) {
+                            Label("Quick Renew (Default)", systemImage: "arrow.triangle.2.circlepath")
+                        }
                     }
-                    Button(action: onManageAccess) {
-                        Label("Share & Access…", systemImage: "person.2")
-                    }
-                    Button(action: onRenew) {
-                        Label("Quick Renew (Default)", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    Divider()
-                    Button(role: .destructive, action: onDelete) {
-                        Label("Delete Early", systemImage: "trash")
+                    if share.can_manage == true {
+                        Button(action: onManageAccess) {
+                            Label("Share & Access…", systemImage: "person.2")
+                        }
+                        Divider()
+                        Button(role: .destructive, action: onDelete) {
+                            Label("Delete Early", systemImage: "trash")
+                        }
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -611,9 +618,11 @@ private struct ShareRowView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("More options for \(share.slug)")
+                }
 
                 Spacer()
 
+                if share.can_manage == true {
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .font(.caption)
@@ -624,6 +633,7 @@ private struct ShareRowView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Delete \(share.slug)")
+                }
             }
             .padding(.top, 2)
         }
@@ -631,12 +641,16 @@ private struct ShareRowView: View {
         .contextMenu {
             Button(action: onCopy) { Label("Copy Link", systemImage: "doc.on.doc") }
             Button(action: onView) { Label("View", systemImage: "arrow.up.right.square") }
-            Divider()
-            Button(action: onRename) { Label("Rename", systemImage: "pencil") }
-            Button(action: onExtend) { Label("Extend Expiry…", systemImage: "clock.arrow.circlepath") }
-            Button(action: onManageAccess) { Label("Share & Access…", systemImage: "person.2") }
-            Divider()
-            Button(role: .destructive, action: onDelete) { Label("Delete Early", systemImage: "trash") }
+            if share.can_edit == true || share.can_manage == true {
+                Divider()
+                Button(action: onExtend) { Label("Extend Expiry…", systemImage: "clock.arrow.circlepath") }
+            }
+            if share.can_manage == true {
+                Button(action: onRename) { Label("Rename", systemImage: "pencil") }
+                Button(action: onManageAccess) { Label("Share & Access…", systemImage: "person.2") }
+                Divider()
+                Button(role: .destructive, action: onDelete) { Label("Delete Early", systemImage: "trash") }
+            }
         }
     }
 }

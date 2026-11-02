@@ -24,3 +24,9 @@ test('existing sorting has an accessible visible control and keeps Newest defaul
   assert.match(view, /Label\("Sort", systemImage: "arrow.up.arrow.down"\)/);
   assert.match(view, /accessibilityLabel\("Sort links"\)/);
 });
+test('team rows fail closed on missing permissions and gate destructive menus', () => {
+  assert.match(model, /can_manage: share.can_manage \?\? false/);
+  assert.match(model, /can_edit: share.can_edit \?\? false/);
+  assert.ok((view.match(/if share.can_manage == true/g) ?? []).length >= 4);
+  assert.match(view, /if share.can_edit == true \|\| share.can_manage == true/);
+});
