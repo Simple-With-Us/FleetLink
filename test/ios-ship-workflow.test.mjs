@@ -173,7 +173,7 @@ test("apps.json describes the same app project.yml builds", () => {
 });
 
 test("export-only qualification does not sync testers or upload Sentry source artifacts", () => {
-  assert.match(active, /if: success\(\) && steps.gate.outputs.should_ship == '1' && github.ref == 'refs\/heads\/main' && inputs.export_only != true/);
+  assert.match(active, /if: success\(\) && steps.ship.outputs.uploaded == 'true' && github.ref == 'refs\/heads\/main' && inputs.export_only != true/);
   const ship = readFileSync(new URL('../scripts/ios-fleet/ship-testflight.sh', import.meta.url), 'utf8');
   assert.match(ship, /if \[\[ "\$EXPORT_ONLY" -eq 0 \]\]; then\s+upload_sentry_artifacts/);
 });
