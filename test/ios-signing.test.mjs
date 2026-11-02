@@ -127,6 +127,14 @@ test("loadSigning masks Infisical values and fails closed without the distributi
     true,
     "the hosted key decodes to a PEM",
   );
+  // Simulate Actions splitting stdout before interpreting workflow commands.
+  // A raw multiline add-mask registers only its first line and leaks the rest.
+  const transportLines = logs.join("\n").split("\n");
+  assert.ok(transportLines.every((line) => line.startsWith("::add-mask::") || line.startsWith("Loaded the shared ASC key")), "mask output has no ordinary secret-bearing physical lines");
+  assert.ok(logs.every((line) => !/[\r\n]/.test(line)), "every workflow command is one physical line");
+  const unescape = (value) => value.replaceAll("%0D", "\r").replaceAll("%0A", "\n").replaceAll("%25", "%");
+  const masks = transportLines.filter((line) => line.startsWith("::add-mask::")).map((line) => unescape(line.slice("::add-mask::".length)));
+  assert.ok(masks.some((value) => value.includes("-----BEGIN PRIVATE KEY-----\n")), "multiline PEM mask round-trips after transport decoding");
   assert.ok(logs.some((line) => line === "::add-mask::pw"));
   assert.ok(logs.some((line) => line.startsWith("Loaded the shared ASC key")));
 });

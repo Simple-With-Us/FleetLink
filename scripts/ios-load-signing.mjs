@@ -91,9 +91,12 @@ export async function loadSigning({ env = process.env, fetchImpl = fetch, log = 
 function mask(value, log) {
   const text = String(value ?? "");
   if (!text) return;
-  log(`::add-mask::${text}`);
+  // Workflow commands are single physical lines. Escape command data before
+  // emitting it, otherwise a multiline secret leaks before line masks register.
+  const commandData = (value) => value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+  log(`::add-mask::${commandData(text)}`);
   for (const line of text.split("\n")) {
-    if (line.trim()) log(`::add-mask::${line}`);
+    if (line.trim()) log(`::add-mask::${commandData(line)}`);
   }
 }
 
