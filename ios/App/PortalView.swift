@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 public struct PortalView: View {
     @ObservedObject var portalManager: PortalManager
     var onSelectArtifact: (URL) -> Void
+    private var tokenProvider: (() -> String)?
 
     @EnvironmentObject private var session: SessionManager
     @AppStorage("fleetlink_server_host") private var serverHost: String = "https://fleetlink.online"
@@ -42,10 +43,13 @@ public struct PortalView: View {
         var id: String { rawValue }
     }
 
-    public init(portalManager: PortalManager, onSelectArtifact: @escaping (URL) -> Void) {
+    public init(portalManager: PortalManager, tokenProvider: (() -> String)? = nil, onSelectArtifact: @escaping (URL) -> Void) {
         self.portalManager = portalManager
+        self.tokenProvider = tokenProvider
         self.onSelectArtifact = onSelectArtifact
     }
+
+    private var activeToken: String { tokenProvider?() ?? session.apiToken }
 
     var filteredShares: [PortalShare] {
         let rows = portalManager.shares.filter { share in
@@ -82,54 +86,24 @@ public struct PortalView: View {
 
     public var body: some View {
         NavigationStack {
-            List {
-                errorMessageBanner
-                analyticsSection
-                filterChipsSection
-                sharesListSection
-            }
-            .searchable(text: $searchText, prompt: "Search by name or address")
-            .refreshable {
-                await portalManager.fetchShares(host: serverHost, token: session.apiToken)
-            }
-            .navigationTitle("Links")
-            .toolbar {
-                toolbarContent
-            }
-            .confirmationDialog(
-                "Delete this link?",
-                isPresented: $showDeleteConfirmation,
-                titleVisibility: .visible,
-                presenting: shareToDelete
-            ) { share in
-                Button("Delete '\(share.slug)'", role: .destructive) {
-                    Task {
-                        _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: session.apiToken)
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
+            portalList
+                .toolbar { toolbarContent }
+            .confirmationDialog("Delete this link?", isPresented: $showDeleteConfirmation,
+                                titleVisibility: .visible, presenting: shareToDelete) { share in
+                deleteActions(share)
             } message: { share in
-                Text("Delete \(share.slug)?\u{00A0} This cannot be undone.")
+                Text("Delete \(share.slug)? This cannot be undone.")
             }
             .alert("Rename Link", isPresented: $showRenameAlert) {
                 renameAlertContent
             } message: {
                 Text("Enter a new link name (slug).\u{00A0} Links using the old name will stop working.")
             }
-            .confirmationDialog(
-                "Extend Expiration",
-                isPresented: $showExtendDialog,
-                titleVisibility: .visible,
-                presenting: shareToExtend
-            ) { share in
-                Button("Extend by 3 days") { extendShare(share, days: "3") }
-                Button("Extend by 7 days") { extendShare(share, days: "7") }
-                Button("Extend by 30 days") { extendShare(share, days: "30") }
-                Button("Extend by 90 days") { extendShare(share, days: "90") }
-                Button("Extend by 180 days") { extendShare(share, days: "180") }
-                Button("Cancel", role: .cancel) {}
-            } message: { share in
-                Text("Extend \(share.slug) from today.\u{00A0} Choose a duration.")
+            .confirmationDialog("Extend Expiration", isPresented: $showExtendDialog,
+                                titleVisibility: .visible, presenting: shareToExtend) { share in
+                extendActions(share)
+            } message: { _ in
+                Text("Choose a duration from today.")
             }
             .sheet(isPresented: $showManageSheet) {
                 if let share = shareToManage {
@@ -137,21 +111,62 @@ public struct PortalView: View {
                         share: share,
                         portalManager: portalManager,
                         serverHost: serverHost,
-                        token: session.apiToken,
+                        token: activeToken,
                         onDismiss: { showManageSheet = false }
                     )
                 }
             }
             .task {
                 if portalManager.shares.isEmpty {
-                    await portalManager.fetchShares(host: serverHost, token: session.apiToken)
+                    await portalManager.fetchShares(host: serverHost, token: activeToken)
                 }
-                await portalManager.fetchTeams(host: serverHost, token: session.apiToken)
+                await portalManager.fetchTeams(host: serverHost, token: activeToken)
+            }
+            .onChange(of: portalManager.scope) { _, _ in
+                Task { await portalManager.fetchShares(host: serverHost, token: activeToken) }
             }
             .onChange(of: session.user) { _, _ in
-                Task { await portalManager.fetchShares(host: serverHost, token: session.apiToken) }
+                Task { await portalManager.fetchShares(host: serverHost, token: activeToken) }
             }
         }
+    }
+
+    @ViewBuilder private func deleteActions(_ share: PortalShare) -> some View {
+        Button("Delete '\(share.slug)'", role: .destructive) {
+            Task { _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: activeToken) }
+        }
+        Button("Cancel", role: .cancel) {}
+    }
+    @ViewBuilder private func extendActions(_ share: PortalShare) -> some View {
+        ForEach(["3", "7", "30", "90", "180"], id: \.self) { days in
+            Button("Extend by \(days) days") { extendShare(share, days: days) }
+        }
+        Button("Cancel", role: .cancel) {}
+    }
+
+    private var portalList: some View {
+            List {
+                errorMessageBanner
+                Section {
+                    Picker("Show links", selection: $portalManager.scope) {
+                        ForEach(PortalShareScope.allCases) { scope in
+                            Text(scope.title).tag(scope)
+                        }
+                    }
+                    .accessibilityIdentifier("links.scope")
+                    Text("Team links follow your membership. My bots shows only bots you manage.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                analyticsSection
+                filterChipsSection
+                sharesListSection
+            }
+            .searchable(text: $searchText, prompt: "Search by name or address")
+            .refreshable {
+                await portalManager.fetchShares(host: serverHost, token: activeToken)
+            }
+            .navigationTitle("Links")
     }
 
     // MARK: - Subviews
@@ -332,13 +347,20 @@ public struct PortalView: View {
                     }
                 }
             } label: {
-                Image(systemName: "arrow.up.arrow.down")
+                HStack(spacing: 4) {
+                    Text("Sort")
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+                .fixedSize()
             }
+            .accessibilityLabel("Sort links")
+            .accessibilityValue(sortMode.rawValue)
+            .accessibilityIdentifier("links.sort")
         }
         ToolbarItem(placement: .navigationBarTrailing) {
             Button {
                 Task {
-                    await portalManager.fetchShares(host: serverHost, token: session.apiToken)
+                    await portalManager.fetchShares(host: serverHost, token: activeToken)
                 }
             } label: {
                 Image(systemName: "arrow.clockwise")
@@ -356,7 +378,7 @@ public struct PortalView: View {
             if let share = shareToRename, !renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let target = renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 Task {
-                    _ = await portalManager.renameShare(slug: share.slug, newSlug: target, host: serverHost, token: session.apiToken)
+                    _ = await portalManager.renameShare(slug: share.slug, newSlug: target, host: serverHost, token: activeToken)
                 }
             }
         }
@@ -391,7 +413,7 @@ public struct PortalView: View {
     private func renewShare(_ share: PortalShare) {
         isRenewing[share.slug] = true
         Task {
-            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: session.apiToken)
+            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: activeToken)
             isRenewing[share.slug] = false
         }
     }
@@ -399,7 +421,7 @@ public struct PortalView: View {
     private func extendShare(_ share: PortalShare, days: String) {
         isRenewing[share.slug] = true
         Task {
-            _ = await portalManager.extendShare(slug: share.slug, days: days, host: serverHost, token: session.apiToken)
+            _ = await portalManager.extendShare(slug: share.slug, days: days, host: serverHost, token: activeToken)
             isRenewing[share.slug] = false
         }
     }
@@ -564,22 +586,29 @@ private struct ShareRowView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("View \(share.slug)")
 
+                if share.can_manage == true || share.can_edit == true {
                 Menu {
-                    Button(action: onRename) {
-                        Label("Rename", systemImage: "pencil")
+                    if share.can_manage == true {
+                        Button(action: onRename) {
+                            Label("Rename", systemImage: "pencil")
+                        }
                     }
-                    Button(action: onExtend) {
-                        Label("Extend Expiry…", systemImage: "clock.arrow.circlepath")
+                    if share.can_edit == true || share.can_manage == true {
+                        Button(action: onExtend) {
+                            Label("Extend Expiry…", systemImage: "clock.arrow.circlepath")
+                        }
+                        Button(action: onRenew) {
+                            Label("Quick Renew (Default)", systemImage: "arrow.triangle.2.circlepath")
+                        }
                     }
-                    Button(action: onManageAccess) {
-                        Label("Share & Access…", systemImage: "person.2")
-                    }
-                    Button(action: onRenew) {
-                        Label("Quick Renew (Default)", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    Divider()
-                    Button(role: .destructive, action: onDelete) {
-                        Label("Delete Early", systemImage: "trash")
+                    if share.can_manage == true {
+                        Button(action: onManageAccess) {
+                            Label("Share & Access…", systemImage: "person.2")
+                        }
+                        Divider()
+                        Button(role: .destructive, action: onDelete) {
+                            Label("Delete Early", systemImage: "trash")
+                        }
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -594,9 +623,11 @@ private struct ShareRowView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("More options for \(share.slug)")
+                }
 
                 Spacer()
 
+                if share.can_manage == true {
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .font(.caption)
@@ -607,6 +638,7 @@ private struct ShareRowView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Delete \(share.slug)")
+                }
             }
             .padding(.top, 2)
         }
@@ -614,12 +646,16 @@ private struct ShareRowView: View {
         .contextMenu {
             Button(action: onCopy) { Label("Copy Link", systemImage: "doc.on.doc") }
             Button(action: onView) { Label("View", systemImage: "arrow.up.right.square") }
-            Divider()
-            Button(action: onRename) { Label("Rename", systemImage: "pencil") }
-            Button(action: onExtend) { Label("Extend Expiry…", systemImage: "clock.arrow.circlepath") }
-            Button(action: onManageAccess) { Label("Share & Access…", systemImage: "person.2") }
-            Divider()
-            Button(role: .destructive, action: onDelete) { Label("Delete Early", systemImage: "trash") }
+            if share.can_edit == true || share.can_manage == true {
+                Divider()
+                Button(action: onExtend) { Label("Extend Expiry…", systemImage: "clock.arrow.circlepath") }
+            }
+            if share.can_manage == true {
+                Button(action: onRename) { Label("Rename", systemImage: "pencil") }
+                Button(action: onManageAccess) { Label("Share & Access…", systemImage: "person.2") }
+                Divider()
+                Button(role: .destructive, action: onDelete) { Label("Delete Early", systemImage: "trash") }
+            }
         }
     }
 }
