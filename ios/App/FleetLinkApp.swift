@@ -3,6 +3,13 @@ import SwiftUI
 @main
 struct FleetLinkApp: App {
     init() {
+        #if DEBUG && FLEETLINK_SHARE_FIXTURE
+        // Qualification-only build flag, never included in a Release archive.
+        if ProcessInfo.processInfo.arguments.contains("--seed-share-fixture") {
+            let host = ProcessInfo.processInfo.environment["FLEETLINK_FIXTURE_HOST"] ?? "https://fleetlink.online"
+            ShareSession.save("nonsecret-extension-qualification-fixture", origin: host)
+        }
+        #endif
         #if !FLEETLINK_VISUAL_FIXTURE
         SentryTelemetry.start(surface: "ios-app")
         #endif

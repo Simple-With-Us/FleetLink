@@ -55,3 +55,12 @@ test('all three shipped bundles have install-required name and extension generat
  assert.match(verify, /AppClips\/FleetLinkClip.app/);
  assert.doesNotMatch(verify,/\bassert /);
 });
+
+test('synthetic extension qualification is compile-time DEBUG gated and cannot use network or real credentials', () => {
+ const app=read('ios/App/FleetLinkApp.swift'); const s=read('ios/ShareExtension/ShareViewController.swift');
+ assert.match(app, /#if DEBUG && FLEETLINK_SHARE_FIXTURE/);
+ assert.match(app, /--seed-share-fixture/);
+ assert.match(s, /#if DEBUG && FLEETLINK_SHARE_FIXTURE/);
+ assert.match(s, /Qualification build accepts only its synthetic credential/);
+ assert.match(s, /#else\s+var request = URLRequest/);
+});

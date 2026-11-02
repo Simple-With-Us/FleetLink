@@ -257,6 +257,21 @@ final class ShareViewController: UIViewController {
         guard let credential, ShareSession.read() == credential else {
             throw Failure("Your account or website changed. Open FleetLink, then share again.")
         }
+        #if DEBUG && FLEETLINK_SHARE_FIXTURE
+        if credential.token == "nonsecret-extension-qualification-fixture" {
+            // No URLSession is reached for this qualification credential.
+            if path == "/api/teams", method == "GET" {
+                return Data(#"{"teams":[{"id":"fixture-team","name":"Fixture Team"}]}"#.utf8)
+            }
+            if ["/api/shares", "/api/links"].contains(path), method == "POST" {
+                guard let body, !body.isEmpty else { throw Failure("Empty fixture upload.") }
+                return Data(#"{"share":{"url":"https://example.invalid/qualification-result"}}"#.utf8)
+            }
+            throw Failure("Unsupported qualification request. Nothing was sent.")
+        }
+        // An opted-in fixture build must never use a real account or network.
+        throw Failure("Qualification build accepts only its synthetic credential. Nothing was sent.")
+        #else
         var request = URLRequest(url: credential.origin.appending(path: path))
         request.httpMethod = method
         request.timeoutInterval = 90
@@ -271,5 +286,6 @@ final class ShareViewController: UIViewController {
             throw Failure("FleetLink could not complete this request (\(http.statusCode)). Nothing else will be sent automatically.")
         }
         return data
+        #endif
     }
 }
