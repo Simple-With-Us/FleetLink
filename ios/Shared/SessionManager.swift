@@ -37,6 +37,13 @@ public final class SessionManager: ObservableObject {
     public init() {
         Keychain.remove(account: Self.retiredSecretAccount)
         user = nil
+        syncShareSession()
+    }
+
+    public func syncShareSession() {
+        let value = Keychain.get(account: Self.passkeyBearerAccount)
+        let origin = UserDefaults.standard.string(forKey: "fleetlink_server_host") ?? Self.portalOrigin.absoluteString
+        ShareSession.save(value, origin: origin)
     }
 
     /// The credential for account API calls: the passkey session, or empty when signed out.
@@ -76,19 +83,12 @@ public final class SessionManager: ObservableObject {
 
     /// The passkey session token.  Sent as `Authorization: Bearer`, never as a cookie.
     public var passkeyBearer: String? {
-        let value = Keychain.get(account: Self.passkeyBearerAccount)
-        guard let value, !value.isEmpty else {
-            ShareSession.save(nil)
-            return nil
-        }
-        // Refresh the shared copy on normal app use, including existing installs.
-        ShareSession.save(value)
-        return value
+        Keychain.get(account: Self.passkeyBearerAccount)
     }
 
     public func adoptBearerToken(_ token: String) {
         Keychain.set(token, account: Self.passkeyBearerAccount)
-        ShareSession.save(token)
+        syncShareSession()
         lastError = nil
     }
 

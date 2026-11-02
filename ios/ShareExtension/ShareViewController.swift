@@ -18,7 +18,7 @@ final class ShareViewController: UIViewController {
     private var uploading = false
     private var completed = false
     private var resultLink: String?
-    private let origin = URL(string: "https://fleetlink.online")!
+    private var credential: ShareSession.Credential?
     private let maxBytes = 20 * 1024 * 1024
     private struct Team: Decodable { let id: String; let name: String }
     private struct TeamList: Decodable { let teams: [Team] }
@@ -73,7 +73,8 @@ final class ShareViewController: UIViewController {
 
     private func prepare() async {
         do {
-            guard ShareSession.read() != nil else {
+            credential = ShareSession.read()
+            guard credential != nil else {
                 throw Failure("Open FleetLink and sign in once, then share again. Nothing was uploaded.")
             }
             let items = extensionContext?.inputItems as? [NSExtensionItem] ?? []
@@ -89,6 +90,7 @@ final class ShareViewController: UIViewController {
                     guard let url = item as? URL, ["https", "http"].contains(url.scheme?.lowercased() ?? "") else {
                         throw Failure("That web address is not supported.")
                     }
+                    guard url.absoluteString.utf8.count <= maxBytes - total else { throw Failure("Share up to 20 MB at a time from this extension.") }
                     if providers.count == 1 { redirect = url }
                     else { parts.append(Part(name: "address-\(index + 1).txt", type: "text/plain", data: Data(url.absoluteString.utf8))) }
                 } else if let type = provider.registeredTypeIdentifiers.compactMap({ UTType($0) }).first(where: {
@@ -109,6 +111,7 @@ final class ShareViewController: UIViewController {
                 } else if provider.hasItemConformingToTypeIdentifier(UTType.text.identifier) {
                     let item = try await loadItem(provider, type: UTType.text.identifier)
                     guard let text = item as? String else { throw Failure("That text could not be read.") }
+                    guard text.utf8.count <= maxBytes - total else { throw Failure("Share up to 20 MB at a time from this extension.") }
                     parts.append(Part(name: "text-\(index + 1).txt", type: "text/plain; charset=utf-8", data: Data(text.utf8)))
                 } else { throw Failure("One selected item is unsupported. Nothing was uploaded.") }
                 total = parts.reduce(0) { $0 + $1.data.count }
@@ -251,11 +254,13 @@ final class ShareViewController: UIViewController {
         }
     }
     private func request(path: String, method: String = "GET", body: Data? = nil, type: String? = nil) async throws -> Data {
-        guard let token = ShareSession.read(), !token.isEmpty else { throw Failure("Open FleetLink and sign in, then share again.") }
-        var request = URLRequest(url: origin.appending(path: path))
+        guard let credential, ShareSession.read() == credential else {
+            throw Failure("Your account or website changed. Open FleetLink, then share again.")
+        }
+        var request = URLRequest(url: credential.origin.appending(path: path))
         request.httpMethod = method
         request.timeoutInterval = 90
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(credential.token)", forHTTPHeaderField: "Authorization")
         request.setValue("ios", forHTTPHeaderField: "X-Fleet-Client")
         if let type { request.setValue(type, forHTTPHeaderField: "Content-Type") }
         request.httpBody = body

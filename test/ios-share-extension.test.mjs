@@ -14,7 +14,7 @@ test('Share extension is embedded, restricted to extension-safe code, and activa
 test('credentials stay in scoped keychain with migration and logout clearing, never preferences', () => {
  const shared=read('ios/Shared/ShareSession.swift'), session=read('ios/Shared/SessionManager.swift');
  assert.match(shared,/kSecAttrAccessGroup/); assert.match(shared,/kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly/);
- assert.doesNotMatch(shared,/UserDefaults/); assert.match(session,/ShareSession.save\(value\)/);
+ assert.doesNotMatch(shared,/UserDefaults/); assert.match(session,/ShareSession.save\(value, origin: origin\)/);
  assert.match(session,/ShareSession.save\(nil\)/);
 });
 test('preview precedes explicit confirmed post; bounded memory and errors cannot retry automatically', () => {
@@ -34,4 +34,13 @@ test('extension signing checks shared keychain, not unrelated web credential cap
  assert.doesNotThrow(()=>assertProfileBundle(profile('TEAM.online.fleetlink.ios'),'online.fleetlink.ios.Share'));
  assert.throws(()=>assertProfileBundle(profile('OTHER.*'),'online.fleetlink.ios.Share'),/shared keychain/);
  assert.throws(()=>assertProfileBundle(profile('TEAM.*'),'online.fleetlink.ios'),/application-identifier/);
+});
+
+test('share credential binds validated host and text is bounded before copying', () => {
+ const s=read('ios/ShareExtension/ShareViewController.swift');
+ assert.match(s,/credential.origin.appending/); assert.match(s,/ShareSession.read\(\) == credential/);
+ assert.match(s,/guard text.utf8.count <= maxBytes - total/);
+ const session=read('ios/Shared/SessionManager.swift');
+ assert.doesNotMatch(session.match(/public var passkeyBearer[\s\S]*?public func adoptBearerToken/)[0],/ShareSession.save/);
+ assert.match(read('ios/Shared/ShareSession.swift'),/allowedOrigin/);
 });
