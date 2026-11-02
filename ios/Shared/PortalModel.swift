@@ -275,11 +275,28 @@ private struct ApiTeamsResponse: Decodable {
     let teams: [PortalTeam]
 }
 
-private struct ApiShareList: Decodable { let shares: [ApiShare] }
+private struct ApiShareList: Decodable {
+    let shares: [ApiShare]
+    let next: String?
+}
+
+public enum PortalShareScope: String, CaseIterable, Identifiable {
+    case mine, teams, bots
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .mine: return "My links"
+        case .teams: return "My teams"
+        case .bots: return "My bots"
+        }
+    }
+}
 private struct ApiShareEnvelope: Decodable { let share: ApiShare }
 
 @MainActor
 public final class PortalManager: ObservableObject {
+    @Published public var scope: PortalShareScope = .mine
+    private var sharesRequestID = UUID()
     @Published public private(set) var shares: [PortalShare] = []
     @Published public private(set) var teams: [PortalTeam] = []
     @Published public private(set) var isLoading: Bool = false
@@ -297,42 +314,70 @@ public final class PortalManager: ObservableObject {
     /// The ledger the app kept before shares had owners.  It is cleared once.
     private let legacyLedgerKey = "fl_local_shares_v1"
 
-    public init() {
+    private let urlSession: URLSession
+
+    public init(urlSession: URLSession = .shared) {
+        self.urlSession = urlSession
         UserDefaults.standard.removeObject(forKey: legacyLedgerKey)
     }
 
     /// Load the signed-in account's live shares.  `token` is the passkey session.
     public func fetchShares(host: String = "https://fleetlink.online", token: String = "") async {
+        // A new scope/account/refresh invalidates every older in-flight response.
+        let requestID = UUID()
+        sharesRequestID = requestID
+        let requestedScope = scope
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        shares = []
+        computeAnalytics()
+        defer { if sharesRequestID == requestID { isLoading = false } }
         guard !token.isEmpty else {
-            shares = []
-            computeAnalytics()
             errorMessage = "Sign in with your passkey in Settings to see your links."
             return
         }
-        guard let url = URL(string: "\(normalizedHost(host))/api/shares?scope=mine&limit=200") else {
-            errorMessage = "That server address is not valid."
-            return
-        }
         do {
-            let (data, http) = try await send(authorizedRequest(url: url, method: "GET", token: token))
-            if http.statusCode == 401 || http.statusCode == 403 {
-                shares = []
-                computeAnalytics()
-                errorMessage = "Your sign-in has ended.\u{00A0} Sign in again in Settings."
-                return
-            }
-            guard (200...299).contains(http.statusCode) else {
-                errorMessage = serverMessage(from: data, fallback: "Could not load links.")
-                return
-            }
-            let list = try JSONDecoder().decode(ApiShareList.self, from: data)
-            shares = list.shares.map(Self.portalShare)
+            var cursor: String?
+            var seenCursors = Set<String>()
+            var loaded: [PortalShare] = []
+            var seenSlugs = Set<String>()
+            repeat {
+                try Task.checkCancellation()
+                guard sharesRequestID == requestID else { return }
+                guard var components = URLComponents(string: "\(normalizedHost(host))/api/shares") else {
+                    throw PortalError.invalidURL
+                }
+                components.queryItems = [URLQueryItem(name: "scope", value: requestedScope.rawValue),
+                                         URLQueryItem(name: "limit", value: "200")]
+                if let cursor { components.queryItems?.append(URLQueryItem(name: "before", value: cursor)) }
+                guard let url = components.url else { throw PortalError.invalidURL }
+                let (data, http) = try await send(authorizedRequest(url: url, method: "GET", token: token))
+                guard sharesRequestID == requestID else { return }
+                if http.statusCode == 401 || http.statusCode == 403 {
+                    errorMessage = "Your sign-in has ended.\u{00A0} Sign in again in Settings."
+                    return
+                }
+                guard (200...299).contains(http.statusCode) else {
+                    errorMessage = serverMessage(from: data, fallback: "Could not load links.")
+                    return
+                }
+                let list = try JSONDecoder().decode(ApiShareList.self, from: data)
+                for share in list.shares where seenSlugs.insert(share.slug).inserted {
+                    loaded.append(Self.portalShare(share))
+                }
+                cursor = list.next
+                if let cursor, !seenCursors.insert(cursor).inserted {
+                    throw PortalError.serverError("The server repeated a page. Refresh links to try again.")
+                }
+            } while cursor != nil
+            guard sharesRequestID == requestID else { return }
+            shares = loaded
             computeAnalytics()
+        } catch is CancellationError {
+            // A cancelled view must not publish an incomplete list as complete.
         } catch {
-            errorMessage = "Could not load links.\u{00A0} Check the connection and try again."
+            guard sharesRequestID == requestID else { return }
+            errorMessage = "Could not load all links.\u{00A0} Check the connection and try again."
         }
     }
 
@@ -670,7 +715,7 @@ public final class PortalManager: ObservableObject {
     }
 
     private func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         return (data, http)
     }

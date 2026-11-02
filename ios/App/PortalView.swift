@@ -84,6 +84,17 @@ public struct PortalView: View {
         NavigationStack {
             List {
                 errorMessageBanner
+                Section {
+                    Picker("Show links", selection: $portalManager.scope) {
+                        ForEach(PortalShareScope.allCases) { scope in
+                            Text(scope.title).tag(scope)
+                        }
+                    }
+                    .accessibilityIdentifier("links.scope")
+                    Text("Team links follow your membership. My bots shows only bots you manage.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 analyticsSection
                 filterChipsSection
                 sharesListSection
@@ -147,6 +158,9 @@ public struct PortalView: View {
                     await portalManager.fetchShares(host: serverHost, token: session.apiToken)
                 }
                 await portalManager.fetchTeams(host: serverHost, token: session.apiToken)
+            }
+            .onChange(of: portalManager.scope) { _, _ in
+                Task { await portalManager.fetchShares(host: serverHost, token: session.apiToken) }
             }
             .onChange(of: session.user) { _, _ in
                 Task { await portalManager.fetchShares(host: serverHost, token: session.apiToken) }
@@ -332,8 +346,11 @@ public struct PortalView: View {
                     }
                 }
             } label: {
-                Image(systemName: "arrow.up.arrow.down")
+                Label("Sort", systemImage: "arrow.up.arrow.down")
             }
+            .accessibilityLabel("Sort links")
+            .accessibilityValue(sortMode.rawValue)
+            .accessibilityIdentifier("links.sort")
         }
         ToolbarItem(placement: .navigationBarTrailing) {
             Button {
