@@ -21,7 +21,8 @@ test('selected scope follows cursor pages before publishing a complete list', ()
 test('existing sorting has an accessible visible control and keeps Newest default', () => {
   assert.match(view, /sortMode: ShareSort = .newest/);
   for (const option of ['Newest', 'Expiring first', 'Name', 'Largest']) assert.ok(view.includes(`= "${option}"`));
-  assert.match(view, /Label\("Sort", systemImage: "arrow.up.arrow.down"\)/);
+  assert.match(view, /Text\("Sort"\)/);
+  assert.match(view, /HStack\(spacing: 4\)/);
   assert.match(view, /accessibilityLabel\("Sort links"\)/);
 });
 test('team rows fail closed on missing permissions and gate destructive menus', () => {

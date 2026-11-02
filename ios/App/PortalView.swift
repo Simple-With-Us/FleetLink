@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 public struct PortalView: View {
     @ObservedObject var portalManager: PortalManager
     var onSelectArtifact: (URL) -> Void
+    private var tokenProvider: (() -> String)?
 
     @EnvironmentObject private var session: SessionManager
     @AppStorage("fleetlink_server_host") private var serverHost: String = "https://fleetlink.online"
@@ -42,8 +43,9 @@ public struct PortalView: View {
         var id: String { rawValue }
     }
 
-    public init(portalManager: PortalManager, onSelectArtifact: @escaping (URL) -> Void) {
+    public init(portalManager: PortalManager, tokenProvider: (() -> String)? = nil, onSelectArtifact: @escaping (URL) -> Void) {
         self.portalManager = portalManager
+        self.tokenProvider = tokenProvider
         self.onSelectArtifact = onSelectArtifact
     }
 
@@ -101,7 +103,7 @@ public struct PortalView: View {
             }
             .searchable(text: $searchText, prompt: "Search by name or address")
             .refreshable {
-                await portalManager.fetchShares(host: serverHost, token: session.apiToken)
+                await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken)
             }
             .navigationTitle("Links")
             .toolbar {
@@ -115,7 +117,7 @@ public struct PortalView: View {
             ) { share in
                 Button("Delete '\(share.slug)'", role: .destructive) {
                     Task {
-                        _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: session.apiToken)
+                        _ = await portalManager.deleteShare(slug: share.slug, host: serverHost, token: tokenProvider?() ?? session.apiToken)
                     }
                 }
                 Button("Cancel", role: .cancel) {}
@@ -148,22 +150,22 @@ public struct PortalView: View {
                         share: share,
                         portalManager: portalManager,
                         serverHost: serverHost,
-                        token: session.apiToken,
+                        token: tokenProvider?() ?? session.apiToken,
                         onDismiss: { showManageSheet = false }
                     )
                 }
             }
             .task {
                 if portalManager.shares.isEmpty {
-                    await portalManager.fetchShares(host: serverHost, token: session.apiToken)
+                    await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken)
                 }
-                await portalManager.fetchTeams(host: serverHost, token: session.apiToken)
+                await portalManager.fetchTeams(host: serverHost, token: tokenProvider?() ?? session.apiToken)
             }
             .onChange(of: portalManager.scope) { _, _ in
-                Task { await portalManager.fetchShares(host: serverHost, token: session.apiToken) }
+                Task { await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken) }
             }
             .onChange(of: session.user) { _, _ in
-                Task { await portalManager.fetchShares(host: serverHost, token: session.apiToken) }
+                Task { await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken) }
             }
         }
     }
@@ -346,7 +348,11 @@ public struct PortalView: View {
                     }
                 }
             } label: {
-                Label("Sort", systemImage: "arrow.up.arrow.down")
+                HStack(spacing: 4) {
+                    Text("Sort")
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+                .fixedSize()
             }
             .accessibilityLabel("Sort links")
             .accessibilityValue(sortMode.rawValue)
@@ -355,7 +361,7 @@ public struct PortalView: View {
         ToolbarItem(placement: .navigationBarTrailing) {
             Button {
                 Task {
-                    await portalManager.fetchShares(host: serverHost, token: session.apiToken)
+                    await portalManager.fetchShares(host: serverHost, token: tokenProvider?() ?? session.apiToken)
                 }
             } label: {
                 Image(systemName: "arrow.clockwise")
@@ -373,7 +379,7 @@ public struct PortalView: View {
             if let share = shareToRename, !renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let target = renameSlugInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 Task {
-                    _ = await portalManager.renameShare(slug: share.slug, newSlug: target, host: serverHost, token: session.apiToken)
+                    _ = await portalManager.renameShare(slug: share.slug, newSlug: target, host: serverHost, token: tokenProvider?() ?? session.apiToken)
                 }
             }
         }
@@ -408,7 +414,7 @@ public struct PortalView: View {
     private func renewShare(_ share: PortalShare) {
         isRenewing[share.slug] = true
         Task {
-            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: session.apiToken)
+            _ = await portalManager.renewShare(slug: share.slug, host: serverHost, token: tokenProvider?() ?? session.apiToken)
             isRenewing[share.slug] = false
         }
     }
@@ -416,7 +422,7 @@ public struct PortalView: View {
     private func extendShare(_ share: PortalShare, days: String) {
         isRenewing[share.slug] = true
         Task {
-            _ = await portalManager.extendShare(slug: share.slug, days: days, host: serverHost, token: session.apiToken)
+            _ = await portalManager.extendShare(slug: share.slug, days: days, host: serverHost, token: tokenProvider?() ?? session.apiToken)
             isRenewing[share.slug] = false
         }
     }
