@@ -1633,7 +1633,11 @@ if [[ "$MANUAL_SIGN" -eq 1 ]]; then
     log "archived app signed by: ${_authority:-unknown}"
   fi
 fi
-upload_sentry_artifacts
+if [[ "$EXPORT_ONLY" -eq 0 ]]; then
+  upload_sentry_artifacts
+else
+  log "export only: no Sentry artifacts uploaded"
+fi
 
 if [[ "$MANUAL_SIGN" -eq 0 ]]; then
   EXPORT_PLIST_UPLOAD="${FLEET_DIR}/ExportOptions-appstore.plist"
