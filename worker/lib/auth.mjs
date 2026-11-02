@@ -85,7 +85,7 @@ async function operatorPrincipal(env) {
   return principalFor("operator", user);
 }
 
-/** The Agent-Sync server acting for one seat (agents.mjs).  Agents are never admins. */
+/** The simple-tools server acting for one seat (agents.mjs).  Agents are never admins. */
 async function agentPrincipal(env, request) {
   const user = await ensureAgentUser(env, request.headers.get("x-fleet-seat"));
   const botLimits = await agentLimitsResolution(env, user);

@@ -153,7 +153,7 @@ test("one-time upload URLs: mint with edit access, use once, within size and tim
   assert.equal((await call(env, "PUT", viaToken.upload_url, { body: "x" })).status, 403);
 });
 
-test("agent seats act through the Agent-Sync server credential with their own accounts", async () => {
+test("agent seats act through the simple-tools server credential with their own accounts", async () => {
   const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
   const wrong = await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer fls_${"cd".repeat(32)}`, "x-fleet-seat": "JET" } });
   assert.equal(wrong.status, 401);

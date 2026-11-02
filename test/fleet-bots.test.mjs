@@ -234,7 +234,7 @@ test("bots work with the widest limits:  admin file sizes, any lifetime, no stor
   assert.equal(long.error, null);
 });
 
-test("the manager gives a bot tokens, renames, disables, and adds bots;  the Agent-Sync credential mints a seat token", async () => {
+test("the manager gives a bot tokens, renames, disables, and adds bots;  the simple-tools credential mints a seat token", async () => {
   const { env, jay } = await fleet();
   await callJson(env, "GET", "/api/me", { auth: jay });
   const made = await callJson(env, "POST", "/api/bots/usr_agent_codex/tokens", { auth: jay, json: { name: "codex mac" } });
@@ -265,7 +265,7 @@ test("the manager gives a bot tokens, renames, disables, and adds bots;  the Age
 
   const minted = await callJson(env, "POST", "/api/agent/token", { ...bot("OPENCODE"), json: {} });
   assert.equal(minted.status, 201);
-  assert.deepEqual([minted.data.seat, minted.data.user_id, minted.data.api_token.name], ["OPENCODE", "usr_agent_opencode", "OPENCODE via Agent-Sync"]);
+  assert.deepEqual([minted.data.seat, minted.data.user_id, minted.data.api_token.name], ["OPENCODE", "usr_agent_opencode", "OPENCODE via simple-tools"]);
   assert.equal((await callJson(env, "GET", "/api/me", { auth: { token: minted.data.token } })).data.user.id, "usr_agent_opencode");
   assert.equal((await callJson(env, "POST", "/api/agent/token", { auth: jay, json: {} })).status, 403);
 });
@@ -324,7 +324,7 @@ test("a bot token can follow its manager's limits live:  nothing is copied, so a
   assert.equal((await callJson(env, "POST", "/api/tokens", { auth: person, json: { name: "x", limits_from: "manager" } })).status, 400);
 });
 
-test("the Agent-Sync credential can mint a seat token that follows the fleet owner's limits", async () => {
+test("the simple-tools credential can mint a seat token that follows the fleet owner's limits", async () => {
   const { env, jay } = await fleet();
   await callJson(env, "GET", "/api/me", { auth: jay });
   const minted = await callJson(env, "POST", "/api/agent/token", { ...bot("JET"), json: { limits_from: "manager" } });
@@ -387,7 +387,7 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
   const view = await callJson(env, "GET", "/api/bots", { auth: jay });
   assert.ok(view.data.bots.every((b) => b.limit_mode === "legacy" && b.limits === null));
 
-  // Manual maxes: stored, shown, and enforced through the Agent-Sync path.
+  // Manual maxes: stored, shown, and enforced through the simple-tools path.
   const patched = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "manual", limits: { max_file_days: 2, max_file_mb: 1 } } });
   assert.equal(patched.status, 200);
   assert.equal(patched.data.bot.limit_mode, "manual");

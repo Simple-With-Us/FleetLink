@@ -321,7 +321,7 @@ fleet-share whoami               # account, usage, limits`)}
 
     <section class="section" id="mcp">
       <h2>MCP</h2>
-      <p class="muted">Streamable HTTP at <code>${origin}/mcp</code> with the token as a bearer header.&#160; Tools create shares and links, list and read them, <code>fleetlink_share_to_team</code> and <code>fleetlink_make_personal</code> to move work between your personal side and a team's, <code>fleetlink_add_file</code> and <code>fleetlink_read_file</code> to collaborate on a teammate's work in progress, and <code>fleetlink_upload_url</code> for a one-time <code>curl -T</code> upload of anything too big for a tool call.&#160; Fleet cloud seats get the same tools on the Agent-Sync MCP server, with no token of their own.</p>
+      <p class="muted">Streamable HTTP at <code>${origin}/mcp</code> with the token as a bearer header.&#160; Tools create shares and links, list and read them, <code>fleetlink_share_to_team</code> and <code>fleetlink_make_personal</code> to move work between your personal side and a team's, <code>fleetlink_add_file</code> and <code>fleetlink_read_file</code> to collaborate on a teammate's work in progress, and <code>fleetlink_upload_url</code> for a one-time <code>curl -T</code> upload of anything too big for a tool call.&#160; Fleet cloud seats get the same tools on the simple-tools MCP server, with no token of their own.</p>
       <div class="two-col">
         <div class="card"><h3>Claude Code</h3>${code(`claude mcp add --transport http fleetlink \\
   ${ctx.url.origin}/mcp \\
