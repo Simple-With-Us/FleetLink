@@ -294,7 +294,7 @@ jobs:
             *) echo "::error::plan-build output is not a 12-digit merge-timestamp build"; exit 1 ;;
           esac
           # shellcheck disable=SC2086
-          bash scripts/ios-ship-testflight.sh ${IOS_SHIP_ARGS:-} --build "$PLAN_BUILD"
+          node scripts/ios-observe-ship.mjs bash scripts/ios-ship-testflight.sh ${IOS_SHIP_ARGS:-} --build "$PLAN_BUILD"
 
       - name: Verify signed Share extension archive and exported IPA
         if: success() && steps.gate.outputs.should_ship == '1' && (github.ref != 'refs/heads/main' || inputs.export_only == true)
@@ -303,7 +303,7 @@ jobs:
       # Sync the standing testers and attach/submit the new build to the public
       # external group.  A failure here is a warning, never a red ship.
       - name: Sync standing TestFlight testers
-        if: success() && steps.gate.outputs.should_ship == '1' && github.ref == 'refs/heads/main' && inputs.export_only != true
+        if: success() && steps.ship.outputs.uploaded == 'true' && github.ref == 'refs/heads/main' && inputs.export_only != true
         continue-on-error: true
         env:
           ASC_STANDING_TESTERS: ${{ secrets.ASC_STANDING_TESTERS }}
@@ -321,7 +321,7 @@ jobs:
           appleid_rc=$?
           set -e
           if [ "$appleid_rc" -ne 0 ] || [ -z "$appleid" ]; then
-            echo "::warning title=TestFlight standing testers::could not read the fleetlink appleId from scripts/ios-fleet/apps.json (rc=${appleid_rc}); tester sync skipped.  The TestFlight upload itself succeeded."
+            echo "::warning title=TestFlight standing testers::could not read the fleetlink appleId from scripts/ios-fleet/apps.json (rc=${appleid_rc}); tester sync skipped.  An upload was recorded; processing and tester access are not confirmed."
             exit 0
           fi
           set +e
@@ -329,7 +329,7 @@ jobs:
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
-            echo "::warning title=TestFlight standing testers::tester sync exited ${rc}; see the standing-testers lines above.  The TestFlight upload itself succeeded."
+            echo "::warning title=TestFlight standing testers::tester sync exited ${rc}; see the standing-testers lines above.  An upload was recorded; processing and tester access are not confirmed."
           fi
 
       # Saved even when the ship step failed, but only on ticks that tried to
