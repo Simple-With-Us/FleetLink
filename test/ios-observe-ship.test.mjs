@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -29,3 +29,16 @@ for (const mode of ['rate-skip', 'same-head-skip', 'export-only', 'upload', 'fai
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+ test('unreadable receipt does not block the ship command or invent upload success', () => {
+   const dir = mkdtempSync(join(tmpdir(), 'ship-observe-error-'));
+   try {
+     mkdirSync(join(dir, 'last-ship-fleetlink.txt'));
+     const marker = join(dir, 'command-ran');
+     const output = join(dir, 'output');
+     const result = spawnSync(process.execPath, [script, process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`], { cwd: dir, encoding: 'utf8', env: { ...process.env, IOS_FLEET_STATE_DIR: dir, GITHUB_OUTPUT: output } });
+     assert.equal(result.status, 0, result.stderr);
+     assert.equal(readFileSync(marker, 'utf8'), 'ran');
+     assert.equal(readFileSync(output, 'utf8'), 'uploaded=false\n');
+   } finally { rmSync(dir, { recursive: true, force: true }); }
+ });

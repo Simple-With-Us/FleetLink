@@ -11,8 +11,8 @@ function receipt() {
     const stat = statSync(state, { bigint: true });
     return { text: readFileSync(state, 'utf8'), identity: `${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}` };
   } catch (error) {
-    if (error.code === 'ENOENT') return null;
-    throw error;
+    // Observation must not prevent the ship command from running.
+    return null;
   }
 }
 const [command, ...args] = process.argv.slice(2);
