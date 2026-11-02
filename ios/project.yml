@@ -86,11 +86,15 @@ targets:
     dependencies:
       - target: FleetLinkClip
         embed: true
+      - target: FleetLinkShare
+        embed: true
       - package: sentry-cocoa
         product: Sentry
     entitlements:
       path: App/FleetLink.entitlements
       properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)online.fleetlink.ios
         com.apple.developer.associated-domains:
           - applinks:fleetlink.online
           - applinks:fleetlink.app
@@ -121,6 +125,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         SentryDSN: $(SENTRY_DSN)
         FleetLinkAccountOrigin: https://fleetlink.online
+        FleetLinkSharedKeychainGroup: $(AppIdentifierPrefix)online.fleetlink.ios
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -132,12 +137,53 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
 
+  FleetLinkShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+      - path: Shared/ShareSession.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios.Share
+        DEVELOPMENT_TEAM: CC8UTF7ATG
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "202610290000"
+        TARGETED_DEVICE_FAMILY: '1,2'
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/FleetLinkShare.entitlements
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: "FleetLink iOS Share App Store"
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: FleetLink
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        FleetLinkSharedKeychainGroup: $(AppIdentifierPrefix)online.fleetlink.ios
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsFileWithMaxCount: 10
+              NSExtensionActivationSupportsImageWithMaxCount: 10
+              NSExtensionActivationSupportsMovieWithMaxCount: 10
+              NSExtensionActivationSupportsWebURLWithMaxCount: 10
+              NSExtensionActivationSupportsText: true
+
 schemes:
   FleetLink:
     build:
       targets:
         FleetLink: all
         FleetLinkClip: all
+        FleetLinkShare: all
     run:
       config: Debug
     archive:

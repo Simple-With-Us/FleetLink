@@ -72,7 +72,14 @@ export function assertProfileBundle(xml, bundleId) {
   }
   const task = matchOne(xml, /<key>get-task-allow<\/key>\s*<(true|false)\s*\/>/);
   if (task !== "false") throw new Error(`Profile for ${bundleId} is not a distribution profile.`);
-  if (!xml.includes("com.apple.developer.associated-domains")) {
+  if (bundleId === "online.fleetlink.ios.Share") {
+    const groups = matchOne(xml, /<key>keychain-access-groups<\/key>\s*<array>([\s\S]*?)<\/array>/);
+    const prefix = appId.slice(0, -(bundleId.length + 1));
+    const allowed = [...groups.matchAll(/<string>([^<]+)<\/string>/g)].map((m) => m[1]);
+    if (!allowed.includes(`${prefix}.*`) && !allowed.includes(`${prefix}.online.fleetlink.ios`)) {
+      throw new Error(`Profile for ${bundleId} cannot access the FleetLink shared keychain group.`);
+    }
+  } else if (!xml.includes("com.apple.developer.associated-domains")) {
     throw new Error(`Profile for ${bundleId} is missing the associated-domains entitlement.`);
   }
 }

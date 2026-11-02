@@ -77,17 +77,24 @@ public final class SessionManager: ObservableObject {
     /// The passkey session token.  Sent as `Authorization: Bearer`, never as a cookie.
     public var passkeyBearer: String? {
         let value = Keychain.get(account: Self.passkeyBearerAccount)
-        guard let value, !value.isEmpty else { return nil }
+        guard let value, !value.isEmpty else {
+            ShareSession.save(nil)
+            return nil
+        }
+        // Refresh the shared copy on normal app use, including existing installs.
+        ShareSession.save(value)
         return value
     }
 
     public func adoptBearerToken(_ token: String) {
         Keychain.set(token, account: Self.passkeyBearerAccount)
+        ShareSession.save(token)
         lastError = nil
     }
 
     public func clearBearerToken() {
         Keychain.remove(account: Self.passkeyBearerAccount)
+        ShareSession.save(nil)
     }
 
     /// Validate the stored bearer token against `GET /api/me`.
