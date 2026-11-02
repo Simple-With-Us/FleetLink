@@ -296,10 +296,14 @@ jobs:
           # shellcheck disable=SC2086
           bash scripts/ios-ship-testflight.sh ${IOS_SHIP_ARGS:-} --build "$PLAN_BUILD"
 
+      - name: Verify signed Share extension archive and exported IPA
+        if: success() && steps.gate.outputs.should_ship == '1' && (github.ref != 'refs/heads/main' || inputs.export_only == true)
+        run: python3 scripts/ios-verify-share-export.py
+
       # Sync the standing testers and attach/submit the new build to the public
       # external group.  A failure here is a warning, never a red ship.
       - name: Sync standing TestFlight testers
-        if: success() && steps.gate.outputs.should_ship == '1'
+        if: success() && steps.gate.outputs.should_ship == '1' && github.ref == 'refs/heads/main' && inputs.export_only != true
         continue-on-error: true
         env:
           ASC_STANDING_TESTERS: ${{ secrets.ASC_STANDING_TESTERS }}

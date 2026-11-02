@@ -105,7 +105,17 @@ struct FleetLinkApp: App {
                     .tag(3)
             }
             .environmentObject(session)
-            .task { await session.refreshSession() }
+            .task {
+                #if DEBUG && FLEETLINK_SHARE_FIXTURE
+                // Run after StateObject initialization/migration, not App.init.
+                if ProcessInfo.processInfo.arguments.contains("--seed-share-fixture") {
+                    let host = ProcessInfo.processInfo.environment["FLEETLINK_FIXTURE_HOST"] ?? "https://fleetlink.online"
+                    ShareSession.save("nonsecret-extension-qualification-fixture", origin: host)
+                }
+                #else
+                await session.refreshSession()
+                #endif
+            }
             .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
                 guard let incomingURL = userActivity.webpageURL else { return }
                 inputURLString = incomingURL.absoluteString

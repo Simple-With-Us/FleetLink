@@ -148,7 +148,7 @@ test("project.yml carries the fixed marketing version and a 12-digit build place
   const apps = JSON.parse(read("scripts/ios-fleet/apps.json")).apps.fleetlink;
   const marketing = [...project.matchAll(/MARKETING_VERSION: "([^"]+)"/g)].map((m) => m[1]);
   const build = [...project.matchAll(/CURRENT_PROJECT_VERSION: "([^"]+)"/g)].map((m) => m[1]);
-  assert.equal(marketing.length, 2, "app and App Clip");
+  assert.equal(marketing.length, 3, "app, App Clip and Share extension");
   assert.equal(new Set(marketing).size, 1, "app and App Clip share one version");
   assert.equal(marketing[0], apps.fixedMarketingVersion, "the placeholder tracks apps.json fixedMarketingVersion");
   assert.equal(new Set(build).size, 1, "app and App Clip share one build");
@@ -163,11 +163,17 @@ test("apps.json describes the same app project.yml builds", () => {
   const project = read("ios/project.yml");
   assert.equal(apps.bundleId, "online.fleetlink.ios");
   assert.match(project, /PRODUCT_BUNDLE_IDENTIFIER: online\.fleetlink\.ios\n/);
-  assert.deepEqual(apps.extraBundleIds, ["online.fleetlink.ios.Clip"]);
+  assert.deepEqual(apps.extraBundleIds, ["online.fleetlink.ios.Clip", "online.fleetlink.ios.Share"]);
   assert.equal(apps.scheme, "FleetLink");
   assert.equal(apps.projectRel, "ios/FleetLink.xcodeproj");
   assert.equal(apps.sentryPlistKey, "SentryDSN");
   assert.match(project, /SentryDSN: \$\(SENTRY_DSN\)/);
   const profiles = JSON.parse(read("ios/appstore-profiles.json"));
-  assert.deepEqual(Object.keys(profiles).sort(), ["online.fleetlink.ios", "online.fleetlink.ios.Clip"]);
+  assert.deepEqual(Object.keys(profiles).sort(), ["online.fleetlink.ios", "online.fleetlink.ios.Clip", "online.fleetlink.ios.Share"]);
+});
+
+test("export-only qualification does not sync testers or upload Sentry source artifacts", () => {
+  assert.match(active, /if: success\(\) && steps.gate.outputs.should_ship == '1' && github.ref == 'refs\/heads\/main' && inputs.export_only != true/);
+  const ship = readFileSync(new URL('../scripts/ios-fleet/ship-testflight.sh', import.meta.url), 'utf8');
+  assert.match(ship, /if \[\[ "\$EXPORT_ONLY" -eq 0 \]\]; then\s+upload_sentry_artifacts/);
 });

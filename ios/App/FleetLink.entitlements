@@ -9,5 +9,9 @@
 		<string>webcredentials:fleetlink.online</string>
 		<string>webcredentials:fleetlink.app</string>
 	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)online.fleetlink.ios</string>
+	</array>
 </dict>
 </plist>

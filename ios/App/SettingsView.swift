@@ -65,6 +65,7 @@ public struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onChange(of: serverHost) { _, _ in session.syncShareSession() }
         }
     }
 }

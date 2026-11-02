@@ -22,6 +22,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>FleetLinkAccountOrigin</key>
 	<string>https://fleetlink.online</string>
+	<key>FleetLinkSharedKeychainGroup</key>
+	<string>$(AppIdentifierPrefix)online.fleetlink.ios</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UILaunchScreen</key>
