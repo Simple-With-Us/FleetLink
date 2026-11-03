@@ -14,7 +14,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { z } from "zod";
-import { makeEnv, OPERATOR_SECRET } from "../test/helpers/harness.mjs";
+import { callJson, makeEnv, OWNER_SESSION } from "../test/helpers/harness.mjs";
 import { serve } from "../test/helpers/server.mjs";
 
 /** The slice of GET /api/admin/users this test relies on, so a contract change fails here. */
@@ -185,10 +185,13 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     await page.click("#signin-form button[type=submit]");
     await page.waitForURL("**/dashboard");
 
-    // Make Ada an admin with the operator secret, then use the admin console.
-    const users = AdminUsers.parse(await (await fetch(`${base}/api/admin/users`, { headers: { "x-fleet-admin": OPERATOR_SECRET } })).json());
+    // Make Ada an admin with the harness admin person's session (the shared
+    // operator secret is retired), then use the admin console.
+    await callJson(env, "GET", "/api/me", { auth: { operator: true } });
+    const adminAuth = { authorization: `Bearer ${OWNER_SESSION}` };
+    const users = AdminUsers.parse(await (await fetch(`${base}/api/admin/users`, { headers: adminAuth })).json());
     const adaId = users.users.find((u) => u.display_name === "Ada").id;
-    await fetch(`${base}/api/admin/users/${adaId}`, { method: "PATCH", headers: { "x-fleet-admin": OPERATOR_SECRET, "content-type": "application/json" }, body: JSON.stringify({ role: "admin" }) });
+    await fetch(`${base}/api/admin/users/${adaId}`, { method: "PATCH", headers: { ...adminAuth, "content-type": "application/json" }, body: JSON.stringify({ role: "admin" }) });
     await page.goto("/login");
     await page.click("#signin-form button[type=submit]");
     await page.waitForURL("**/dashboard");
@@ -221,7 +224,7 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     await page.waitForSelector("#content h1");
 
     // Bob is now locked out by a disabled account.
-    await fetch(`${base}/api/admin/users/${(users.users.find((u) => u.display_name === "Bob")).id}`, { method: "PATCH", headers: { "x-fleet-admin": OPERATOR_SECRET, "content-type": "application/json" }, body: JSON.stringify({ status: "disabled" }) });
+    await fetch(`${base}/api/admin/users/${(users.users.find((u) => u.display_name === "Bob")).id}`, { method: "PATCH", headers: { ...adminAuth, "content-type": "application/json" }, body: JSON.stringify({ status: "disabled" }) });
     await bob.page.goto("/dashboard");
     await bob.page.waitForURL("**/login?next=/dashboard");
 
