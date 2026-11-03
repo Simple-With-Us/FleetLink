@@ -583,16 +583,19 @@ def resolve_auth(args):
             # AGENT_SECRET is the canonical name for the caller's own API
             # token in the auth file; FLEETLINK_TOKEN stays accepted.
             for token_key in ("FLEETLINK_TOKEN", "AGENT_SECRET"):
-                if values.get(token_key):
-                    return ("Authorization", "Bearer " + values[token_key], path)
+                token_value = (values.get(token_key) or "").strip()
+                if token_value:
+                    return ("Authorization", "Bearer " + token_value, path)
         for key in ("FLEET_ADMIN_SECRET", "ADMIN_SECRET", "FLEET_AUTH_SECRET"):
             if values.get(key):
                 return ("X-Fleet-Admin", values[key], path + " (operator)")
         break
     if not args.operator and os.path.isfile(credentials_path()):
         saved = read_kv_file(credentials_path())
-        if saved.get("FLEETLINK_TOKEN"):
-            return ("Authorization", "Bearer " + saved["FLEETLINK_TOKEN"], "saved login")
+        for token_key in ("FLEETLINK_TOKEN", "AGENT_SECRET"):
+            token_value = (saved.get(token_key) or "").strip()
+            if token_value:
+                return ("Authorization", "Bearer " + token_value, "saved login")
     for key in ("FLEET_ADMIN_SECRET", "ADMIN_SECRET"):
         if os.environ.get(key, "").strip():
             return ("X-Fleet-Admin", os.environ[key].strip(), key + " (operator)")
@@ -1028,7 +1031,7 @@ def cmd_whoami(args):
 
 
 def cmd_login(args):
-    token = args.token or os.environ.get("FLEETLINK_TOKEN") or getpass.getpass("API token (input hidden): ")
+    token = (args.token or os.environ.get("FLEETLINK_TOKEN") or os.environ.get("AGENT_SECRET") or getpass.getpass("API token (input hidden): ")).strip()
     token = token.strip()
     if not token.startswith("fla_"):
         raise CliError("That does not look like a FleetLink API token (fla_…).")

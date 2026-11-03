@@ -124,11 +124,25 @@ test("login saves the token with mode 0600, and auth sources follow their order"
     // AGENT_SECRET in the environment works the same way.
     const viaAgentSecret = await run(["whoami"], { cwd: f.work, env: { ...f.base, ["AGENT" + "_SECRET"]: f.adaToken } });
     assert.match(viaAgentSecret.stdout, /^Ada/);
+    // Padding inside a quoted auth-file value is stripped before use.
+    writeFileSync(join(f.work, "fleet-link-auth.env"), `AGENT_SECRET="  ${f.adaToken}  "\n`);
+    assert.match((await run(["whoami"], { cwd: f.work, env: f.base })).stdout, /^Ada/);
+    rmSync(join(f.work, "fleet-link-auth.env"));
+    // A saved credentials file may also carry the token as AGENT_SECRET.
+    writeFileSync(saved, `AGENT_SECRET=${f.adaToken}\n`);
+    assert.match((await run(["whoami"], { cwd: f.work, env: f.base })).stdout, /^Ada/);
     // The operator secret is the last resort, or forced with --operator.
     const op = await run(["whoami", "--operator"], { cwd: f.work, env: { ...f.base, FLEET_ADMIN_SECRET: "test-operator-secret-value" } });
     assert.match(op.stdout, /^Operator \(admin\)/);
     const out = await run(["logout"], { cwd: f.work, env: f.base });
     assert.match(out.stdout, /Removed/);
+    // Login also accepts AGENT_SECRET from the environment.
+    const agentLogin = await run(["login"], { cwd: f.work, env: { ...f.base, ["AGENT" + "_SECRET"]: f.bobToken } });
+    assert.equal(agentLogin.status, 0, agentLogin.stderr);
+    assert.match(agentLogin.stdout, /Signed in as Bob/);
+    assert.match((await run(["whoami"], { cwd: f.work, env: f.base })).stdout, /^Bob/);
+    const out2 = await run(["logout"], { cwd: f.work, env: f.base });
+    assert.match(out2.stdout, /Removed/);
     const agent = await run(["--agent", "notes.md"], { cwd: f.work, env: { ...f.base, FLEET_AGENT_SECRET: "x" } });
     assert.match(agent.stderr, /retired/);
   } finally {
