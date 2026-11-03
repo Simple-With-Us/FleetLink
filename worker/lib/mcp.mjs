@@ -652,7 +652,7 @@ export async function handleMcp(request, env, origin, exec) {
   if (request.method !== "POST") return jsonResponse({ error: "Method not allowed." }, 405, { allow: "POST" });
   let principal;
   try {
-    principal = await resolvePrincipal(request, env);
+    principal = await resolvePrincipal(request, env, exec?.waitUntil ? (promise) => exec.waitUntil(promise.catch(() => {})) : undefined);
   } catch (err) {
     const status = err instanceof HttpError ? err.status : 401;
     return jsonResponse({ error: err instanceof HttpError ? err.message : "Authentication required." }, status, { "www-authenticate": mcpWwwAuthenticate(request) });

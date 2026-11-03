@@ -11,6 +11,7 @@
 | D1 database | `D1_DATABASE_ID` | Bound as `DB`.  `scripts/provision-d1.sh` creates one and prints its id.  The worker creates and migrates its own tables on first use. |
 | R2 bucket `fleet-shares` | bound as `FLEET_SHARES` | `FLEETLINK_R2_BUCKET` overrides the name. |
 | `ADMIN_SECRET` | Worker secret | The operator break-glass credential.  It acts as the built-in `operator` admin account.  Also published as `FLEET_ADMIN_SECRET`. |
+| `AGENT_SYNC_SECRET` | Worker secret | The simple-tools MCP server credential, presented with an `X-Fleet-Seat` header to act as that seat's bot account.  Live today; being retired in favor of per-seat API tokens, and deleted once the retirement soak completes. |
 | `SESSION_SECRET` | Worker secret | Pepper for session, API token, and invite hashes, and the key for password-unlock cookies.  Rotating it signs everyone out and invalidates every API token and invite. |
 | `SENTRY_DSN` | Worker secret | Optional error reporting.  The scrubber drops passwords, cookies, and auth headers. |
 | `CF_ANALYTICS_TOKEN`, `CF_ZONE_ID` | Worker secret / plain text | Optional.  Shows Cloudflare zone traffic in the dashboard's Analytics tab.  The token needs **Zone → Analytics → Read** on the zone; the id is the zone tag (`fleetlink.online`).  FleetLink's own per-share counts work without them. |

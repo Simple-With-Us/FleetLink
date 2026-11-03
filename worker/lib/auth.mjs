@@ -1,4 +1,5 @@
 import { AGENT_SECRET, ensureAgentUser, isAgentSecret } from "./agents.mjs";
+import { audit } from "./audit.mjs";
 import { safeEqual } from "./bytes.mjs";
 import { first } from "./db.mjs";
 import { getUser } from "./users.mjs";
@@ -79,17 +80,33 @@ function principalFor(kind, user, extra = {}) {
   return { kind, user, isAdmin: user.role === "admin", viaCookie: false, ...extra };
 }
 
-async function operatorPrincipal(env) {
+async function operatorPrincipal(env, via, background) {
   const user = await getUser(env.DB, OPERATOR_USER_ID);
   if (!user) throw new HttpError(503, "The operator account is missing.");
-  return principalFor("operator", user);
+  const principal = principalFor("operator", user);
+  // Retirement soak: every use of the legacy operator secret leaves an audit
+  // row, so remaining holders stay visible until the credential is retired.
+  // Backgrounded through the execution context so the write never sits in
+  // the request path; this row is removed with the branch that mints this
+  // principal.
+  const logged = audit(env, user.id, "auth.operator", user.id, { via });
+  if (background) background(logged); else await logged;
+  return principal;
 }
 
 /** The simple-tools server acting for one seat (agents.mjs).  Agents are never admins. */
-async function agentPrincipal(env, request) {
+async function agentPrincipal(env, request, background) {
   const user = await ensureAgentUser(env, request.headers.get("x-fleet-seat"));
   const botLimits = await agentLimitsResolution(env, user);
-  return { ...principalFor("agent", user), isAdmin: false, seat: user.agent_seat, ...(botLimits.limitsUser ? { limitsUser: botLimits.limitsUser } : {}), ...(botLimits.limitsOverride ? { limitsOverride: botLimits.limitsOverride } : {}) };
+  const principal = { ...principalFor("agent", user), isAdmin: false, seat: user.agent_seat, ...(botLimits.limitsUser ? { limitsUser: botLimits.limitsUser } : {}), ...(botLimits.limitsOverride ? { limitsOverride: botLimits.limitsOverride } : {}) };
+  // Retirement soak: every use of the shared agent secret leaves an audit
+  // row, so remaining holders stay visible until the credential is retired.
+  // Backgrounded through the execution context so the write never sits in
+  // the request path; this row is removed with the branch that mints this
+  // principal.
+  const logged = audit(env, user.id, "auth.agent", user.id, { seat: user.agent_seat });
+  if (background) background(logged); else await logged;
+  return principal;
 }
 
 async function fromToken(env, secret) {
@@ -114,14 +131,14 @@ async function fromSession(env, token, viaCookie) {
  * invalid header credential is a 401, so a typo never silently downgrades to
  * anonymous.  A stale cookie is ignored, because public pages must still load.
  */
-export async function resolvePrincipal(request, env) {
+export async function resolvePrincipal(request, env, background) {
   if (request.headers.has("x-fleet-agent")) {
     throw unauthorized("The shared agent secret is retired.  Create an API token on your FleetLink dashboard and send it as Authorization: Bearer fla_….");
   }
   const admin = operatorSecret(env);
   const adminHeader = (request.headers.get("x-fleet-admin") || "").trim();
   if (adminHeader) {
-    if (admin && await safeEqual(adminHeader, admin)) return operatorPrincipal(env);
+    if (admin && await safeEqual(adminHeader, admin)) return operatorPrincipal(env, "x-fleet-admin", background);
     if (API_TOKEN.test(adminHeader)) return fromToken(env, adminHeader);
     throw unauthorized("The operator secret is not valid.");
   }
@@ -129,11 +146,11 @@ export async function resolvePrincipal(request, env) {
   if (presented) {
     if (API_TOKEN.test(presented)) return fromToken(env, presented);
     if (AGENT_SECRET.test(presented)) {
-      if (await isAgentSecret(env, presented)) return agentPrincipal(env, request);
+      if (await isAgentSecret(env, presented)) return agentPrincipal(env, request, background);
       throw unauthorized("That agent server credential is not valid.");
     }
     if (SESSION_TOKEN.test(presented)) return fromSession(env, presented, false);
-    if (admin && await safeEqual(presented, admin)) return operatorPrincipal(env);
+    if (admin && await safeEqual(presented, admin)) return operatorPrincipal(env, "bearer", background);
     throw unauthorized("That credential is not valid.");
   }
   const tokenHeader = (request.headers.get("x-fleet-token") || "").trim();
