@@ -117,6 +117,13 @@ test("login saves the token with mode 0600, and auth sources follow their order"
     writeFileSync(join(f.work, "fleet-link-auth.env"), `FLEETLINK_TOKEN="${f.bobToken}"\n`);
     assert.match((await run(["whoami"], { cwd: f.work, env: f.base })).stdout, /^Bob/);
     rmSync(join(f.work, "fleet-link-auth.env"));
+    // AGENT_SECRET is the canonical auth-file name for the caller's own token.
+    writeFileSync(join(f.work, "fleet-link-auth.env"), `AGENT_SECRET="${f.adaToken}"\n`);
+    assert.match((await run(["whoami"], { cwd: f.work, env: f.base })).stdout, /^Ada/);
+    rmSync(join(f.work, "fleet-link-auth.env"));
+    // AGENT_SECRET in the environment works the same way.
+    const viaAgentSecret = await run(["whoami"], { cwd: f.work, env: { ...f.base, ["AGENT" + "_SECRET"]: f.adaToken } });
+    assert.match(viaAgentSecret.stdout, /^Ada/);
     // The operator secret is the last resort, or forced with --operator.
     const op = await run(["whoami", "--operator"], { cwd: f.work, env: { ...f.base, FLEET_ADMIN_SECRET: "test-operator-secret-value" } });
     assert.match(op.stdout, /^Operator \(admin\)/);

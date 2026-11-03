@@ -561,12 +561,15 @@ def read_kv_file(path):
 def resolve_auth(args):
     """Return (header_name, value, label).  Order: flag, env, auth file, saved login, operator secret."""
     if getattr(args, "agent", False):
-        raise CliError("The shared agent secret is retired.  Create an API token on your dashboard and set FLEETLINK_TOKEN.")
+        raise CliError("The shared agent secret is retired.  Create an API token on your dashboard and set AGENT_SECRET or FLEETLINK_TOKEN.")
     if args.token:
         return ("Authorization", "Bearer " + args.token.strip(), "--token")
     env_token = os.environ.get("FLEETLINK_TOKEN", "").strip()
     if env_token and not args.operator:
         return ("Authorization", "Bearer " + env_token, "FLEETLINK_TOKEN")
+    env_agent_secret = os.environ.get("AGENT_SECRET", "").strip()
+    if env_agent_secret and not args.operator:
+        return ("Authorization", "Bearer " + env_agent_secret, "AGENT_SECRET")
     files = []
     if os.environ.get("FLEETLINK_AUTH_FILE"):
         if not os.path.isfile(os.environ["FLEETLINK_AUTH_FILE"]):
@@ -576,8 +579,12 @@ def resolve_auth(args):
         files.extend(f for f in ("./fleet-link-auth.env", "./.fleet-link-auth.env") if os.path.isfile(f))
     for path in files:
         values = read_kv_file(path)
-        if values.get("FLEETLINK_TOKEN") and not args.operator:
-            return ("Authorization", "Bearer " + values["FLEETLINK_TOKEN"], path)
+        if not args.operator:
+            # AGENT_SECRET is the canonical name for the caller's own API
+            # token in the auth file; FLEETLINK_TOKEN stays accepted.
+            for token_key in ("FLEETLINK_TOKEN", "AGENT_SECRET"):
+                if values.get(token_key):
+                    return ("Authorization", "Bearer " + values[token_key], path)
         for key in ("FLEET_ADMIN_SECRET", "ADMIN_SECRET", "FLEET_AUTH_SECRET"):
             if values.get(key):
                 return ("X-Fleet-Admin", values[key], path + " (operator)")
@@ -591,7 +598,7 @@ def resolve_auth(args):
             return ("X-Fleet-Admin", os.environ[key].strip(), key + " (operator)")
     raise CliError(
         "Not signed in.  Create an API token at " + domain(args) + "/dashboard#tokens, then run "
-        "`fleet-share login` or set FLEETLINK_TOKEN."
+        "`fleet-share login`, set AGENT_SECRET in the auth file, or set FLEETLINK_TOKEN."
     )
 
 
