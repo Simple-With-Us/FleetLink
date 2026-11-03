@@ -72,7 +72,7 @@ export function requestContext(request, env, exec, deps = {}) {
     params: {},
     async principal() {
       if (!principalPromise) {
-        principalPromise = resolvePrincipal(request, env).then((principal) => {
+        principalPromise = resolvePrincipal(request, env, (promise) => ctx.waitUntil(promise)).then((principal) => {
           assertSameOrigin(request, principal);
           return principal;
         });

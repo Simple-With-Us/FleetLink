@@ -194,7 +194,7 @@ test("legacy secret authentications leave audit rows for the retirement soak", a
   const agent = await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer ${agentSecret}`, "x-fleet-seat": "MA" } });
   assert.equal(agent.data.auth.kind, "agent");
   assert.equal(agent.data.user.id, "usr_agent_ma");
-  const rows = (await env.DB.prepare("SELECT action, detail FROM audit_events WHERE action IN ('auth.operator', 'auth.agent') ORDER BY ts, action").all()).results;
+  const rows = (await env.DB.prepare("SELECT action, detail FROM audit_events WHERE action IN ('auth.operator', 'auth.agent') ORDER BY id").all()).results;
   assert.deepEqual(rows.map((r) => r.action), ["auth.operator", "auth.operator", "auth.agent"]);
   assert.deepEqual(rows.map((r) => JSON.parse(r.detail).via ?? JSON.parse(r.detail).seat), ["x-fleet-admin", "bearer", "MA"]);
   // Token and session authentications stay unaudited.
