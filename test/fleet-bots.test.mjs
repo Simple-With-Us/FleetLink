@@ -343,14 +343,22 @@ test("a bot token can follow its manager's limits live:  nothing is copied, so a
   assert.equal((await callJson(env, "POST", "/api/tokens", { auth: person, json: { name: "x", limits_from: "manager" } })).status, 400);
 });
 
-test("a bot can rotate its own token into one that follows the fleet owner's limits", async () => {
+test("a bot can rotate its own token, keeping its limits scope; only its manager can change the scope", async () => {
   const { env, jay } = await fleet();
   await callJson(env, "GET", "/api/me", { auth: jay });
-  const minted = await callJson(env, "POST", "/api/agent/token", { ...(await bot(env, "JET")), json: { limits_from: "manager" } });
+  // The manager gives JET a manager-following token; rotation preserves it.
+  const follow = (await callJson(env, "POST", "/api/bots/usr_agent_jet/tokens", { auth: jay, json: { name: "follows", limits_from: "manager" } })).data.token;
+  const minted = await callJson(env, "POST", "/api/agent/token", { auth: { token: follow }, json: {} });
   assert.equal(minted.status, 201);
   assert.equal(minted.data.api_token.limits_from, "manager");
   const me = await callJson(env, "GET", "/api/me", { auth: { token: minted.data.token } });
   assert.deepEqual([me.data.user.id, me.data.auth.limits_from], ["usr_agent_jet", "manager"]);
+  // An own-scope token cannot widen itself through rotation.
+  const widen = await callJson(env, "POST", "/api/agent/token", { ...(await bot(env, "JET")), json: { limits_from: "manager" } });
+  assert.equal(widen.status, 400);
+  const kept = await callJson(env, "POST", "/api/agent/token", { ...(await bot(env, "JET")), json: {} });
+  assert.equal(kept.status, 201);
+  assert.equal(kept.data.api_token.limits_from, "own");
 });
 
 test("fleet bot tokens under the fleet owner can post forever, renew forever, and create forever short links", async () => {

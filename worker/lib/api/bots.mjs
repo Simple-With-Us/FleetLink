@@ -257,17 +257,22 @@ export function botRoutes(router) {
   });
 
   // A bot presenting its own API token gets a fresh one for itself
-  // (self-rotation).  Manager minting (POST /api/bots/:id/tokens) is the
-  // recovery path for a lost token.
+  // (self-rotation).  The new token keeps the presenting token's limits
+  // scope:  rotation never widens, so a narrow token cannot escalate to the
+  // manager's tier by itself.  Manager minting (POST /api/bots/:id/tokens)
+  // is the only path that can change the scope, and the recovery path for a
+  // lost token.
   router.on("POST", "/api/agent/token", async (ctx) => {
     const principal = await ctx.auth();
     if (principal.kind !== "token" || principal.user.kind !== "agent") throw forbidden("Only a bot presenting its own API token can do that.");
     const seat = principal.user.agent_seat;
     const input = parseWith(AgentTokenBody, await readBody(ctx.request));
+    const scope = principal.token.limits_from ?? "own";
+    if (input.limits_from && input.limits_from !== scope) throw badRequest("Self-rotation keeps the presenting token's limits scope.  A manager mints a token with a different scope.");
     const made = await createToken(ctx.env, principal.user, await ctx.settings(), {
       name: input.name || `${seat} via simple-tools`,
       expires_in_days: input.expires_in_days ?? null,
-      limits_from: input.limits_from ?? "own"
+      limits_from: scope
     });
     await audit(ctx.env, principal.user.id, "bot.token.create", principal.user.id, { token_id: made.api_token.id, via: "simple-tools" });
     return json({ ...made, seat, user_id: principal.user.id }, 201);
