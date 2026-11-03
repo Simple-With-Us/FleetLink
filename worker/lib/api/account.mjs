@@ -133,7 +133,6 @@ export function accountRoutes(router) {
   router.on("DELETE", "/api/me", async (ctx) => {
     const principal = await ctx.person();
     parseWith(DeleteMeBody, await readBody(ctx.request));
-    if (principal.kind === "operator") throw badRequest("The operator account cannot be deleted.");
     await closeAccount(ctx.env, principal.user.id, principal.user.id);
     return json({ ok: true, deleted: true }, 200, { "Set-Cookie": clearSessionCookieHeader() });
   });

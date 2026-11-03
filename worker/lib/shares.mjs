@@ -321,8 +321,7 @@ export async function createShare(env, principal, input) {
   const expiresAt = resolveExpiry(principal, kind, input.days ?? input.expire_days, ts, settings);
   const password = cleanPassword(input.password);
   const teamId = await resolveTeam(env, principal, await defaultTeam(env, principal, input));
-  // The operator credential is the fleet owner's break-glass identity, so what it makes is theirs.
-  const ownerId = principal.kind === "operator" ? ((await fleetOwner(env))?.id ?? principal.user.id) : principal.user.id;
+  const ownerId = principal.user.id;
   const row = {
     id: newId("shr", 10),
     slug: requested || randomSlug(),

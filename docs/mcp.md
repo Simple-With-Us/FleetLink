@@ -15,7 +15,7 @@ The worker serves a remote MCP server at `https://fleetlink.online/mcp` (`https:
 Authorization: Bearer <API token>
 ```
 
-Create the token on `https://fleetlink.online/dashboard#tokens` (or `fleet-share tokens create NAME` as the operator).  A passkey session bearer and the operator secret (`X-Fleet-Admin`) also work.  A browser cookie does not: MCP takes header credentials only.  A missing or bad credential is `401` with `WWW-Authenticate: Bearer realm="fleetlink", resource_metadata="https://<host>/.well-known/oauth-protected-resource"`.  That document (RFC 9728) names the resource `https://<host>/mcp`; there is no OAuth authorization server.
+Create the token on `https://fleetlink.online/dashboard#tokens` (or `fleet-share tokens create NAME` while signed in).  A passkey session bearer also works.  A browser cookie does not: MCP takes header credentials only.  A missing or bad credential is `401` with `WWW-Authenticate: Bearer realm="fleetlink", resource_metadata="https://<host>/.well-known/oauth-protected-resource"`.  That document (RFC 9728) names the resource `https://<host>/mcp`; there is no OAuth authorization server.
 
 ## Tools
 

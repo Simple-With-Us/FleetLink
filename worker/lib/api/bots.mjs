@@ -6,9 +6,10 @@
  * itself.  The manager already has the owner's rights on the bot's shares
  * (policy.mjs).  Site admins can act on any bot.
  *
- * The simple-tools server credential can also mint a token for the seat it acts
- * as (POST /api/agent/token), which is how the fleet's per-seat tokens are
- * provisioned into Infisical without a person in the loop.
+ * A bot can also mint a token for itself (POST /api/agent/token, self-rotation
+ * with its current token), which is how the fleet's per-seat tokens are
+ * provisioned into Infisical without a person in the loop.  A bot whose token
+ * is lost is recovered by its manager minting a fresh one here.
  */
 import { z } from "zod";
 import { SEAT } from "../agents.mjs";
@@ -255,17 +256,20 @@ export function botRoutes(router) {
     return json({ ok: true });
   });
 
-  // The simple-tools server, acting as one seat, gets an API token for that seat.
+  // A bot presenting its own API token gets a fresh one for itself
+  // (self-rotation).  Manager minting (POST /api/bots/:id/tokens) is the
+  // recovery path for a lost token.
   router.on("POST", "/api/agent/token", async (ctx) => {
     const principal = await ctx.auth();
-    if (principal.kind !== "agent") throw forbidden("Only the simple-tools server credential can do that.");
+    if (principal.kind !== "token" || principal.user.kind !== "agent") throw forbidden("Only a bot presenting its own API token can do that.");
+    const seat = principal.user.agent_seat;
     const input = parseWith(AgentTokenBody, await readBody(ctx.request));
     const made = await createToken(ctx.env, principal.user, await ctx.settings(), {
-      name: input.name || `${principal.seat} via simple-tools`,
+      name: input.name || `${seat} via simple-tools`,
       expires_in_days: input.expires_in_days ?? null,
       limits_from: input.limits_from ?? "own"
     });
     await audit(ctx.env, principal.user.id, "bot.token.create", principal.user.id, { token_id: made.api_token.id, via: "simple-tools" });
-    return json({ ...made, seat: principal.seat, user_id: principal.user.id }, 201);
+    return json({ ...made, seat, user_id: principal.user.id }, 201);
   });
 }

@@ -10,8 +10,7 @@
 | Cloudflare account id | `CLOUDFLARE_ACCOUNT_ID` | The dedicated FleetLink account. |
 | D1 database | `D1_DATABASE_ID` | Bound as `DB`.  `scripts/provision-d1.sh` creates one and prints its id.  The worker creates and migrates its own tables on first use. |
 | R2 bucket `fleet-shares` | bound as `FLEET_SHARES` | `FLEETLINK_R2_BUCKET` overrides the name. |
-| `ADMIN_SECRET` | Worker secret | The operator break-glass credential.  It acts as the built-in `operator` admin account.  Also published as `FLEET_ADMIN_SECRET`. |
-| `AGENT_SYNC_SECRET` | Worker secret | The simple-tools MCP server credential, presented with an `X-Fleet-Seat` header to act as that seat's bot account.  Live today; being retired in favor of per-seat API tokens, and deleted once the retirement soak completes. |
+| _Retired_ | — | The shared static credentials (`ADMIN_SECRET`, `FLEET_ADMIN_SECRET`, `AGENT_SYNC_SECRET`, `AGENT_SECRET`, `FLEET_AGENT_SECRET`) are retired and deleted from the worker.  Every caller authenticates with its own API token: people with a user token, bots with their assigned per-seat token, the operator's break-glass access with the fleet owner's user token. |
 | `SESSION_SECRET` | Worker secret | Pepper for session, API token, and invite hashes, and the key for password-unlock cookies.  Rotating it signs everyone out and invalidates every API token and invite. |
 | `SENTRY_DSN` | Worker secret | Optional error reporting.  The scrubber drops passwords, cookies, and auth headers. |
 | `CF_ANALYTICS_TOKEN`, `CF_ZONE_ID` | Worker secret / plain text | Optional.  Shows Cloudflare zone traffic in the dashboard's Analytics tab.  The token needs **Zone → Analytics → Read** on the zone; the id is the zone tag (`fleetlink.online`).  FleetLink's own per-share counts work without them. |
@@ -51,14 +50,7 @@ The deploy also uploads `assets/web/media/*` (the logo animations) to R2 under `
 
 ## First Admin
 
-The operator secret is an admin.  Use it once to make a person an admin, then work from that account:
-
-```bash
-FLEET_ADMIN_SECRET=… fleet-share admin invite --role admin --note "owner"
-# open the printed sign-up link, create a passkey, done
-```
-
-Or promote an existing account: `fleet-share admin user set USER_ID --role admin`.
+Sign up as a person first.  Then promote that account once, either from an existing admin (`fleet-share admin user set USER_ID --role admin`, run with an admin person's user token) or, on a fresh deployment with no admin yet, by setting the account's role directly in D1.  After that, work from the person account; there is no shared operator credential.
 
 ## Rolling Back
 

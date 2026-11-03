@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { callJson, createToken, makeEnv, signUp } from "./helpers/harness.mjs";
+import { callJson, createToken, makeEnv, OWNER_SESSION, OWNER_TOKEN, signUp } from "./helpers/harness.mjs";
 import { serve } from "./helpers/server.mjs";
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -30,6 +30,9 @@ function run(args, { cwd, env = {}, input } = {}) {
 async function fixture() {
   const env = await makeEnv();
   const server = await serve(env);
+  // Seed the harness admin person (usr_test_owner) so the CLI can act as them
+  // with their own session or token, the post-retirement break-glass shape.
+  await callJson(env, "GET", "/api/me", { auth: { operator: true } });
   const ada = await signUp(env, "Ada", { email: "ada@example.com" });
   const bob = await signUp(env, "Bob");
   const home = mkdtempSync(join(tmpdir(), "fl-cli-"));
@@ -41,7 +44,7 @@ async function fixture() {
   const adaToken = await createToken(env, ada, { name: "cli" });
   const bobToken = await createToken(env, bob, { name: "cli" });
   const base = { HOME: home, FLEETLINK_DOMAIN: server.url };
-  return { env, server, ada, bob, home, work, adaToken, bobToken, base, done: async () => { await server.close(); rmSync(home, { recursive: true, force: true }); } };
+  return { env, server, ada, bob, home, work, adaToken, bobToken, base, ownerSession: OWNER_SESSION, ownerToken: OWNER_TOKEN, done: async () => { await server.close(); rmSync(home, { recursive: true, force: true }); } };
 }
 
 test("the CLI uploads files and folders as one owned share and prints every link", async () => {
@@ -131,9 +134,10 @@ test("login saves the token with mode 0600, and auth sources follow their order"
     // A saved credentials file may also carry the token as AGENT_SECRET.
     writeFileSync(saved, `AGENT_SECRET=${f.adaToken}\n`);
     assert.match((await run(["whoami"], { cwd: f.work, env: f.base })).stdout, /^Ada/);
-    // The operator secret is the last resort, or forced with --operator.
-    const op = await run(["whoami", "--operator"], { cwd: f.work, env: { ...f.base, FLEET_ADMIN_SECRET: "test-operator-secret-value" } });
-    assert.match(op.stdout, /^Operator \(admin\)/);
+    // Admin work runs on the admin person's own token:  there is no operator
+    // secret and no --operator flag anymore.
+    const op = await run(["whoami"], { cwd: f.work, env: { ...f.base, ["AGENT" + "_SECRET"]: f.ownerToken } });
+    assert.match(op.stdout, /^Test Owner \(admin\)/);
     const out = await run(["logout"], { cwd: f.work, env: f.base });
     assert.match(out.stdout, /Removed/);
     // Login also accepts AGENT_SECRET from the environment.
@@ -143,8 +147,10 @@ test("login saves the token with mode 0600, and auth sources follow their order"
     assert.match((await run(["whoami"], { cwd: f.work, env: f.base })).stdout, /^Bob/);
     const out2 = await run(["logout"], { cwd: f.work, env: f.base });
     assert.match(out2.stdout, /Removed/);
+    // The shared-secret --agent mode is removed outright, not just refused.
     const agent = await run(["--agent", "notes.md"], { cwd: f.work, env: { ...f.base, FLEET_AGENT_SECRET: "x" } });
-    assert.match(agent.stderr, /retired/);
+    assert.notEqual(agent.status, 0);
+    assert.match(agent.stderr, /unrecognized arguments: --agent/);
   } finally {
     await f.done();
   }
@@ -156,7 +162,8 @@ test("tokens, teams, and admin commands", async () => {
     // Token management needs a person, so the CLI is refused with a token.
     const refused = await run(["tokens", "list"], { cwd: f.work, env: { ...f.base, FLEETLINK_TOKEN: f.adaToken } });
     assert.match(refused.stderr, /API tokens cannot manage the account/);
-    const op = { ...f.base, FLEET_ADMIN_SECRET: "test-operator-secret-value" };
+    // Person-scoped commands run on the admin person's own session.
+    const op = { ...f.base, FLEETLINK_TOKEN: f.ownerSession };
     const created = await run(["tokens", "create", "publisher", "--max-days", "2"], { cwd: f.work, env: op });
     assert.equal(created.status, 0, created.stderr);
     const opToken = created.stdout.trim().split("\n").pop();
@@ -266,8 +273,8 @@ test("bots and admin fleet commands", async () => {
   const f = await fixture();
   try {
     await callJson(f.env, "PATCH", `/api/admin/users/${f.ada.user.id}`, { auth: { operator: true }, json: { role: "admin" } });
-    // Bot management needs a person (passkey session or operator), not a token.
-    const op = { ...f.base, FLEET_ADMIN_SECRET: "test-operator-secret-value" };
+    // Bot management needs a person (a signed-in session), not a token.
+    const op = { ...f.base, FLEETLINK_TOKEN: f.ownerSession };
     const fleet = await run(["admin", "fleet"], { env: op });
     assert.equal(fleet.status, 0, fleet.stderr);
     assert.match(fleet.stdout, /Fleet owner: none\.  36 bots, 36 without a manager\./);

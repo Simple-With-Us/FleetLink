@@ -119,8 +119,8 @@ class FleetTests(unittest.TestCase):
         with self.assertRaises(F.FleetError):
             F.FleetApi(self.args)
 
-    def test_no_provider_operator_or_domain_mix(self):
-        for field, value in (("token", "bad"), ("operator", True), ("domain", "https://example.com")):
+    def test_no_provider_token_or_domain_mix(self):
+        for field, value in (("token", "bad"), ("domain", "https://example.com")):
             args = SimpleNamespace(**vars(self.args))
             setattr(args, field, value)
             with self.assertRaises(F.CliError):
