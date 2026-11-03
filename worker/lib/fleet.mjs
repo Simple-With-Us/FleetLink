@@ -8,10 +8,10 @@
  * (users.manager_id) and owns the Fleet team, so the bots and the owner are on
  * one team and edit each other's team shares.
  *
- * The operator account (the break-glass ADMIN_SECRET identity) is the owner's
- * too:  everything it owns, including the links adopted from before accounts
- * existed, moves to the owner, and later adoptions and operator-made shares
- * are owned by the owner from the start (legacy.mjs, shares.mjs).
+ * The operator account is a legacy system account from before per-account
+ * tokens:  everything it owns, including the links adopted from before
+ * accounts existed, moves to the owner (legacy.mjs).  No credential resolves
+ * to it anymore; it remains only as a row that used to own shares.
  */
 import { audit } from "./audit.mjs";
 import { first, getMeta, now, run, setMeta } from "./db.mjs";

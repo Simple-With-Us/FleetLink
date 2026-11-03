@@ -2,8 +2,9 @@
  * The fleet's bots: every AI seat that may use FleetLink, from the fleet
  * handbook (FLEET-PROTOCOL.md, "Active Seats" and "Platform Bots").  Migration 3
  * gives each one an agent account in the Fleet team before its first call, so
- * the fleet owner sees and manages all of them from the start.  A seat that
- * is not listed still gets its account on first use (agents.mjs).
+ * the fleet owner sees and manages all of them from the start.  Bot accounts
+ * beyond the roster are created explicitly by their manager (bots API);
+ * there is no first-use provisioning.
  */
 export const FLEET_TEAM_ID = "team_fleet";
 

@@ -378,8 +378,8 @@ class Client:
 class FleetApi:
     """REST-shaped local adapter. The gateway authenticates; FleetLink authorizes."""
     def __init__(self, args):
-        if args.token or args.operator or args.domain or os.environ.get("FLEETLINK_DOMAIN"):
-            raise CliError("Fleet bearer mode cannot mix a provider token, operator credential or alternate domain.")
+        if args.token or args.domain or os.environ.get("FLEETLINK_DOMAIN"):
+            raise CliError("Fleet bearer mode cannot mix a provider token or alternate domain.")
         self.client = Client(args.fleet_bearer_file)
 
     def tool(self, name, arguments):
@@ -478,7 +478,7 @@ class FleetApi:
                     grant = self.tool("fleetlink_upload_url", args)
                     return self.stream(grant, data, length, args["path"], parts[2])
         if name is None:
-            raise CliError("This account/admin operation is not exposed by the fleet gateway. No provider fallback was used; use an explicit human/operator session for account management.")
+            raise CliError("This account/admin operation is not exposed by the fleet gateway. No provider fallback was used; use an explicit human session for account management.")
         if "days" in args and args["days"] != "forever":
             args["days"] = self.number(args["days"], float, "days")
         return self.tool(name, args)
@@ -559,16 +559,20 @@ def read_kv_file(path):
 
 
 def resolve_auth(args):
-    """Return (header_name, value, label).  Order: flag, env, auth file, saved login, operator secret."""
-    if getattr(args, "agent", False):
-        raise CliError("The shared agent secret is retired.  Create an API token on your dashboard and set AGENT_SECRET or FLEETLINK_TOKEN.")
+    """Return (header_name, value, label).  Order: flag, env, auth file, saved login.
+
+    The only credential is the caller's own API token: AGENT_SECRET (or
+    FLEETLINK_TOKEN) in the environment or the auth file, a --token flag, or a
+    saved `fleet-share login`.  Admin commands use the same token; an admin
+    person's user token carries their admin rights with it.
+    """
     if args.token:
         return ("Authorization", "Bearer " + args.token.strip(), "--token")
     env_token = os.environ.get("FLEETLINK_TOKEN", "").strip()
-    if env_token and not args.operator:
+    if env_token:
         return ("Authorization", "Bearer " + env_token, "FLEETLINK_TOKEN")
     env_agent_secret = os.environ.get("AGENT_SECRET", "").strip()
-    if env_agent_secret and not args.operator:
+    if env_agent_secret:
         return ("Authorization", "Bearer " + env_agent_secret, "AGENT_SECRET")
     files = []
     if os.environ.get("FLEETLINK_AUTH_FILE"):
@@ -579,26 +583,19 @@ def resolve_auth(args):
         files.extend(f for f in ("./fleet-link-auth.env", "./.fleet-link-auth.env") if os.path.isfile(f))
     for path in files:
         values = read_kv_file(path)
-        if not args.operator:
-            # AGENT_SECRET is the canonical name for the caller's own API
-            # token in the auth file; FLEETLINK_TOKEN stays accepted.
-            for token_key in ("FLEETLINK_TOKEN", "AGENT_SECRET"):
-                token_value = (values.get(token_key) or "").strip()
-                if token_value:
-                    return ("Authorization", "Bearer " + token_value, path)
-        for key in ("FLEET_ADMIN_SECRET", "ADMIN_SECRET", "FLEET_AUTH_SECRET"):
-            if values.get(key):
-                return ("X-Fleet-Admin", values[key], path + " (operator)")
+        # AGENT_SECRET is the canonical name for the caller's own API
+        # token in the auth file; FLEETLINK_TOKEN stays accepted.
+        for token_key in ("FLEETLINK_TOKEN", "AGENT_SECRET"):
+            token_value = (values.get(token_key) or "").strip()
+            if token_value:
+                return ("Authorization", "Bearer " + token_value, path)
         break
-    if not args.operator and os.path.isfile(credentials_path()):
+    if os.path.isfile(credentials_path()):
         saved = read_kv_file(credentials_path())
         for token_key in ("FLEETLINK_TOKEN", "AGENT_SECRET"):
             token_value = (saved.get(token_key) or "").strip()
             if token_value:
                 return ("Authorization", "Bearer " + token_value, "saved login")
-    for key in ("FLEET_ADMIN_SECRET", "ADMIN_SECRET"):
-        if os.environ.get(key, "").strip():
-            return ("X-Fleet-Admin", os.environ[key].strip(), key + " (operator)")
     raise CliError(
         "Not signed in.  Create an API token at " + domain(args) + "/dashboard#tokens, then run "
         "`fleet-share login`, set AGENT_SECRET in the auth file, or set FLEETLINK_TOKEN."
@@ -1269,7 +1266,6 @@ def build_parser():
     common.add_argument("--domain", help="FleetLink base URL (default {} or FLEETLINK_DOMAIN)".format(DEFAULT_DOMAIN))
     common.add_argument("--fleet-bearer-file", default=argparse.SUPPRESS, metavar="PATH", help="use this bot's existing private fleet bearer via the gateway, never a provider fallback")
     common.add_argument("--token", help="API token for this call (prefer FLEETLINK_TOKEN or `fleet-share login`)")
-    common.add_argument("--operator", action="store_true", help="use the operator secret (FLEET_ADMIN_SECRET) even if a token is set")
     common.add_argument("--json", action="store_true", help="print JSON")
 
     shareopts = argparse.ArgumentParser(add_help=False)
@@ -1287,7 +1283,6 @@ def build_parser():
 
     p = sub.add_parser("upload", parents=[common, shareopts], help="upload files and folders as one share")
     p.add_argument("paths", nargs="+")
-    p.add_argument("--agent", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--preview", help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_upload)
 
@@ -1452,12 +1447,12 @@ def main(argv):
     if not getattr(args, "func", None):
         parser.print_help()
         return 1
-    for attr in ("token", "operator", "agent", "json", "domain"):
+    for attr in ("token", "json", "domain"):
         if not hasattr(args, attr):
             setattr(args, attr, None)
     try:
         if getattr(args, "fleet_bearer_file", None) is not None and args.command in {"login", "logout", "tokens", "bots", "admin", "skill"}:
-            raise CliError("This account/admin operation is not exposed by the fleet gateway. No provider fallback was used; use an explicit human/operator session for account management.")
+            raise CliError("This account/admin operation is not exposed by the fleet gateway. No provider fallback was used; use an explicit human session for account management.")
         result = args.func(args)
         return result if isinstance(result, int) else 0
     except (CliError, FleetError) as err:

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { agentUserId } from "../worker/lib/schema.mjs";
 import { call, callJson, createToken, makeAdmin, makeEnv, signUp } from "./helpers/harness.mjs";
 
-const AGENT_SECRET = `fls_${"ab".repeat(32)}`;
 
 async function people() {
-  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const env = await makeEnv();
   const ada = await signUp(env, "Ada", { email: "ada@example.com" });
   const bob = await signUp(env, "Bob", { email: "bob@example.com" });
   const carol = await signUp(env, "Carol", { email: "carol@example.com" });
@@ -26,7 +26,19 @@ async function share(env, person, slug, extra = {}) {
 const putFile = (env, auth, slug, path, body = "x") =>
   call(env, "PUT", `/api/shares/${slug}/files/${path}`, { auth, body, headers: { "content-type": "text/plain" } });
 
-const agent = (seat) => ({ authorization: `Bearer ${AGENT_SECRET}`, "x-fleet-seat": seat });
+// A seat acts with its own API token, minted by the harness admin and cached
+// per env:  the production shape since the shared agent credential retired.
+const agentTokens = new WeakMap();
+async function agent(env, seat) {
+  let per = agentTokens.get(env);
+  if (!per) { per = new Map(); agentTokens.set(env, per); }
+  if (!per.has(seat)) {
+    const minted = await callJson(env, "POST", `/api/bots/${agentUserId(seat)}/tokens`, { auth: { operator: true }, json: { name: "test" } });
+    if (minted.status !== 201) throw new Error(`mint for ${seat} failed ${minted.status}`);
+    per.set(seat, minted.data.token);
+  }
+  return { authorization: `Bearer ${per.get(seat)}` };
+}
 
 async function rpc(env, opts, method, params) {
   return callJson(env, "POST", "/mcp", { ...opts, json: { jsonrpc: "2.0", id: 1, method, params } });
@@ -153,28 +165,27 @@ test("one-time upload URLs: mint with edit access, use once, within size and tim
   assert.equal((await call(env, "PUT", viaToken.upload_url, { body: "x" })).status, 403);
 });
 
-test("agent seats act through the simple-tools server credential with their own accounts", async () => {
-  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+test("agent seats act through their own API tokens with their own accounts", async () => {
+  const env = await makeEnv();
+  const legacy = "fls_" + "ab".repeat(32);
   const wrong = await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer fls_${"cd".repeat(32)}`, "x-fleet-seat": "JET" } });
   assert.equal(wrong.status, 401);
-  assert.equal((await callJson(env, "GET", "/api/shares", { headers: { authorization: `Bearer ${AGENT_SECRET}` } })).status, 400);
-  assert.equal((await callJson(env, "GET", "/api/shares", { headers: agent("no spaces") })).status, 400);
-  const noSecret = await makeEnv();
-  const unset = await callJson(noSecret, "GET", "/api/shares", { headers: agent("JET") });
-  assert.equal(unset.status, 503);
-  assert.match(unset.data.error, /AGENT_SYNC_SECRET is not configured/);
-  // Everyone else is unaffected by the missing setting.
-  assert.equal((await callJson(noSecret, "GET", "/health")).status, 200);
-  const malformed = await makeEnv({ AGENT_SYNC_SECRET: "too-short" });
-  assert.equal((await callJson(malformed, "GET", "/api/shares", { headers: agent("JET") })).status, 503);
+  // The retired shared credential authenticates nothing:  with a seat header,
+  // without one, with a malformed seat, and whether or not the worker still
+  // carries the (ignored) binding.
+  assert.equal((await callJson(env, "GET", "/api/shares", { headers: { authorization: `Bearer ${legacy}` } })).status, 401);
+  assert.equal((await callJson(env, "GET", "/api/shares", { headers: { authorization: `Bearer ${legacy}`, "x-fleet-seat": "no spaces" } })).status, 401);
+  const withBinding = await makeEnv({ AGENT_SYNC_SECRET: legacy });
+  assert.equal((await callJson(withBinding, "GET", "/api/shares", { headers: { authorization: `Bearer ${legacy}`, "x-fleet-seat": "JET" } })).status, 401);
+  assert.equal((await callJson(withBinding, "GET", "/health")).status, 200);
 
-  const jet = await tool(env, { headers: agent("JET") }, "fleetlink_whoami");
+  const jet = await tool(env, { headers: (await agent(env, "JET")) }, "fleetlink_whoami");
   assert.equal(jet.data.user.id, "usr_agent_jet");
   assert.equal(jet.data.user.kind, "agent");
-  assert.equal(jet.data.auth.kind, "agent");
+  assert.equal(jet.data.auth.kind, "token");
   // Agents cannot run account management.
-  assert.equal((await callJson(env, "POST", "/api/tokens", { headers: agent("JET"), json: { name: "x" } })).status, 403);
-  assert.equal((await callJson(env, "POST", "/api/teams", { headers: agent("JET"), json: { name: "x" } })).status, 403);
+  assert.equal((await callJson(env, "POST", "/api/tokens", { headers: (await agent(env, "JET")), json: { name: "x" } })).status, 403);
+  assert.equal((await callJson(env, "POST", "/api/teams", { headers: (await agent(env, "JET")), json: { name: "x" } })).status, 403);
 
   // Bots post only under an active main account:  give JET one, opted out of team-only sharing.
   const boss = await signUp(env, "Boss", { email: "boss@example.com" });
@@ -182,17 +193,17 @@ test("agent seats act through the simple-tools server credential with their own 
   await env.DB.prepare("UPDATE users SET manager_id = ? WHERE id = 'usr_agent_jet'").bind(boss.user.id).run();
 
   // Asked for personal: GROK-WEB cannot see JET's share until JET shares it to the team.
-  const made = await tool(env, { headers: agent("JET") }, "fleetlink_create_share", { markdown: "# Findings", slug: "jet-findings", personal: true });
+  const made = await tool(env, { headers: (await agent(env, "JET")) }, "fleetlink_create_share", { markdown: "# Findings", slug: "jet-findings", personal: true });
   assert.equal(made.data.share.visibility, "personal");
-  assert.equal((await tool(env, { headers: agent("GROK-WEB") }, "fleetlink_get_share", { slug: "jet-findings" })).error, "Share not found.");
-  const teams = await tool(env, { headers: agent("JET") }, "fleetlink_list_teams");
+  assert.equal((await tool(env, { headers: (await agent(env, "GROK-WEB")) }, "fleetlink_get_share", { slug: "jet-findings" })).error, "Share not found.");
+  const teams = await tool(env, { headers: (await agent(env, "JET")) }, "fleetlink_list_teams");
   assert.deepEqual(teams.data.teams.map((t) => [t.id, t.name, t.my_role]), [["team_fleet", "Fleet", "admin"]]);
-  const moved = await tool(env, { headers: agent("JET") }, "fleetlink_share_to_team", { slug: "jet-findings" });
+  const moved = await tool(env, { headers: (await agent(env, "JET")) }, "fleetlink_share_to_team", { slug: "jet-findings" });
   assert.equal(moved.error, null);
   assert.deepEqual(moved.data.share.team, { id: "team_fleet", name: "Fleet", access: "edit" });
 
   // GROK-WEB collaborates on it: reads, adds, and replaces files.
-  const grok = { headers: agent("GROK-WEB") };
+  const grok = { headers: (await agent(env, "GROK-WEB")) };
   const read = await tool(env, grok, "fleetlink_read_file", { slug: "jet-findings", path: "note.md" });
   assert.deepEqual([read.data.encoding, read.data.text], ["utf-8", "# Findings"]);
   assert.equal((await tool(env, grok, "fleetlink_add_file", { slug: "jet-findings", path: "grok/review.md", markdown: "LGTM" })).error, null);
@@ -217,23 +228,23 @@ test("agent seats act through the simple-tools server credential with their own 
   assert.equal((await callJson(env, "POST", "/api/admin/teams/team_fleet/join", { auth: jay })).status, 200);
   assert.equal((await callJson(env, "POST", "/api/admin/teams/team_nope/join", { auth: jay })).status, 404);
   assert.equal((await callJson(env, "GET", "/api/shares?scope=team&team_id=team_fleet", { auth: jay })).data.shares.length, 1);
-  assert.equal((await callJson(env, "POST", "/api/admin/teams/team_fleet/join", { headers: agent("JET") })).status, 403);
+  assert.equal((await callJson(env, "POST", "/api/admin/teams/team_fleet/join", { headers: (await agent(env, "JET")) })).status, 403);
 
   // An agent account promoted to admin still acts without admin rights.
   await callJson(env, "PATCH", "/api/admin/users/usr_agent_jet", { auth: jay, json: { role: "admin" } });
-  assert.equal((await tool(env, { headers: agent("JET") }, "fleetlink_list_shares", { scope: "all" })).error, "Admins only.");
+  assert.equal((await tool(env, { headers: (await agent(env, "JET")) }, "fleetlink_list_shares", { scope: "all" })).error, "Admins only.");
   // Disabling the agent's account stops it.
   await callJson(env, "PATCH", "/api/admin/users/usr_agent_grok_web", { auth: jay, json: { status: "disabled" } });
   assert.equal((await rpc(env, grok, "tools/list", {})).status, 403);
 });
 
 test("MCP upload_url creates a share when needed and a curl PUT lands the file", async () => {
-  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const env = await makeEnv();
   // Bots post only under an active main account:  give JET one, opted out of team-only sharing.
   const boss = await signUp(env, "Boss", { email: "boss@example.com" });
   await callJson(env, "PATCH", "/api/me", { auth: boss, json: { bot_team_only: false } });
   await env.DB.prepare("UPDATE users SET manager_id = ? WHERE id = 'usr_agent_jet'").bind(boss.user.id).run();
-  const jet = { headers: agent("JET") };
+  const jet = { headers: (await agent(env, "JET")) };
   const fresh = await tool(env, jet, "fleetlink_upload_url", { path: "dist/build.tar.gz", title: "Nightly build", team_id: "team_fleet", team_access: "view" });
   assert.equal(fresh.error, null);
   assert.equal(fresh.data.created, true);
@@ -245,7 +256,7 @@ test("MCP upload_url creates a share when needed and a curl PUT lands the file",
   const again = await tool(env, jet, "fleetlink_upload_url", { slug: fresh.data.share.slug, path: "dist/notes.txt" });
   assert.equal(again.data.created, false);
   // Bots are Fleet team admins, so another bot uploads even to a view-only team share.
-  assert.equal((await tool(env, { headers: agent("ECHO") }, "fleetlink_upload_url", { slug: fresh.data.share.slug, path: "x" })).error, null);
+  assert.equal((await tool(env, { headers: (await agent(env, "ECHO")) }, "fleetlink_upload_url", { slug: fresh.data.share.slug, path: "x" })).error, null);
   // A failed grant does not leave an empty new share behind.
   assert.ok((await tool(env, jet, "fleetlink_upload_url", { slug: "fresh-name", path: "x", ttl_seconds: 5 })).error);
   assert.equal((await tool(env, jet, "fleetlink_get_share", { slug: "fresh-name" })).error, "Share not found.");

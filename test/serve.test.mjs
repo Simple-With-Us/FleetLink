@@ -4,7 +4,7 @@ import { importLegacyBatch } from "../worker/lib/legacy.mjs";
 import { sweep } from "../worker/lib/sweep.mjs";
 import { ensureSchema } from "../worker/lib/db.mjs";
 import worker from "../worker/index.mjs";
-import { call, callJson, makeEnv, put, signUp } from "./helpers/harness.mjs";
+import { call, callJson, makeEnv, OWNER_SESSION, put, signUp } from "./helpers/harness.mjs";
 
 async function setup() {
   const env = await makeEnv();
@@ -187,8 +187,8 @@ test("old bucket objects are adopted on first visit and by the sweep, and expire
   assert.match(await (await call(env, "GET", "/Report.PDF")).text(), /Password Required/);
   assert.equal(await (await call(env, "GET", "/Report.PDF?password=hunter2")).text(), "%PDF");
   assert.equal(await (await call(env, "GET", "/preview.png")).text(), "PNG");
-  // The operator can manage adopted shares like any admin.
-  const list = await callJson(env, "GET", "/api/shares", { auth: { operator: true } });
+  // An admin can manage adopted shares like any of their own.
+  const list = await callJson(env, "GET", "/api/shares?scope=all", { auth: { operator: true } });
   assert.equal(list.data.shares.length, 4);
   // After the import finishes, unknown slugs are not looked up in the bucket again.
   await env.FLEET_SHARES.put("late/x.txt", "x");
@@ -266,7 +266,7 @@ test("signed-in pages render for people and admins", async () => {
   assert.match(body, /\/assets\/dashboard\.js/);
   assert.equal((await call(env, "GET", "/admin", { headers: { cookie: `fl_session=${ada.cookie}` } })).status, 403);
   assert.equal((await call(env, "GET", "/login", { headers: { cookie: `fl_session=${ada.cookie}` } })).status, 303);
-  const op = await call(env, "GET", "/admin", { headers: { "x-fleet-admin": "test-operator-secret-value" } });
+  const op = await call(env, "GET", "/admin", { headers: { cookie: `fl_session=${OWNER_SESSION}` }, auth: { operator: true } });
   assert.equal(op.status, 200);
 });
 
@@ -300,15 +300,18 @@ for (const [path, type] of [["/favicon.ico", "image/x-icon"], ["/apple-touch-ico
   assert.ok(!home.includes('class="preview"'), "dashboard mockup removed");
 });
 
-test("old links belong to the fleet owner:  existing operator shares move once, later adoptions and operator-made shares start there, and legacy bytes do not count against the quota", async () => {
+test("old links belong to the fleet owner:  existing operator shares move once, later adoptions start there, and legacy bytes do not count against the quota", async () => {
   const env = await makeEnv({ FLEET_OWNER_EMAIL: "owner@example.com" });
   await ensureSchema(env.DB);
   await legacyBucket(env);
   // Adopted before anyone owns the fleet:  the operator holds it, as before.
   assert.equal((await call(env, "GET", "/zulip/zulip-fleet-guide.md?raw=1")).status, 200);
   assert.equal((await env.DB.prepare("SELECT owner_id FROM shares WHERE slug = 'zulip'").first()).owner_id, "usr_operator");
+  // A second share already sitting on the operator account (the historical
+  // state the move exists for; no credential creates these anymore).
   const opMade = await callJson(env, "POST", "/api/shares", { auth: { operator: true }, json: { slug: "op-before" } });
-  assert.equal(opMade.data.share.owner.id, "usr_operator");
+  await env.DB.prepare("UPDATE shares SET owner_id = 'usr_operator' WHERE slug = 'op-before'").run();
+  assert.equal(opMade.data.share.owner.id, "usr_test_owner");
 
   // The owner signs up and signs in:  everything the operator owned is theirs, and the old link still works.
   const jay = await signUp(env, "Jay", { email: "owner@example.com" });
@@ -322,14 +325,14 @@ test("old links belong to the fleet owner:  existing operator shares move once, 
   const audit = (await env.DB.prepare("SELECT detail FROM audit_events WHERE action = 'fleet.operator_shares'").first());
   assert.equal(JSON.parse(audit.detail).moved, 2);
 
-  // Later:  the sweep adopts the rest straight to the owner, and an operator-made share is theirs too.
+  // Later:  the sweep adopts the rest straight to the owner.
   let report;
   do report = await importLegacyBatch(env, 8);
   while (!report.done);
   const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM shares WHERE owner_id = 'usr_operator'").first();
   assert.equal(left.n, 0);
   assert.equal((await env.DB.prepare("SELECT owner_id FROM shares WHERE slug = 'handbook'").first()).owner_id, jay.user.id);
-  const opAfter = await callJson(env, "POST", "/api/shares", { auth: { operator: true }, json: { slug: "op-after" } });
+  const opAfter = await callJson(env, "POST", "/api/shares", { auth: jay, json: { slug: "op-after" } });
   assert.equal(opAfter.data.share.owner.id, jay.user.id);
 
   // Legacy shares are shown in usage but do not count against the storage quota.

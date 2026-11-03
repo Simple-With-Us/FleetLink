@@ -1,20 +1,17 @@
-import { AGENT_SECRET, ensureAgentUser, isAgentSecret } from "./agents.mjs";
-import { audit } from "./audit.mjs";
-import { safeEqual } from "./bytes.mjs";
 import { first } from "./db.mjs";
-import { getUser } from "./users.mjs";
-import { cookie, forbidden, HttpError, unauthorized } from "./http.mjs";
-import { OPERATOR_USER_ID } from "./schema.mjs";
+import { cookie, forbidden, unauthorized } from "./http.mjs";
 import { lookupSession, SESSION_COOKIE, SESSION_TOKEN } from "./sessions.mjs";
 import { API_TOKEN, lookupToken, STANDARD_LIMITS_USER, tokenLimitsUser } from "./tokens.mjs";
 
 /**
  * A principal is who a request acts as:
- *   { kind: "session" | "token" | "operator" | "agent", user, isAdmin, sessionId?, token?, seat?, limitsUser?, limitsOverride?, viaCookie }
+ *   { kind: "session" | "token", user, isAdmin, sessionId?, token?, limitsUser?, limitsOverride?, viaCookie }
  * limitsUser, when set, is whose limits apply (a bot that follows its manager).
  * limitsOverride, when set, clamps that tier with a bot's manual caps.
- * Every credential resolves to a real user row, including the operator secret,
- * which acts as the built-in operator account.
+ * Every credential resolves to a real user row: an API token (a person's user
+ * token or a bot's assigned token) or a website session.  There is no shared
+ * secret presentation: the retired agent server credential and operator
+ * secret authenticate nothing.
  */
 
 /** A bot's manual caps come from JSON on its user row; anything unusable is ignored. */
@@ -65,10 +62,6 @@ export async function agentLimitsResolution(env, user) {
   return { limitsUser };
 }
 
-export function operatorSecret(env) {
-  return String(env?.ADMIN_SECRET || env?.FLEET_ADMIN_SECRET || "").trim();
-}
-
 function bearer(request) {
   const match = (request.headers.get("authorization") || "").match(/^Bearer\s+(\S+)\s*$/i);
   return match ? match[1] : "";
@@ -77,36 +70,8 @@ function bearer(request) {
 function principalFor(kind, user, extra = {}) {
   if (user.status === "disabled") throw forbidden("This account is disabled.  Ask a FleetLink admin to enable it.");
   if (user.status !== "active") throw unauthorized("This account no longer exists.");
-  return { kind, user, isAdmin: user.role === "admin", viaCookie: false, ...extra };
-}
-
-async function operatorPrincipal(env, via, background) {
-  const user = await getUser(env.DB, OPERATOR_USER_ID);
-  if (!user) throw new HttpError(503, "The operator account is missing.");
-  const principal = principalFor("operator", user);
-  // Retirement soak: every use of the legacy operator secret leaves an audit
-  // row, so remaining holders stay visible until the credential is retired.
-  // Backgrounded through the execution context so the write never sits in
-  // the request path; this row is removed with the branch that mints this
-  // principal.
-  const logged = audit(env, user.id, "auth.operator", user.id, { via });
-  if (background) background(logged); else await logged;
-  return principal;
-}
-
-/** The simple-tools server acting for one seat (agents.mjs).  Agents are never admins. */
-async function agentPrincipal(env, request, background) {
-  const user = await ensureAgentUser(env, request.headers.get("x-fleet-seat"));
-  const botLimits = await agentLimitsResolution(env, user);
-  const principal = { ...principalFor("agent", user), isAdmin: false, seat: user.agent_seat, ...(botLimits.limitsUser ? { limitsUser: botLimits.limitsUser } : {}), ...(botLimits.limitsOverride ? { limitsOverride: botLimits.limitsOverride } : {}) };
-  // Retirement soak: every use of the shared agent secret leaves an audit
-  // row, so remaining holders stay visible until the credential is retired.
-  // Backgrounded through the execution context so the write never sits in
-  // the request path; this row is removed with the branch that mints this
-  // principal.
-  const logged = audit(env, user.id, "auth.agent", user.id, { seat: user.agent_seat });
-  if (background) background(logged); else await logged;
-  return principal;
+  // An agent account never acts as a site admin, even if given the role.
+  return { kind, user, isAdmin: user.role === "admin" && user.kind !== "agent", viaCookie: false, ...extra };
 }
 
 async function fromToken(env, secret) {
@@ -135,22 +100,10 @@ export async function resolvePrincipal(request, env, background) {
   if (request.headers.has("x-fleet-agent")) {
     throw unauthorized("The shared agent secret is retired.  Create an API token on your FleetLink dashboard and send it as Authorization: Bearer fla_….");
   }
-  const admin = operatorSecret(env);
-  const adminHeader = (request.headers.get("x-fleet-admin") || "").trim();
-  if (adminHeader) {
-    if (admin && await safeEqual(adminHeader, admin)) return operatorPrincipal(env, "x-fleet-admin", background);
-    if (API_TOKEN.test(adminHeader)) return fromToken(env, adminHeader);
-    throw unauthorized("The operator secret is not valid.");
-  }
   const presented = bearer(request);
   if (presented) {
     if (API_TOKEN.test(presented)) return fromToken(env, presented);
-    if (AGENT_SECRET.test(presented)) {
-      if (await isAgentSecret(env, presented)) return agentPrincipal(env, request, background);
-      throw unauthorized("That agent server credential is not valid.");
-    }
     if (SESSION_TOKEN.test(presented)) return fromSession(env, presented, false);
-    if (admin && await safeEqual(presented, admin)) return operatorPrincipal(env, "bearer", background);
     throw unauthorized("That credential is not valid.");
   }
   const tokenHeader = (request.headers.get("x-fleet-token") || "").trim();

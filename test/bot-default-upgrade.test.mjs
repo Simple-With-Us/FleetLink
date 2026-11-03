@@ -51,14 +51,16 @@ test('real staged upgrade: schema7 rows -> immutable 139 v8 -> 141 v9, fresh ins
 });
 
 test('request dispatch migrates v8 before the new bot INSERT writes its v9 flag', async()=>{
- const {makeEnv,callJson}=await import('./helpers/harness.mjs');
- const env=await makeEnv({AGENT_SYNC_SECRET:`fls_${'cd'.repeat(32)}`});
+ const {makeEnv,callJson,signUp}=await import('./helpers/harness.mjs');
+ const env=await makeEnv();
  const db=env.DB;
  await db.prepare('CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)').run();
  for(const m of MIGRATIONS.filter(m=>m.version<=8)) await db.batch([...splitStatements(m.sql).map(s=>db.prepare(s)),db.prepare('INSERT INTO schema_migrations VALUES (?, ?, 1)').bind(m.version,m.name)]);
- const res=await callJson(env,'POST','/mcp',{headers:{authorization:`Bearer fls_${'cd'.repeat(32)}`,'x-fleet-seat':'ROLLOUT'},json:{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'fleetlink_whoami',arguments:{}}}});
- assert.equal(res.status,200);
- assert.ok(res.data.result && !res.data.result.isError);
+ // The first dispatched request runs the remaining migrations; only then can
+ // the manager's bot INSERT write the v9 flag the new schema gives it.
+ const pat=await signUp(env,'Pat');
+ const made=await callJson(env,'POST','/api/bots',{auth:pat,json:{seat:'ROLLOUT'}});
+ assert.equal(made.status,201);
  assert.equal((await read(db,'usr_agent_rollout')).agent_inherits_defaults,1);
  assert.equal((await db.prepare('SELECT MAX(version) AS v FROM schema_migrations').first()).v,11);
 });

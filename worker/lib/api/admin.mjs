@@ -154,7 +154,6 @@ export function adminRoutes(router) {
   });
   router.on("POST", "/api/admin/teams/:id/join", async (ctx) => {
     const principal = await ctx.admin();
-    if (principal.kind === "operator") throw badRequest("The operator account is already in the teams it needs.  Sign in as yourself to join.");
     const team = await first(ctx.env.DB, "SELECT id FROM teams WHERE id = ?", ctx.params.id);
     if (!team) throw notFound("Team not found.");
     await run(

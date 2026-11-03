@@ -22,8 +22,7 @@ Per-person overrides (`storage_quota_bytes`, `token_quota`) are set on the perso
 | --- | --- | --- |
 | `DB` | D1 | People, credentials, teams, shares, settings, audit.  Schema in `worker/lib/schema.mjs`. |
 | `FLEET_SHARES` | R2 | File bytes.  New files under `fl2/<share id>/<path>`.  Older objects stay at their old keys and are adopted in place. |
-| `ADMIN_SECRET` (or `FLEET_ADMIN_SECRET`) | secret | Operator credential. |
-| `AGENT_SYNC_SECRET` | secret | Simple-tools MCP server credential (per-seat bot access).  Live today; being retired in favor of per-seat API tokens. |
+| _Retired_ | — | The shared static credentials (the operator secret and the agent server credential, in all their name variants) are retired and deleted.  Authentication is per-account API tokens and passkey sessions only. |
 | `SESSION_SECRET` | secret | Pepper for stored session, token, and invite hashes; key for password-unlock cookies. |
 | `SENTRY_DSN` | secret | Error reporting.  Off when unset. |
 | `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, `WEBAUTHN_RP_NAME` | plain text | Passkey relying party.  Passkeys stop working when unset. |

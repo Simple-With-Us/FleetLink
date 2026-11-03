@@ -149,14 +149,15 @@ test("closed sign-up still accepts an invite, and a team invite joins the team",
   assert.equal(teams.data.teams[0].my_role, "member");
 });
 
-test("credentials: operator secret, API tokens, retired agent secret, and bad bearer values", async () => {
+test("credentials: admin person session and token, retired shared secrets, and bad bearer values", async () => {
   const env = await makeEnv();
   const op = await callJson(env, "GET", "/api/me", { auth: { operator: true } });
   assert.equal(op.status, 200);
-  assert.equal(op.data.user.id, "usr_operator");
-  assert.equal(op.data.auth.kind, "operator");
-  const viaBearer = await callJson(env, "GET", "/api/me", { headers: { authorization: "Bearer test-operator-secret-value" } });
-  assert.equal(viaBearer.data.user.id, "usr_operator");
+  assert.equal(op.data.user.id, "usr_test_owner");
+  assert.equal(op.data.auth.kind, "session");
+  // The retired operator secret authenticates nothing, in either presentation.
+  assert.equal((await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer ${OPERATOR_SECRET}` } })).status, 401);
+  assert.equal((await callJson(env, "GET", "/api/me", { headers: { "x-fleet-admin": OPERATOR_SECRET } })).status, 401);
   assert.equal((await callJson(env, "GET", "/api/me", { headers: { "x-fleet-admin": "wrong" } })).status, 401);
   assert.equal((await callJson(env, "GET", "/api/me", { headers: { authorization: "Bearer nonsense" } })).status, 401);
   const agent = await callJson(env, "GET", "/api/me", { headers: { "x-fleet-agent": "anything" } });
@@ -184,26 +185,28 @@ test("credentials: operator secret, API tokens, retired agent secret, and bad be
   assert.equal((await callJson(env, "GET", "/api/me", { auth: { token } })).status, 401);
 });
 
-test("legacy secret authentications leave audit rows for the retirement soak", async () => {
+test("retired shared secrets authenticate nothing and leave no audit rows", async () => {
   const agentSecret = "fls_" + "a".repeat(64);
-  const env = await makeEnv({ AGENT_SYNC_SECRET: agentSecret });
-  const op = await callJson(env, "GET", "/api/me", { auth: { operator: true } });
-  assert.equal(op.data.auth.kind, "operator");
-  const opBearer = await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer ${OPERATOR_SECRET}` } });
-  assert.equal(opBearer.data.auth.kind, "operator");
-  const agent = await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer ${agentSecret}`, "x-fleet-seat": "MA" } });
-  assert.equal(agent.data.auth.kind, "agent");
-  assert.equal(agent.data.user.id, "usr_agent_ma");
-  const rows = (await env.DB.prepare("SELECT action, detail FROM audit_events WHERE action IN ('auth.operator', 'auth.agent') ORDER BY id").all()).results;
-  assert.deepEqual(rows.map((r) => r.action), ["auth.operator", "auth.operator", "auth.agent"]);
-  assert.deepEqual(rows.map((r) => JSON.parse(r.detail).via ?? JSON.parse(r.detail).seat), ["x-fleet-admin", "bearer", "MA"]);
+  // The bindings may still be configured during the retirement window; the
+  // worker must ignore them entirely.
+  const env = await makeEnv({ AGENT_SYNC_SECRET: agentSecret, ADMIN_SECRET: OPERATOR_SECRET, FLEET_ADMIN_SECRET: OPERATOR_SECRET });
+  assert.equal((await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer ${agentSecret}`, "x-fleet-seat": "MA" } })).status, 401);
+  assert.equal((await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer ${OPERATOR_SECRET}` } })).status, 401);
+  assert.equal((await callJson(env, "GET", "/api/me", { headers: { "x-fleet-admin": OPERATOR_SECRET } })).status, 401);
+  // No agent account was provisioned by the seat presentation (ZZ-TEST is not
+  // on the migration roster, so only first-use provisioning could create it).
+  assert.equal((await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer ${agentSecret}`, "x-fleet-seat": "ZZ-TEST" } })).status, 401);
+  const provisioned = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE agent_seat = 'ZZ-TEST'").first();
+  assert.equal(provisioned.n, 0);
+  const rows = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action IN ('auth.operator', 'auth.agent')").first();
+  assert.equal(rows.n, 0);
   // Token and session authentications stay unaudited.
   const ada = await signUp(env, "Ada");
   await callJson(env, "GET", "/api/me", { auth: ada });
   const token = await createToken(env, ada, { name: "ci" });
   await callJson(env, "GET", "/api/me", { auth: { token } });
   const after = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action IN ('auth.operator', 'auth.agent')").first();
-  assert.equal(after.n, 3);
+  assert.equal(after.n, 0);
 });
 
 test("expired tokens stop working and token quota is enforced", async () => {
@@ -307,8 +310,8 @@ test("profile edits and account deletion", async () => {
   assert.equal(row.email, null);
   // The email is free again.
   assert.ok((await signUp(env, "New Ada", { email: "ada@example.com" })).session);
-  // The operator account cannot be deleted.
-  assert.equal((await callJson(env, "DELETE", "/api/me", { auth: { operator: true }, json: { confirm: "delete my account" } })).status, 400);
+  // The system operator account's role and status are fixed, even for an admin.
+  assert.equal((await callJson(env, "PATCH", "/api/admin/users/usr_operator", { auth: { operator: true }, json: { role: "user" } })).status, 400);
 });
 
 test("old endpoints stay closed", async () => {
@@ -324,8 +327,12 @@ test("without SESSION_SECRET, credential and unlock paths fail closed instead of
   const env = await makeEnv();
   const ada = await signUp(env, "Ada");
   await call(env, "PUT", "/locked-x/a.txt", { auth: ada, body: "a", headers: { "content-type": "text/plain", "x-fleet-password": "pw" } });
+  // Warm the harness admin before the pepper disappears, so its rows exist.
+  assert.equal((await callJson(env, "GET", "/api/me", { auth: { operator: true } })).status, 200);
   delete env.SESSION_SECRET;
   assert.equal((await callJson(env, "GET", "/api/me", { auth: ada })).status, 503);
   await assert.rejects(call(env, "GET", "/locked-x/a.txt?password=pw"), /SESSION_SECRET/);
-  assert.equal((await callJson(env, "GET", "/api/me", { auth: { operator: true } })).status, 200);
+  // Every credential path fails closed, the admin person's session included:
+  // there is no shared-secret path left that could bypass the pepper.
+  assert.equal((await callJson(env, "GET", "/api/me", { auth: { operator: true } })).status, 503);
 });

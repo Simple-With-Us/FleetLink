@@ -36,7 +36,7 @@ adminRoutes(router);
 botRoutes(router);
 pageRoutes(router);
 router.on("GET", "/api/auth/token", () => json({ error: "gone" }, 410));
-router.on("POST", "/api/auth", () => json({ error: "Operator secret sign-in was removed.  Sign in with a passkey, or send the operator secret as X-Fleet-Admin." }, 410));
+router.on("POST", "/api/auth", () => json({ error: "Operator secret sign-in was removed.  Sign in with a passkey, or use your own API token." }, 410));
 router.on("GET", "/api/shortcut/download", () => shortcutResponse());
 
 const SUBDOMAIN_EXCEPTIONS = new Set(["www", "api", "admin", "portal"]);

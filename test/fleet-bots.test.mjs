@@ -2,11 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { FLEET_BOTS } from "../worker/lib/fleet-roster.mjs";
 import { OPERATOR_USER_ID } from "../worker/lib/schema.mjs";
-import { call, callJson, makeAdmin, makeEnv, signUp } from "./helpers/harness.mjs";
-
-const AGENT_SECRET = `fls_${"cd".repeat(32)}`;
+import { agentUserId } from "../worker/lib/schema.mjs";
+import { call, callJson, makeAdmin, makeEnv, OWNER_TOKEN, signUp } from "./helpers/harness.mjs";
 const OWNER_EMAIL = "owner@example.com";
-const bot = (seat) => ({ headers: { authorization: `Bearer ${AGENT_SECRET}`, "x-fleet-seat": seat } });
+
+// A bot acts with its own API token, minted for it by the harness admin (a
+// site admin may mint for any bot) and cached per env:  the production shape
+// since the shared agent credential was retired.
+const botTokens = new WeakMap();
+async function bot(env, seat) {
+  let per = botTokens.get(env);
+  if (!per) { per = new Map(); botTokens.set(env, per); }
+  if (!per.has(seat)) {
+    const minted = await callJson(env, "POST", `/api/bots/${agentUserId(seat)}/tokens`, { auth: { operator: true }, json: { name: "test" } });
+    if (minted.status !== 201) throw new Error(`mint for ${seat} failed ${minted.status} ${JSON.stringify(minted.data)}`);
+    per.set(seat, minted.data.token);
+  }
+  return { headers: { authorization: `Bearer ${per.get(seat)}` } };
+}
 
 async function rpcTool(env, opts, name, args = {}) {
   const res = await callJson(env, "POST", "/mcp", { ...opts, json: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } });
@@ -15,7 +28,7 @@ async function rpcTool(env, opts, name, args = {}) {
 }
 
 async function fleet() {
-  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET, FLEET_OWNER_EMAIL: OWNER_EMAIL });
+  const env = await makeEnv({ FLEET_OWNER_EMAIL: OWNER_EMAIL });
   const jay = await signUp(env, "Jay", { email: OWNER_EMAIL });
   return { env, jay };
 }
@@ -50,8 +63,11 @@ test("the fleet owner is found by FLEET_OWNER_EMAIL, owns the Fleet team, and ma
   assert.deepEqual((await callJson(env, "GET", "/api/me", { auth: eve })).data.bots, { count: 0, fleet_owner: false });
   assert.equal((await callJson(env, "GET", "/api/bots", { auth: eve })).data.bots.length, 0);
   assert.equal((await callJson(env, "PATCH", "/api/bots/usr_agent_jet", { auth: eve, json: { status: "disabled" } })).status, 404);
-  // A seat not on the roster still gets an account under the owner on first use.
-  const fresh = await rpcTool(env, bot("NEWBOT"), "fleetlink_whoami");
+  // A seat not on the roster gets an account only when the owner creates it
+  // explicitly; presenting a seat name provisions nothing.
+  const added = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "NEWBOT" } });
+  assert.equal(added.status, 201);
+  const fresh = await rpcTool(env, (await bot(env, "NEWBOT")), "fleetlink_whoami");
   assert.equal(fresh.data.user.id, "usr_agent_newbot");
   assert.equal(fresh.data.user.manager_id, jay.user.id);
 });
@@ -60,51 +76,51 @@ test("bots and the owner edit and overwrite each other's team work;  the owner m
   const { env, jay } = await fleet();
   await callJson(env, "GET", "/api/me", { auth: jay });
   // A bot's new share lands in the Fleet team with edit access.
-  const made = await rpcTool(env, bot("CODEX"), "fleetlink_create_share", { markdown: "v1", slug: "codex-plan" });
+  const made = await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_create_share", { markdown: "v1", slug: "codex-plan" });
   assert.deepEqual(made.data.share.team, { id: "team_fleet", name: "Fleet", access: "edit" });
   // Another bot overwrites the same file over the raw path and the tool.
-  assert.equal((await call(env, "PUT", "/codex-plan/note.md", { ...bot("CLAUDE"), body: "v2", headers: { ...bot("CLAUDE").headers, accept: "application/json" } })).status, 200);
-  assert.equal((await rpcTool(env, bot("GROK"), "fleetlink_add_file", { slug: "codex-plan", path: "note.md", markdown: "v3" })).error, null);
+  assert.equal((await call(env, "PUT", "/codex-plan/note.md", { ...(await bot(env, "CLAUDE")), body: "v2", headers: { ...(await bot(env, "CLAUDE")).headers, accept: "application/json" } })).status, 200);
+  assert.equal((await rpcTool(env, (await bot(env, "GROK")), "fleetlink_add_file", { slug: "codex-plan", path: "note.md", markdown: "v3" })).error, null);
   assert.equal(await (await call(env, "GET", "/codex-plan/note.md?raw=1")).text(), "v3");
   // The owner overwrites it too, and a bot overwrites the owner's team share.
   assert.equal((await call(env, "PUT", "/api/shares/codex-plan/files/note.md", { auth: jay, body: "jay", headers: { "content-type": "text/markdown" } })).status, 201);
   await callJson(env, "POST", "/api/shares", { auth: jay, json: { slug: "jay-brief", team_id: "team_fleet" } });
   await call(env, "PUT", "/api/shares/jay-brief/files/brief.md", { auth: jay, body: "jay v1", headers: { "content-type": "text/markdown" } });
-  assert.equal((await rpcTool(env, bot("BF-FIXER"), "fleetlink_add_file", { slug: "jay-brief", path: "brief.md", markdown: "fixed" })).error, null);
+  assert.equal((await rpcTool(env, (await bot(env, "BF-FIXER")), "fleetlink_add_file", { slug: "jay-brief", path: "brief.md", markdown: "fixed" })).error, null);
   assert.equal(await (await call(env, "GET", "/jay-brief/brief.md?raw=1")).text(), "fixed");
   // Even a view-only team share:  bots are team admins.
   await callJson(env, "PATCH", "/api/shares/jay-brief", { auth: jay, json: { team_access: "view" } });
-  assert.equal((await rpcTool(env, bot("GB-FIXER"), "fleetlink_add_file", { slug: "jay-brief", path: "more.md", text: "x" })).error, null);
+  assert.equal((await rpcTool(env, (await bot(env, "GB-FIXER")), "fleetlink_add_file", { slug: "jay-brief", path: "more.md", text: "x" })).error, null);
   // Jay's personal shares stay protected from team members, but his agents can view and edit them.
   await callJson(env, "POST", "/api/shares", { auth: jay, json: { slug: "jay-private" } });
-  const jayPriv = await rpcTool(env, bot("CODEX"), "fleetlink_get_share", { slug: "jay-private" });
+  const jayPriv = await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_get_share", { slug: "jay-private" });
   assert.equal(jayPriv.error, null);
   assert.equal(jayPriv.data.share.can_edit, true);
   assert.equal(jayPriv.data.share.can_manage, false);
   // Team-only is on for the fleet owner, so the bot can read but not write into the personal share.
-  assert.match((await rpcTool(env, bot("CODEX"), "fleetlink_add_file", { slug: "jay-private", path: "agent.md", markdown: "from bot" })).error, /move it to a team/);
+  assert.match((await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_add_file", { slug: "jay-private", path: "agent.md", markdown: "from bot" })).error, /move it to a team/);
   assert.equal((await callJson(env, "GET", "/api/shares/jay-private", { auth: jay })).data.share.file_count, 0);
   const eve = await signUp(env, "Eve Out", { email: "eveout@example.com" });
   assert.equal((await callJson(env, "GET", "/api/shares/jay-private", { auth: eve })).status, 404);
   assert.equal((await callJson(env, "GET", "/api/shares?scope=manager", { auth: eve })).status, 403);
-  const mgrList = await callJson(env, "GET", "/api/shares?scope=manager", bot("CODEX"));
+  const mgrList = await callJson(env, "GET", "/api/shares?scope=manager", (await bot(env, "CODEX")));
   assert.equal(mgrList.status, 200);
   assert.ok(mgrList.data.shares.some((s) => s.slug === "jay-private"));
 
   // The fleet owner requires team sharing, so a bot's personal ask is refused.
-  const refused = await rpcTool(env, bot("AG"), "fleetlink_create_share", { text: "draft", slug: "ag-draft", personal: true });
+  const refused = await rpcTool(env, (await bot(env, "AG")), "fleetlink_create_share", { text: "draft", slug: "ag-draft", personal: true });
   assert.match(refused.error, /requires its bots to share new posts with a team/);
   // With the policy off, a bot's personal share is hidden from the other bots, but its manager sees and manages it.
   assert.equal((await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_team_only: false } })).data.bot_defaults.team_only, false);
-  const secret = await rpcTool(env, bot("AG"), "fleetlink_create_share", { text: "draft", slug: "ag-draft", personal: true });
+  const secret = await rpcTool(env, (await bot(env, "AG")), "fleetlink_create_share", { text: "draft", slug: "ag-draft", personal: true });
   assert.equal(secret.data.share.visibility, "personal");
-  assert.equal((await rpcTool(env, bot("CODEX"), "fleetlink_get_share", { slug: "ag-draft" })).error, "Share not found.");
+  assert.equal((await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_get_share", { slug: "ag-draft" })).error, "Share not found.");
   const mine = await callJson(env, "GET", "/api/shares?scope=bots", { auth: jay });
   assert.deepEqual(mine.data.shares.map((s) => [s.slug, s.owner.is_bot, s.can_manage]).sort(), [["ag-draft", true, true], ["codex-plan", true, true]]);
   assert.equal((await callJson(env, "PATCH", "/api/shares/ag-draft", { auth: jay, json: { team_id: "team_fleet" } })).status, 200);
   assert.equal((await callJson(env, "DELETE", "/api/shares/ag-draft", { auth: jay })).status, 200);
   // With the policy off the bot writes into Jay's personal share again.
-  assert.equal((await rpcTool(env, bot("CODEX"), "fleetlink_add_file", { slug: "jay-private", path: "agent.md", markdown: "from bot" })).error, null);
+  assert.equal((await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_add_file", { slug: "jay-private", path: "agent.md", markdown: "from bot" })).error, null);
   assert.equal(await (await call(env, "GET", "/jay-private/agent.md?raw=1")).text(), "from bot");
 });
 
@@ -120,30 +136,30 @@ test("team-only bot sharing: the fleet owner and new accounts default on, bots c
   assert.equal((await callJson(env, "GET", "/api/me", { auth: eve })).data.bot_defaults.team_only, true);
 
   // An ordinary bot post lands in the Fleet team as before; an explicit personal ask is refused and creates nothing.
-  const made = await rpcTool(env, bot("CODEX"), "fleetlink_create_share", { markdown: "v1", slug: "teamonly-plan" });
+  const made = await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_create_share", { markdown: "v1", slug: "teamonly-plan" });
   assert.equal(made.error, null);
   assert.deepEqual(made.data.share.team, { id: "team_fleet", name: "Fleet", access: "edit" });
-  const refused = await rpcTool(env, bot("CODEX"), "fleetlink_create_share", { text: "mine", slug: "teamonly-secret", personal: true });
+  const refused = await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_create_share", { text: "mine", slug: "teamonly-secret", personal: true });
   assert.match(refused.error, /requires its bots to share new posts with a team/);
-  assert.equal((await rpcTool(env, bot("CODEX"), "fleetlink_get_share", { slug: "teamonly-secret" })).error, "Share not found.");
-  const raw = await call(env, "PUT", "/teamonly-raw/note.md", { ...bot("CLAUDE"), body: "v1", headers: { ...bot("CLAUDE").headers, "x-fleet-personal": "1", accept: "application/json" } });
+  assert.equal((await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_get_share", { slug: "teamonly-secret" })).error, "Share not found.");
+  const raw = await call(env, "PUT", "/teamonly-raw/note.md", { ...(await bot(env, "CLAUDE")), body: "v1", headers: { ...(await bot(env, "CLAUDE")).headers, "x-fleet-personal": "1", accept: "application/json" } });
   assert.equal(raw.status, 400);
   assert.equal((await callJson(env, "GET", "/api/shares/teamonly-raw", { auth: jay })).status, 404);
 
   // A bot cannot take its own share out of the team; the manager still can.
-  assert.match((await rpcTool(env, bot("CODEX"), "fleetlink_make_personal", { slug: "teamonly-plan" })).error, /requires its bots to keep their shares in a team/);
+  assert.match((await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_make_personal", { slug: "teamonly-plan" })).error, /requires its bots to keep their shares in a team/);
   const personal = await callJson(env, "PATCH", "/api/shares/teamonly-plan", { auth: jay, json: { team_id: null } });
   assert.equal(personal.data.share.visibility, "personal");
 
   // The manager turns the policy off and the bot posts personal again.
   assert.equal((await callJson(env, "PATCH", "/api/me", { auth: jay, json: { bot_team_only: false } })).data.bot_defaults.team_only, false);
-  const free = await rpcTool(env, bot("CODEX"), "fleetlink_create_share", { text: "mine", slug: "teamonly-secret", personal: true });
+  const free = await rpcTool(env, (await bot(env, "CODEX")), "fleetlink_create_share", { text: "mine", slug: "teamonly-secret", personal: true });
   assert.equal(free.error, null);
   assert.equal(free.data.share.visibility, "personal");
 });
 
 test("team-only bots cannot write files or links into personal shares until the main account moves them to a team", async () => {
-  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const env = await makeEnv();
   const pat = await signUp(env, "Pat", { email: "pat-writes@example.com" });
   const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-w" } })).data.bot;
   const tok = (await callJson(env, "POST", `/api/bots/${patBot.id}/tokens`, { auth: pat, json: { name: "t" } })).data.token;
@@ -182,7 +198,7 @@ test("team-only bots cannot write files or links into personal shares until the 
 });
 
 test("team-only enforcement fails closed when the manager is missing or disabled, and an opted-out manager is respected", async () => {
-  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const env = await makeEnv();
   const pat = await signUp(env, "Pat", { email: "pat-orphan@example.com" });
   const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-orph" } })).data.bot;
   const tok = (await callJson(env, "POST", `/api/bots/${patBot.id}/tokens`, { auth: pat, json: { name: "t" } })).data.token;
@@ -220,21 +236,22 @@ test("team-only enforcement fails closed when the manager is missing or disabled
 });
 
 test("bots work with the widest limits:  admin file sizes, any lifetime, no storage quota", async () => {
-  const { env } = await fleet();
-  const who = await rpcTool(env, bot("MA"), "fleetlink_whoami");
+  const { env, jay } = await fleet();
+  await callJson(env, "GET", "/api/me", { auth: jay });
+  const who = await rpcTool(env, (await bot(env, "MA")), "fleetlink_whoami");
   assert.equal(who.data.limits.max_file_bytes, 300 * 1024 * 1024);
   assert.equal(who.data.limits.forever_allowed, true);
   assert.equal(who.data.limits.max_file_days, null);
   assert.equal(who.data.quotas.storage_bytes, null);
   assert.equal(who.data.quotas.token_quota, 100);
-  const forever = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "keep", slug: "ma", days: "forever" });
+  const forever = await rpcTool(env, (await bot(env, "MA")), "fleetlink_create_share", { text: "keep", slug: "ma", days: "forever" });
   assert.equal(forever.error, null);
   assert.equal(forever.data.share.expires_at, null);
-  const long = await rpcTool(env, bot("MA"), "fleetlink_create_link", { url: "https://example.com", days: 3650 });
+  const long = await rpcTool(env, (await bot(env, "MA")), "fleetlink_create_link", { url: "https://example.com", days: 3650 });
   assert.equal(long.error, null);
 });
 
-test("the manager gives a bot tokens, renames, disables, and adds bots;  the simple-tools credential mints a seat token", async () => {
+test("the manager gives a bot tokens, renames, disables, and adds bots;  a bot rotates its own token", async () => {
   const { env, jay } = await fleet();
   await callJson(env, "GET", "/api/me", { auth: jay });
   const made = await callJson(env, "POST", "/api/bots/usr_agent_codex/tokens", { auth: jay, json: { name: "codex mac" } });
@@ -251,8 +268,9 @@ test("the manager gives a bot tokens, renames, disables, and adds bots;  the sim
   assert.equal((await callJson(env, "GET", "/api/me", { auth: { token: made.data.token } })).status, 401);
 
   assert.equal((await callJson(env, "PATCH", "/api/bots/usr_agent_codex", { auth: jay, json: { display_name: "Codex" } })).data.bot.display_name, "Codex");
+  const codexCreds = await bot(env, "CODEX");
   assert.equal((await callJson(env, "PATCH", "/api/bots/usr_agent_codex", { auth: jay, json: { status: "disabled" } })).status, 200);
-  assert.equal((await callJson(env, "GET", "/api/me", bot("CODEX"))).status, 403);
+  assert.equal((await callJson(env, "GET", "/api/me", codexCreds)).status, 403);
   assert.equal((await callJson(env, "POST", "/api/bots/usr_agent_codex/tokens", { auth: jay, json: { name: "x" } })).status, 403);
 
   const added = await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "qa-bot", display_name: "QA" } });
@@ -261,9 +279,9 @@ test("the manager gives a bot tokens, renames, disables, and adds bots;  the sim
   assert.equal((await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "QA-BOT" } })).status, 409);
   assert.equal((await callJson(env, "POST", "/api/bots", { auth: jay, json: { seat: "x y" } })).status, 400);
   // Tokens and agents cannot manage bots.
-  assert.equal((await callJson(env, "GET", "/api/bots", bot("CLAUDE"))).status, 403);
+  assert.equal((await callJson(env, "GET", "/api/bots", (await bot(env, "CLAUDE")))).status, 403);
 
-  const minted = await callJson(env, "POST", "/api/agent/token", { ...bot("OPENCODE"), json: {} });
+  const minted = await callJson(env, "POST", "/api/agent/token", { ...(await bot(env, "OPENCODE")), json: {} });
   assert.equal(minted.status, 201);
   assert.deepEqual([minted.data.seat, minted.data.user_id, minted.data.api_token.name], ["OPENCODE", "usr_agent_opencode", "OPENCODE via simple-tools"]);
   assert.equal((await callJson(env, "GET", "/api/me", { auth: { token: minted.data.token } })).data.user.id, "usr_agent_opencode");
@@ -271,14 +289,15 @@ test("the manager gives a bot tokens, renames, disables, and adds bots;  the sim
 });
 
 test("a site admin can claim the fleet when no email matches", async () => {
-  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const env = await makeEnv();
   const ada = await signUp(env, "Ada");
   assert.deepEqual((await callJson(env, "GET", "/api/me", { auth: ada })).data.bots, { count: 0, fleet_owner: false });
   assert.equal((await callJson(env, "POST", "/api/admin/fleet/claim", { auth: ada })).status, 403);
   await makeAdmin(env, ada);
   const before = await callJson(env, "GET", "/api/admin/fleet", { auth: ada });
   assert.deepEqual([before.data.owner, before.data.bots, before.data.unmanaged], [null, 36, 36]);
-  assert.equal((await callJson(env, "POST", "/api/admin/fleet/claim", { auth: { operator: true } })).status, 400);
+  // Claiming needs a signed-in person: even an admin's API token is refused.
+  assert.equal((await callJson(env, "POST", "/api/admin/fleet/claim", { auth: { token: OWNER_TOKEN } })).status, 400);
   const claimed = await callJson(env, "POST", "/api/admin/fleet/claim", { auth: ada });
   assert.deepEqual([claimed.data.owner_id, claimed.data.bots], [ada.user.id, 36]);
   const after = await callJson(env, "GET", "/api/admin/fleet", { auth: ada });
@@ -289,7 +308,7 @@ test("a site admin can claim the fleet when no email matches", async () => {
 });
 
 test("a bot token can follow its manager's limits live:  nothing is copied, so a change to the manager reaches it at once", async () => {
-  const env = await makeEnv({ AGENT_SYNC_SECRET: AGENT_SECRET });
+  const env = await makeEnv();
   const pat = await signUp(env, "Pat");
   // This test exercises limits, not sharing:  Pat's bot is in no team, so opt out of the team-only default.
   await callJson(env, "PATCH", "/api/me", { auth: pat, json: { bot_team_only: false } });
@@ -324,14 +343,22 @@ test("a bot token can follow its manager's limits live:  nothing is copied, so a
   assert.equal((await callJson(env, "POST", "/api/tokens", { auth: person, json: { name: "x", limits_from: "manager" } })).status, 400);
 });
 
-test("the simple-tools credential can mint a seat token that follows the fleet owner's limits", async () => {
+test("a bot can rotate its own token, keeping its limits scope; only its manager can change the scope", async () => {
   const { env, jay } = await fleet();
   await callJson(env, "GET", "/api/me", { auth: jay });
-  const minted = await callJson(env, "POST", "/api/agent/token", { ...bot("JET"), json: { limits_from: "manager" } });
+  // The manager gives JET a manager-following token; rotation preserves it.
+  const follow = (await callJson(env, "POST", "/api/bots/usr_agent_jet/tokens", { auth: jay, json: { name: "follows", limits_from: "manager" } })).data.token;
+  const minted = await callJson(env, "POST", "/api/agent/token", { auth: { token: follow }, json: {} });
   assert.equal(minted.status, 201);
   assert.equal(minted.data.api_token.limits_from, "manager");
   const me = await callJson(env, "GET", "/api/me", { auth: { token: minted.data.token } });
   assert.deepEqual([me.data.user.id, me.data.auth.limits_from], ["usr_agent_jet", "manager"]);
+  // An own-scope token cannot widen itself through rotation.
+  const widen = await callJson(env, "POST", "/api/agent/token", { ...(await bot(env, "JET")), json: { limits_from: "manager" } });
+  assert.equal(widen.status, 400);
+  const kept = await callJson(env, "POST", "/api/agent/token", { ...(await bot(env, "JET")), json: {} });
+  assert.equal(kept.status, 201);
+  assert.equal(kept.data.api_token.limits_from, "own");
 });
 
 test("fleet bot tokens under the fleet owner can post forever, renew forever, and create forever short links", async () => {
@@ -398,13 +425,13 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
   const deleted = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limits: { max_file_mb: null, max_link_days: null } } });
   assert.deepEqual(deleted.data.bot.limits, { max_file_days: 2 });
   await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limits: { max_file_mb: 1 } } });
-  const capped = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-capped", days: 5 });
+  const capped = await rpcTool(env, (await bot(env, "MA")), "fleetlink_create_share", { text: "x", slug: "ma-capped", days: 5 });
   assert.equal(capped.error, "File shares last at most 2 days.");
-  const within = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-within", days: 2 });
+  const within = await rpcTool(env, (await bot(env, "MA")), "fleetlink_create_share", { text: "x", slug: "ma-within", days: 2 });
   assert.equal(within.error, null);
-  const forever = await rpcTool(env, bot("MA"), "fleetlink_create_share", { text: "x", slug: "ma-forever", days: "forever" });
+  const forever = await rpcTool(env, (await bot(env, "MA")), "fleetlink_create_share", { text: "x", slug: "ma-forever", days: "forever" });
   assert.equal(forever.error, "Only admins can make a share that never expires.");
-  const who = await rpcTool(env, bot("MA"), "fleetlink_whoami");
+  const who = await rpcTool(env, (await bot(env, "MA")), "fleetlink_whoami");
   assert.equal(who.data.limits.max_file_bytes, 1 * 1024 * 1024);
   assert.equal(who.data.limits.forever_allowed, false);
 
@@ -417,7 +444,7 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
   // A cap never widens past the manager's own allowance.  Jay, as fleet owner, is an
   // admin, so MA's base is the admin tier and the 9999 MB cap cannot raise it.
   await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "manual", limits: { max_file_mb: 9999 } } });
-  assert.equal((await rpcTool(env, bot("MA"), "fleetlink_whoami")).data.limits.max_file_bytes, 300 * 1024 * 1024);
+  assert.equal((await rpcTool(env, (await bot(env, "MA")), "fleetlink_whoami")).data.limits.max_file_bytes, 300 * 1024 * 1024);
 
   // Account mode tracks the manager live.  Pat is a regular person with their own bot:
   const pat = await signUp(env, "Pat", { email: "pat@example.com" });
@@ -426,13 +453,13 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
   const patBot = (await callJson(env, "POST", "/api/bots", { auth: pat, json: { seat: "pat-acct" } })).data.bot;
   const setMode = (mode) => callJson(env, "PATCH", `/api/bots/${patBot.id}`, { auth: pat, json: { limit_mode: mode } });
   await setMode("account");
-  const whoPat = async () => (await rpcTool(env, bot("PAT-ACCT"), "fleetlink_whoami")).data.limits;
+  const whoPat = async () => (await rpcTool(env, (await bot(env, "PAT-ACCT")), "fleetlink_whoami")).data.limits;
   assert.deepEqual([(await whoPat()).max_file_bytes, (await whoPat()).follows], [100 * 1024 * 1024, "manager"]);
-  assert.equal((await rpcTool(env, bot("PAT-ACCT"), "fleetlink_create_share", { text: "x", slug: "pat-acct-f", days: "forever" })).error, "Only admins can make a share that never expires.");
+  assert.equal((await rpcTool(env, (await bot(env, "PAT-ACCT")), "fleetlink_create_share", { text: "x", slug: "pat-acct-f", days: "forever" })).error, "Only admins can make a share that never expires.");
   // ...the manager becomes an admin and the bot widens on its next request, with no new token:
   await callJson(env, "PATCH", `/api/admin/users/${pat.user.id}`, { auth: { operator: true }, json: { role: "admin" } });
   assert.equal((await whoPat()).max_file_bytes, 300 * 1024 * 1024);
-  assert.equal((await rpcTool(env, bot("PAT-ACCT"), "fleetlink_create_share", { text: "x", slug: "pat-acct", days: "forever" })).error, null);
+  assert.equal((await rpcTool(env, (await bot(env, "PAT-ACCT")), "fleetlink_create_share", { text: "x", slug: "pat-acct", days: "forever" })).error, null);
   // ...and a disabled manager means the standard person's limits, never wider:
   await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").bind(pat.user.id).run();
   assert.equal((await whoPat()).max_file_bytes, 100 * 1024 * 1024);
@@ -442,7 +469,7 @@ test("a bot's limit modes: legacy keeps the widest tier, account follows the man
   const back = await callJson(env, "PATCH", "/api/bots/usr_agent_ma", { auth: jay, json: { limit_mode: "legacy" } });
   assert.equal(back.data.bot.limit_mode, "legacy");
   assert.equal(back.data.bot.limits, null);
-  const who3 = await rpcTool(env, bot("MA"), "fleetlink_whoami");
+  const who3 = await rpcTool(env, (await bot(env, "MA")), "fleetlink_whoami");
   assert.equal(who3.data.limits.max_file_bytes, 300 * 1024 * 1024);
   assert.equal(who3.data.limits.forever_allowed, true);
 
@@ -463,7 +490,7 @@ test("an 'inherit' bot tracks its manager's account-wide default live, explicit 
   // these tests set the columns directly to pin the resolution layer.
   const setBotMode = (id, mode) => env.DB.prepare("UPDATE users SET agent_limit_mode = ?, agent_inherits_defaults = ? WHERE id = ?").bind(mode === "inherit" ? "legacy" : mode, mode === "inherit" ? 1 : 0, id).run();
   const setDefault = (id, mode, caps = null) => env.DB.prepare("UPDATE users SET bot_default_mode = ?, bot_default_limits = ? WHERE id = ?").bind(mode, caps, id).run();
-  const whoPat = async () => (await rpcTool(env, bot("PAT-INH"), "fleetlink_whoami")).data.limits;
+  const whoPat = async () => (await rpcTool(env, (await bot(env, "PAT-INH")), "fleetlink_whoami")).data.limits;
 
   await setBotMode(patBot.id, "inherit");
 
@@ -474,7 +501,7 @@ test("an 'inherit' bot tracks its manager's account-wide default live, explicit 
   // Changing the default to 'account' reaches the bot on its next request.
   await setDefault(pat.user.id, "account");
   assert.deepEqual([(await whoPat()).max_file_bytes, (await whoPat()).follows], [100 * 1024 * 1024, "manager"]);
-  assert.equal((await rpcTool(env, bot("PAT-INH"), "fleetlink_create_share", { text: "x", slug: "inh-f", days: "forever" })).error, "Only admins can make a share that never expires.");
+  assert.equal((await rpcTool(env, (await bot(env, "PAT-INH")), "fleetlink_create_share", { text: "x", slug: "inh-f", days: "forever" })).error, "Only admins can make a share that never expires.");
 
   // Changing it to 'manual' clamps with the manager's stored default caps.
   await setDefault(pat.user.id, "manual", JSON.stringify({ max_file_mb: 2 }));
@@ -500,7 +527,7 @@ test("an 'inherit' bot tracks its manager's account-wide default live, explicit 
   // Explicit per-bot modes and 'legacy' bots are untouched by the manager's default.
   // Jay sets a tight default;  MA (legacy) and an explicit-account bot ignore it.
   await setDefault(jay.user.id, "manual", JSON.stringify({ max_file_mb: 1 }));
-  const whoMA = await rpcTool(env, bot("MA"), "fleetlink_whoami");
+  const whoMA = await rpcTool(env, (await bot(env, "MA")), "fleetlink_whoami");
   assert.equal(whoMA.data.limits.max_file_bytes, 300 * 1024 * 1024); // legacy: unchanged widest
   assert.equal(whoMA.data.limits.forever_allowed, true);
 });
@@ -545,7 +572,7 @@ test("migration order v8 -> v9 applies cleanly and pre-existing rows are unchang
   // A row inserted the old way (no new columns named) still resolves as legacy,
   // so data written before this stage behaves exactly as before it.
   await env.DB.prepare("INSERT INTO users (id, display_name, role, status, is_system, kind, agent_seat, manager_id, created_at, updated_at) VALUES ('usr_agent_oldrow', 'OLDROW (bot)', 'user', 'active', 0, 'agent', 'OLDROW', ?, 1, 1)").bind(jay.user.id).run();
-  const who = await rpcTool(env, bot("OLDROW"), "fleetlink_whoami");
+  const who = await rpcTool(env, (await bot(env, "OLDROW")), "fleetlink_whoami");
   assert.equal(who.data.limits.max_file_bytes, 300 * 1024 * 1024);
   assert.equal(who.data.limits.forever_allowed, true);
 });
@@ -569,12 +596,12 @@ test('default cap PATCH validates policy, merges partial caps, and supports clea
 });
 
 test('inherited default changes do not alter explicit account/manual or legacy; disabled manager stays restricted',async()=>{
- const env=await makeEnv({AGENT_SYNC_SECRET:AGENT_SECRET});
+ const env=await makeEnv();
  const pat=await signUp(env,'Policy manager');
  const create=async seat=>(await callJson(env,'POST','/api/bots',{auth:pat,json:{seat}})).data.bot;
  const a=await create('explicit-acct'),m=await create('explicit-cap'),l=await create('explicit-old'),i=await create('inherited');
  for(const [b,mode,limits] of [[a,'account',undefined],[m,'manual',{max_file_mb:4}],[l,'legacy',undefined]]) await callJson(env,'PATCH','/api/bots/'+b.id,{auth:pat,json:{limit_mode:mode,limits}});
- const cap=async seat=>(await rpcTool(env,bot(seat),'fleetlink_whoami')).data.limits.max_file_bytes;
+ const cap=async seat=>(await rpcTool(env,(await bot(env, seat)),'fleetlink_whoami')).data.limits.max_file_bytes;
  for(const mode of ['manual','account','legacy']) {
   await callJson(env,'PATCH','/api/me',{auth:pat,json:{bot_default_mode:mode,...(mode==='manual'?{bot_default_limits:{max_file_mb:1}}:{})}});
   assert.equal(await cap('EXPLICIT-ACCT'),100*1024*1024);
