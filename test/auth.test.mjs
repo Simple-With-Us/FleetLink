@@ -4,7 +4,7 @@ import { SoftAuthenticator } from "../scripts/lib/soft-authenticator.mjs";
 import { ensureSchema, migrate } from "../worker/lib/db.mjs";
 import { MIGRATIONS, splitStatements } from "../worker/lib/schema.mjs";
 import { memoryD1 } from "./helpers/d1.mjs";
-import { call, callJson, createToken, makeEnv, ORIGIN, signIn, signUp } from "./helpers/harness.mjs";
+import { call, callJson, createToken, makeEnv, OPERATOR_SECRET, ORIGIN, signIn, signUp } from "./helpers/harness.mjs";
 
 const OLD_SCHEMA = `
 CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT, display_name TEXT, email TEXT, disabled INTEGER, agent_token_quota INTEGER, created_at INTEGER);
@@ -182,6 +182,28 @@ test("credentials: operator secret, API tokens, retired agent secret, and bad be
   const id = list.data.tokens[0].id;
   assert.equal((await callJson(env, "DELETE", `/api/tokens/${id}`, { auth: ada })).status, 200);
   assert.equal((await callJson(env, "GET", "/api/me", { auth: { token } })).status, 401);
+});
+
+test("legacy secret authentications leave audit rows for the retirement soak", async () => {
+  const agentSecret = "fls_" + "a".repeat(64);
+  const env = await makeEnv({ AGENT_SYNC_SECRET: agentSecret });
+  const op = await callJson(env, "GET", "/api/me", { auth: { operator: true } });
+  assert.equal(op.data.auth.kind, "operator");
+  const opBearer = await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer ${OPERATOR_SECRET}` } });
+  assert.equal(opBearer.data.auth.kind, "operator");
+  const agent = await callJson(env, "GET", "/api/me", { headers: { authorization: `Bearer ${agentSecret}`, "x-fleet-seat": "MA" } });
+  assert.equal(agent.data.auth.kind, "agent");
+  assert.equal(agent.data.user.id, "usr_agent_ma");
+  const rows = (await env.DB.prepare("SELECT action, detail FROM audit_events WHERE action IN ('auth.operator', 'auth.agent') ORDER BY ts, action").all()).results;
+  assert.deepEqual(rows.map((r) => r.action), ["auth.operator", "auth.operator", "auth.agent"]);
+  assert.deepEqual(rows.map((r) => JSON.parse(r.detail).via ?? JSON.parse(r.detail).seat), ["x-fleet-admin", "bearer", "MA"]);
+  // Token and session authentications stay unaudited.
+  const ada = await signUp(env, "Ada");
+  await callJson(env, "GET", "/api/me", { auth: ada });
+  const token = await createToken(env, ada, { name: "ci" });
+  await callJson(env, "GET", "/api/me", { auth: { token } });
+  const after = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action IN ('auth.operator', 'auth.agent')").first();
+  assert.equal(after.n, 3);
 });
 
 test("expired tokens stop working and token quota is enforced", async () => {

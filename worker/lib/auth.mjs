@@ -1,4 +1,5 @@
 import { AGENT_SECRET, ensureAgentUser, isAgentSecret } from "./agents.mjs";
+import { audit } from "./audit.mjs";
 import { safeEqual } from "./bytes.mjs";
 import { first } from "./db.mjs";
 import { getUser } from "./users.mjs";
@@ -79,17 +80,27 @@ function principalFor(kind, user, extra = {}) {
   return { kind, user, isAdmin: user.role === "admin", viaCookie: false, ...extra };
 }
 
-async function operatorPrincipal(env) {
+async function operatorPrincipal(env, via) {
   const user = await getUser(env.DB, OPERATOR_USER_ID);
   if (!user) throw new HttpError(503, "The operator account is missing.");
-  return principalFor("operator", user);
+  const principal = principalFor("operator", user);
+  // Retirement soak: every use of the legacy operator secret leaves an audit
+  // row, so remaining holders stay visible until the credential is retired.
+  // This row is removed with the branch that mints this principal.
+  await audit(env, user.id, "auth.operator", user.id, { via });
+  return principal;
 }
 
 /** The simple-tools server acting for one seat (agents.mjs).  Agents are never admins. */
 async function agentPrincipal(env, request) {
   const user = await ensureAgentUser(env, request.headers.get("x-fleet-seat"));
   const botLimits = await agentLimitsResolution(env, user);
-  return { ...principalFor("agent", user), isAdmin: false, seat: user.agent_seat, ...(botLimits.limitsUser ? { limitsUser: botLimits.limitsUser } : {}), ...(botLimits.limitsOverride ? { limitsOverride: botLimits.limitsOverride } : {}) };
+  const principal = { ...principalFor("agent", user), isAdmin: false, seat: user.agent_seat, ...(botLimits.limitsUser ? { limitsUser: botLimits.limitsUser } : {}), ...(botLimits.limitsOverride ? { limitsOverride: botLimits.limitsOverride } : {}) };
+  // Retirement soak: every use of the shared agent secret leaves an audit
+  // row, so remaining holders stay visible until the credential is retired.
+  // This row is removed with the branch that mints this principal.
+  await audit(env, user.id, "auth.agent", user.id, { seat: user.agent_seat });
+  return principal;
 }
 
 async function fromToken(env, secret) {
@@ -121,7 +132,7 @@ export async function resolvePrincipal(request, env) {
   const admin = operatorSecret(env);
   const adminHeader = (request.headers.get("x-fleet-admin") || "").trim();
   if (adminHeader) {
-    if (admin && await safeEqual(adminHeader, admin)) return operatorPrincipal(env);
+    if (admin && await safeEqual(adminHeader, admin)) return operatorPrincipal(env, "x-fleet-admin");
     if (API_TOKEN.test(adminHeader)) return fromToken(env, adminHeader);
     throw unauthorized("The operator secret is not valid.");
   }
@@ -133,7 +144,7 @@ export async function resolvePrincipal(request, env) {
       throw unauthorized("That agent server credential is not valid.");
     }
     if (SESSION_TOKEN.test(presented)) return fromSession(env, presented, false);
-    if (admin && await safeEqual(presented, admin)) return operatorPrincipal(env);
+    if (admin && await safeEqual(presented, admin)) return operatorPrincipal(env, "bearer");
     throw unauthorized("That credential is not valid.");
   }
   const tokenHeader = (request.headers.get("x-fleet-token") || "").trim();
