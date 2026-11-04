@@ -9,6 +9,9 @@ import {
   eventFromError,
   finishWorkerTrace,
   recordWorkerSpan,
+  repoRelativePath,
+  scrubStackText,
+  topFrame,
   redactSentryUrl,
   scrubSentryEvent,
   scrubSentryLog,
@@ -130,4 +133,29 @@ test("deploy.sh publishes SENTRY_RELEASE from git for Worker release correlation
   assert.match(deploy, /SENTRY_RELEASE/);
   assert.match(deploy, /rev-parse HEAD/);
   assert.match(deploy, /SENTRY_TRACES_SAMPLE_RATE/);
+});
+
+test("stack paths are repo-relative so builder home directories do not leak", () => {
+  assert.equal(repoRelativePath("/Users/builder/code/FleetLink/worker/lib/x.mjs"), "worker/lib/x.mjs");
+  assert.equal(repoRelativePath("file:///home/bob/proj/worker/index.mjs?v=1"), "worker/index.mjs");
+  assert.equal(repoRelativePath("C:\\Users\\bob\\proj\\worker\\a.mjs"), "worker/a.mjs");
+  assert.equal(repoRelativePath("/Users/builder/other/lib/y.mjs"), "lib/y.mjs");
+});
+
+test("eventFromError sends the top frame and a scrubbed stack", () => {
+  const error = new Error("boom");
+  error.stack = "Error: boom\n    at handle (/Users/builder/FleetLink/worker/lib/x.mjs:10:5)\n    at /Users/builder/FleetLink/worker/index.mjs:3:1";
+  const frame = topFrame(error);
+  assert.deepEqual(frame, { filename: "worker/lib/x.mjs", lineno: 10, in_app: true, function: "handle", colno: 5 });
+  const event = eventFromError(error, new Request("https://fleetlink.online/"), null);
+  assert.equal(event.exception.values[0].stacktrace.frames[0].filename, "worker/lib/x.mjs");
+  assert.ok(!event.extra.stack.includes("/Users/builder"));
+  assert.ok(event.extra.stack.includes("worker/lib/x.mjs:10:5"));
+  assert.ok(!scrubStackText(error.stack).includes("builder"));
+});
+
+test("eventFromError keeps the old shape for non-errors", () => {
+  const event = eventFromError("oops", new Request("https://fleetlink.online/"), null);
+  assert.equal(event.message, "oops");
+  assert.equal(event.exception, undefined);
 });
