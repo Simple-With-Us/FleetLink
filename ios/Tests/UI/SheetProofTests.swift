@@ -16,19 +16,20 @@ final class SheetProofTests: XCTestCase {
 
     func findFleetLink(in app: XCUIApplication, timeout: TimeInterval = 10) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
-        var swipes = 0
         while Date() < deadline {
             for query in [app.buttons, app.cells, app.staticTexts, app.otherElements] as [XCUIElementQuery] {
                 let el = query["FleetLink"]
+                // Only a hittable element can be tapped; returning a
+                // non-hittable match masks a missing/offscreen activity as a
+                // "failed to synthesize event" tap error, so keep polling.
                 if el.exists && el.isHittable { return el }
-                if el.exists { return el }
             }
-            if swipes < 3 {
-                let cv = app.collectionViews.firstMatch
-                if cv.exists && cv.isHittable && !cv.frame.isEmpty {
-                    cv.swipeLeft()
-                    swipes += 1
-                }
+            // Keep scrolling for the whole timeout: a three-swipe budget is
+            // consumed in the first seconds and then deeper activities are
+            // falsely reported absent from a static list.
+            let cv = app.collectionViews.firstMatch
+            if cv.exists && cv.isHittable && !cv.frame.isEmpty {
+                cv.swipeLeft()
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.6))
         }
@@ -81,6 +82,10 @@ final class SheetProofAuthedTests: XCTestCase {
         let main = XCUIApplication(bundleIdentifier: "online.fleetlink.ios")
         main.launchArguments = ["--seed-share-fixture"]
         main.launch()
+        XCTAssertTrue(
+            main.wait(for: .runningForeground, timeout: 15),
+            "Fixture seeding requires the FleetLink app and extension built and installed in Debug with -DFLEETLINK_SHARE_FIXTURE; the FleetLinkQualification scheme installs only FleetLinkHarness, so install the app before running this class."
+        )
         sleep(3)
         main.terminate()
 
@@ -101,23 +106,28 @@ final class SheetProofAuthedTests: XCTestCase {
         fl.tap()
         let preview = app.staticTexts["share.preview"]
         XCTAssertTrue(preview.waitForExistence(timeout: 20))
+        // The placeholder "Preparing preview…" exists before the extension
+        // resolves; wait for a resolved label so the signed-out gate
+        // assertion below is meaningful instead of passing on the placeholder.
+        let previewResolved = NSPredicate(format: "label != %@", "Preparing preview…")
+        let resolution = XCTNSPredicateExpectation(predicate: previewResolved, object: preview)
+        XCTAssertEqual(XCTWaiter.wait(for: [resolution], timeout: 20), .completed, "preview never resolved: \(preview.label)")
         XCTAssertFalse(preview.label.contains("sign in"), "unexpected signed-out gate: \(preview.label)")
         shoot("fixture-personal-preview")
 
+        // The team flow is the point of this fixture test: missing controls
+        // must fail loudly, not silently continue on Personal where Create
+        // link is enabled and the example.invalid assertion would still pass.
         let teamSegment = app.buttons["Team"]
-        if teamSegment.waitForExistence(timeout: 5) { teamSegment.tap() }
+        XCTAssertTrue(teamSegment.waitForExistence(timeout: 5), "Team segment missing; the fixture team flow cannot run on Personal")
+        teamSegment.tap()
         let choose = app.buttons["Choose team"]
-        if choose.waitForExistence(timeout: 10) {
-            choose.tap()
-            let fixtureTeam = app.buttons["Fixture Team"]
-            if fixtureTeam.waitForExistence(timeout: 6) {
-                fixtureTeam.tap()
-                shoot("fixture-team-selected")
-            } else {
-                shoot("fixture-team-missing")
-                XCTFail("Fixture Team not listed")
-            }
-        }
+        XCTAssertTrue(choose.waitForExistence(timeout: 10), "Choose team button missing; the fixture team flow cannot run on Personal")
+        choose.tap()
+        let fixtureTeam = app.buttons["Fixture Team"]
+        XCTAssertTrue(fixtureTeam.waitForExistence(timeout: 6), "Fixture Team not listed")
+        fixtureTeam.tap()
+        shoot("fixture-team-selected")
 
         let create = app.buttons["Create link"]
         XCTAssertTrue(create.waitForExistence(timeout: 6))
