@@ -140,6 +140,11 @@ test("stack paths are repo-relative so builder home directories do not leak", ()
   assert.equal(repoRelativePath("file:///home/bob/proj/worker/index.mjs?v=1"), "worker/index.mjs");
   assert.equal(repoRelativePath("C:\\Users\\bob\\proj\\worker\\a.mjs"), "worker/a.mjs");
   assert.equal(repoRelativePath("/Users/builder/other/lib/y.mjs"), "lib/y.mjs");
+  // A Windows drive inside a file:// URL survives scheme stripping unless
+  // the slashes go first; the nested home segment must not reach Sentry.
+  assert.equal(repoRelativePath("file:///C:/Users/bob/x.mjs"), "x.mjs");
+  // A home segment nested deeper than the anchor still names the account.
+  assert.equal(repoRelativePath("/var/lib/users/bob/x.mjs"), "lib/x.mjs");
 });
 
 test("eventFromError sends the top frame and a scrubbed stack", () => {
@@ -152,6 +157,25 @@ test("eventFromError sends the top frame and a scrubbed stack", () => {
   assert.ok(!event.extra.stack.includes("/Users/builder"));
   assert.ok(event.extra.stack.includes("worker/lib/x.mjs:10:5"));
   assert.ok(!scrubStackText(error.stack).includes("builder"));
+  // Assert on the envelope body actually sent to Sentry, not only the
+  // pre-send event: the scrub has to hold after serialization too.
+  const envelope = sentryEnvelope("https://abc@o0.ingest.sentry.io/0", event);
+  assert.ok(!envelope.body.includes("/Users/builder"));
+  assert.ok(!envelope.body.includes("builder"));
+  assert.ok(envelope.body.includes("worker/lib/x.mjs:10:5"));
+});
+
+test("scrubStackText rewrites locations that carry no line numbers", () => {
+  const scrubbed = scrubStackText("Error: boom\n    at handle (/Users/builder/FleetLink/worker/lib/x.mjs)");
+  assert.ok(!scrubbed.includes("/Users/builder"));
+  assert.ok(scrubbed.includes("at handle (worker/lib/x.mjs)"));
+});
+
+test("node runtime frames are not application code", () => {
+  const error = new Error("boom");
+  error.stack = "Error: boom\n    at node:internal/modules/run_main:23:11\n    at handle (/x/worker/lib/x.mjs:1:1)";
+  const frame = topFrame(error);
+  assert.equal(frame.in_app, false);
 });
 
 test("eventFromError keeps the old shape for non-errors", () => {

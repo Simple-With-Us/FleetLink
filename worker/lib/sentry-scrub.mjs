@@ -330,7 +330,7 @@ export function finishWorkerTrace(request, env, ctx, status, fetchImpl = fetch) 
 // ---- stack frames ---------------------------------------------------------------
 
 const REPO_ANCHOR = /(?:^|\/)worker\/.+$/;
-const PRIVATE_HOME = /^(?:users|home)\/[^/]+(?:\/|$)/i;
+const PRIVATE_HOME = /(?:^|\/)(?:users|home)\/[^/]+(\/|$)/i;
 const FRAME_LOCATION = /^(.*?):(\d+)(?::(\d+))?$/;
 
 /**
@@ -348,12 +348,17 @@ export function repoRelativePath(raw) {
   path = path.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
   path = path.replace(/[?#].*$/, "");
   path = path.replace(/\\/g, "/");
-  path = path.replace(/^[A-Za-z]:/, "");
+  // Slashes first: a file:///C:/ URL keeps the drive after the scheme strip,
+  // so the drive (with its own slashes) has to go after them.
+  path = path.replace(/^\/+/, "");
+  path = path.replace(/^[A-Za-z]:\/*/, "");
   path = path.replace(/^\/+/, "");
   const anchor = path.match(REPO_ANCHOR);
   if (anchor) return anchor[0].replace(/^\//, "");
   let rest = path;
-  while (PRIVATE_HOME.test(rest)) rest = rest.replace(PRIVATE_HOME, "");
+  // Not anchored: a home segment nested inside a longer path still carries
+  // the account name, so strip it wherever it occurs before the fallback.
+  while (PRIVATE_HOME.test(rest)) rest = rest.replace(PRIVATE_HOME, "$1");
   const segments = rest.split("/").filter(Boolean);
   if (!segments.length) return "";
   return segments.slice(-2).join("/");
@@ -389,7 +394,7 @@ function parseFrame(line) {
   if (!match) return null;
   const filename = repoRelativePath(match[1]);
   if (!filename) return null;
-  const frame = { filename, lineno: Number(match[2]), in_app: !match[1].includes("node_modules") };
+  const frame = { filename, lineno: Number(match[2]), in_app: !match[1].startsWith("node:") && !match[1].includes("node_modules") };
   if (fn) frame.function = fn;
   if (match[3] != null) frame.colno = Number(match[3]);
   return frame;
@@ -414,7 +419,12 @@ export function scrubStackText(stack) {
     const head = wrapped ? trimmed.slice(0, open + 1) : "at ";
     const location = wrapped ? trimmed.slice(open + 1, -1).trim() : trimmed.slice(3).trim();
     const match = location.match(FRAME_LOCATION);
-    if (!match) return line;
+    if (!match) {
+      // A location without line/column numbers can still carry an absolute
+      // builder path; scrub it rather than returning the raw line.
+      const scrubbed = repoRelativePath(location);
+      return scrubbed ? `${head}${scrubbed}${wrapped ? ")" : ""}` : line;
+    }
     const filename = repoRelativePath(match[1]);
     if (!filename) return line;
     const suffix = match[3] != null ? `:${match[2]}:${match[3]}` : `:${match[2]}`;
