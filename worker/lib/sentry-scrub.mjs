@@ -327,11 +327,153 @@ export function finishWorkerTrace(request, env, ctx, status, fetchImpl = fetch) 
   return { sent: true };
 }
 
+// ---- stack frames ---------------------------------------------------------------
+
+const REPO_ANCHOR = /(?:^|\/)worker\/.+$/;
+// A following segment is required: a repo directory literally named
+// "home" or "users" keeps its files ("app/routes/home/index.mjs").
+const PRIVATE_HOME = /(?:^|\/)(?:users|home)\/[^/]+(\/)(?=[^/])/i;
+// A path that ends at the account directory still leaks the name.  The
+// account segment here has no extension and may carry one trailing slash,
+// so a real filename never matches.
+const TRAILING_HOME = /(?:^|\/)(?:users|home)\/[^/.]+\/?$/i;
+// A dotted final segment ("jay.smith", a Windows-style account name) is
+// ambiguous with a real file, so only a path that arrived absolute, from a
+// drive or from a URL - the shapes that can carry a builder home at all -
+// loses its final account segment whatever it looks like.
+const TRAILING_BUILDER_HOME = /(?:^|\/)(?:users|home)\/[^/]+\/?$/i;
+// ...unless that final segment still names a real file: an absolute repo
+// path can end in a file inside a directory literally named "home"
+// ("/Users/builder/code/FleetLink/app/home/index.mjs"), and stripping there
+// loses the filename and points the frame at its parent directory.  A
+// segment carrying a source-file extension is the file, not the account
+// directory; a dotted account name like "jay.smith" carries none of these.
+const SOURCE_FILE_TAIL = /\.(?:[cm]?[jt]sx?|json|map|wasm|yml|yaml|toml|txt|md)$/i;
+const FRAME_LOCATION = /^(.*?):(\d+)(?::(\d+))?$/;
+// Only an absolute path, Windows drive or URL can carry a builder home.
+const BUILDER_PATH = /^(?:[a-z][a-z0-9+.-]*:\/\/|\/|[A-Za-z]:[\\/])/i;
+
+/**
+ * A source path safe to put in an event: repo-relative, never absolute.
+ *
+ * A stack frame names the file it came from, and on the machine that built
+ * the worker that path is absolute, so it carries the builder's home
+ * directory and user name.  Only the part of the path this repo owns is
+ * kept: the path from "worker/" down, or the last two segments when the
+ * path carries no repo anchor.
+ */
+export function repoRelativePath(raw) {
+  let path = String(raw ?? "").trim();
+  if (!path) return "";
+  const builderPrefixed = BUILDER_PATH.test(path);
+  path = path.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  path = path.replace(/[?#].*$/, "");
+  path = path.replace(/\\/g, "/");
+  // Slashes first: a file:///C:/ URL keeps the drive after the scheme strip,
+  // so the drive (with its own slashes) has to go after them.
+  path = path.replace(/^\/+/, "");
+  path = path.replace(/^[A-Za-z]:\/*/, "");
+  path = path.replace(/^\/+/, "");
+  const anchor = path.match(REPO_ANCHOR);
+  if (anchor) return anchor[0].replace(/^\//, "");
+  let rest = path;
+  // Not anchored: a home segment nested inside a longer path still carries
+  // the account name, so strip it wherever it occurs before the fallback.
+  while (PRIVATE_HOME.test(rest)) rest = rest.replace(PRIVATE_HOME, "$1");
+  rest = rest.replace(TRAILING_HOME, "");
+  if (builderPrefixed && !SOURCE_FILE_TAIL.test(rest)) rest = rest.replace(TRAILING_BUILDER_HOME, "");
+  const segments = rest.split("/").filter(Boolean);
+  if (!segments.length) return "";
+  return segments.slice(-2).join("/");
+}
+
+/**
+ * The top frame of an error: the call that threw.
+ *
+ * The worker posts its own events, so no Sentry SDK reads the stack here.
+ * Only the top frame is kept, and only what a human needs to find the
+ * code: the function, the file, the line and the column.
+ */
+export function topFrame(error) {
+  const stack = typeof error?.stack === "string" ? error.stack : "";
+  for (const line of stack.split("\n")) {
+    const frame = parseFrame(line);
+    if (frame) return frame;
+  }
+  return null;
+}
+
+function parseFrame(line) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed.startsWith("at ")) return null;
+  let rest = trimmed.slice(3).trim();
+  let fn = "";
+  const open = rest.indexOf("(");
+  if (open !== -1 && rest.endsWith(")")) {
+    fn = rest.slice(0, open).trim();
+    rest = rest.slice(open + 1, -1).trim();
+  }
+  const match = rest.match(FRAME_LOCATION);
+  if (!match) return null;
+  const filename = repoRelativePath(match[1]);
+  if (!filename) return null;
+  const frame = { filename, lineno: Number(match[2]), in_app: !match[1].startsWith("node:") && !match[1].includes("node_modules") };
+  if (fn) frame.function = fn;
+  if (match[3] != null) frame.colno = Number(match[3]);
+  return frame;
+}
+
+/**
+ * The stack text with every path in it made repo-relative.
+ *
+ * The text is kept because it names the whole call chain, and it goes under
+ * "extra", which the scrubber already walks.  An absolute path in it would
+ * carry the builder's directory and user name, so every frame line is
+ * rewritten with the same repo-relative path its frame uses.
+ */
+export function scrubStackText(stack) {
+  const text = typeof stack === "string" ? stack : "";
+  if (!text) return "";
+  return text.split("\n").map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("at ")) return line;
+    const open = trimmed.indexOf("(");
+    const wrapped = open !== -1 && trimmed.endsWith(")");
+    const head = wrapped ? trimmed.slice(0, open + 1) : "at ";
+    const location = wrapped ? trimmed.slice(open + 1, -1).trim() : trimmed.slice(3).trim();
+    const match = location.match(FRAME_LOCATION);
+    if (!match) {
+      // A location without line/column numbers can still carry an absolute
+      // builder path; scrub only those.  Bare runtime locations such as
+      // node:internal/... carry no directory and keep their prefix, which
+      // marks the frame non-in-app.
+      if (!BUILDER_PATH.test(location)) return line;
+      const scrubbed = repoRelativePath(location);
+      return scrubbed ? `${head}${scrubbed}${wrapped ? ")" : ""}` : line;
+    }
+    const filename = repoRelativePath(match[1]);
+    if (!filename) return line;
+    const suffix = match[3] != null ? `:${match[2]}:${match[3]}` : `:${match[2]}`;
+    return `${head}${filename}${suffix}${wrapped ? ")" : ""}`;
+  }).join("\n");
+}
+
+function exceptionValue(error, frame) {
+  return {
+    type: error?.name || "Error",
+    value: error?.message || String(error),
+    stacktrace: { frames: [frame] }
+  };
+}
+
 export function eventFromError(error, request, env) {
   let url = "";
   try { url = request?.url || ""; } catch { url = ""; }
+  const isError = error instanceof Error;
+  const frame = isError ? topFrame(error) : null;
+  const stack = isError ? scrubStackText(error.stack) : "";
   return {
-    message: error instanceof Error ? error.message : String(error),
+    message: isError ? error.message : String(error),
     level: "error",
     platform: "javascript",
     ...(env ? telemetryTags(env) : {}),
@@ -339,7 +481,9 @@ export function eventFromError(error, request, env) {
       method: request?.method,
       url,
       headers: request?.headers ? Object.fromEntries(request.headers.entries()) : undefined
-    }
+    },
+    ...(frame ? { exception: { values: [exceptionValue(error, frame)] } } : {}),
+    ...(stack ? { extra: { stack } } : {})
   };
 }
 

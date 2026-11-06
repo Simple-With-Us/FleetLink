@@ -9,6 +9,9 @@ import {
   eventFromError,
   finishWorkerTrace,
   recordWorkerSpan,
+  repoRelativePath,
+  scrubStackText,
+  topFrame,
   redactSentryUrl,
   scrubSentryEvent,
   scrubSentryLog,
@@ -130,4 +133,78 @@ test("deploy.sh publishes SENTRY_RELEASE from git for Worker release correlation
   assert.match(deploy, /SENTRY_RELEASE/);
   assert.match(deploy, /rev-parse HEAD/);
   assert.match(deploy, /SENTRY_TRACES_SAMPLE_RATE/);
+});
+
+test("stack paths are repo-relative so builder home directories do not leak", () => {
+  assert.equal(repoRelativePath("/Users/builder/code/FleetLink/worker/lib/x.mjs"), "worker/lib/x.mjs");
+  assert.equal(repoRelativePath("file:///home/bob/proj/worker/index.mjs?v=1"), "worker/index.mjs");
+  assert.equal(repoRelativePath("C:\\Users\\bob\\proj\\worker\\a.mjs"), "worker/a.mjs");
+  assert.equal(repoRelativePath("/Users/builder/other/lib/y.mjs"), "lib/y.mjs");
+  // A Windows drive inside a file:// URL survives scheme stripping unless
+  // the slashes go first; the nested home segment must not reach Sentry.
+  assert.equal(repoRelativePath("file:///C:/Users/bob/x.mjs"), "x.mjs");
+  // A home segment nested deeper than the anchor still names the account.
+  assert.equal(repoRelativePath("/var/lib/users/bob/x.mjs"), "lib/x.mjs");
+  // Repo directories literally named "home" or "users" keep their files:
+  // only a segment followed by more path is treated as an account name.
+  assert.equal(repoRelativePath("app/routes/home/index.mjs"), "home/index.mjs");
+  assert.equal(repoRelativePath("pages/users/index.mjs"), "users/index.mjs");
+  // A path that ends at the account directory still strips the name.
+  assert.equal(repoRelativePath("/builds/home/jay"), "builds");
+  // A trailing slash still ends at the account directory.
+  assert.equal(repoRelativePath("/Users/bob/"), "");
+  // A dotted Windows-style account name at the end of an absolute path is
+  // still an account name.
+  assert.equal(repoRelativePath("/builds/home/jay.smith"), "builds");
+  // A relative repo path keeps a dotted file under a "home" directory:  it
+  // cannot be a builder's home, so the file name stays.
+  assert.equal(repoRelativePath("app/home/notes.txt"), "home/notes.txt");
+  // An absolute repo path ending in a real file under a directory named
+  // "home" keeps the filename: the trailing segment is the file, not the
+  // account directory (Kody review on dc71670).
+  assert.equal(repoRelativePath("/Users/builder/code/FleetLink/app/home/index.mjs"), "home/index.mjs");
+  assert.equal(repoRelativePath("/Users/builder/code/FleetLink/app/routes/home/index.mjs"), "home/index.mjs");
+});
+
+test("eventFromError sends the top frame and a scrubbed stack", () => {
+  const error = new Error("boom");
+  error.stack = "Error: boom\n    at handle (/Users/builder/FleetLink/worker/lib/x.mjs:10:5)\n    at /Users/builder/FleetLink/worker/index.mjs:3:1";
+  const frame = topFrame(error);
+  assert.deepEqual(frame, { filename: "worker/lib/x.mjs", lineno: 10, in_app: true, function: "handle", colno: 5 });
+  const event = eventFromError(error, new Request("https://fleetlink.online/"), null);
+  assert.equal(event.exception.values[0].stacktrace.frames[0].filename, "worker/lib/x.mjs");
+  assert.ok(!event.extra.stack.includes("/Users/builder"));
+  assert.ok(event.extra.stack.includes("worker/lib/x.mjs:10:5"));
+  assert.ok(!scrubStackText(error.stack).includes("builder"));
+  // Assert on the envelope body actually sent to Sentry, not only the
+  // pre-send event: the scrub has to hold after serialization too.
+  const envelope = sentryEnvelope("https://abc@o0.ingest.sentry.io/0", event);
+  assert.ok(!envelope.body.includes("/Users/builder"));
+  assert.ok(!envelope.body.includes("builder"));
+  assert.ok(envelope.body.includes("worker/lib/x.mjs:10:5"));
+});
+
+test("scrubStackText rewrites locations that carry no line numbers", () => {
+  const scrubbed = scrubStackText("Error: boom\n    at handle (/Users/builder/FleetLink/worker/lib/x.mjs)");
+  assert.ok(!scrubbed.includes("/Users/builder"));
+  assert.ok(scrubbed.includes("at handle (worker/lib/x.mjs)"));
+});
+
+test("scrubStackText leaves bare runtime locations untouched", () => {
+  const scrubbed = scrubStackText("Error: boom\n    at node:internal/modules/cjs/loader\n    at native");
+  assert.ok(scrubbed.includes("at node:internal/modules/cjs/loader"));
+  assert.ok(scrubbed.includes("at native"));
+});
+
+test("node runtime frames are not application code", () => {
+  const error = new Error("boom");
+  error.stack = "Error: boom\n    at node:internal/modules/run_main:23:11\n    at handle (/x/worker/lib/x.mjs:1:1)";
+  const frame = topFrame(error);
+  assert.equal(frame.in_app, false);
+});
+
+test("eventFromError keeps the old shape for non-errors", () => {
+  const event = eventFromError("oops", new Request("https://fleetlink.online/"), null);
+  assert.equal(event.message, "oops");
+  assert.equal(event.exception, undefined);
 });
