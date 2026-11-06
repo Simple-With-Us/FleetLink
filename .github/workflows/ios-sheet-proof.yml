@@ -1,0 +1,27 @@
+name: iOS Sheet Proof
+on:
+  pull_request:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-sheet-proof.yml'
+      - 'scripts/ios-sheet-proof.sh'
+permissions:
+  contents: read
+jobs:
+  sheet-proof:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - name: Prove the share sheet and extension against a fixture build in a disposable simulator
+        run: bash scripts/ios-sheet-proof.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-sheet-proof-results
+          # test.log alone loses the XCTAttachments: keepAlways screenshots
+          # live in the result bundle, so upload both.
+          path: |
+            /tmp/fleetlink-sheet-proof/test.log
+            /tmp/fleetlink-sheet-proof/result.xcresult

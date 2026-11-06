@@ -38,21 +38,37 @@ enum ShareSession {
         return credential
     }
     @discardableResult static func save(_ token: String?, origin: String = "https://fleetlink.online") -> Bool {
-        guard let q = query() else { return false }
+        saveDiagnosed(token, origin: origin).0
+    }
+
+    /// Same write as `save`, but names the stage that failed, so the
+    /// sheet-proof qualification lane can read the cause out of the
+    /// accessibility tree instead of guessing from a missing readiness
+    /// marker (the ca54e2d lane failed the seed without saying why).
+    @discardableResult static func saveDiagnosed(_ token: String?, origin: String = "https://fleetlink.online") -> (Bool, String) {
+        _save(token, origin: origin)
+    }
+
+    private static func _save(_ token: String?, origin: String) -> (Bool, String) {
+        guard let q = query() else {
+            guard let group, !group.isEmpty else { return (false, "group-missing") }
+            return (false, "group-unexpanded")
+        }
         guard let token, !token.isEmpty else {
             let status = SecItemDelete(q as CFDictionary)
-            return status == errSecSuccess || status == errSecItemNotFound
+            return (status == errSecSuccess || status == errSecItemNotFound) ? (true, "ok") : (false, "sec-delete-\(status)")
         }
-        guard let host = allowedOrigin(origin) else { _ = save(nil); return false }
+        guard let host = allowedOrigin(origin) else { _ = save(nil); return (false, "origin-rejected") }
         let credential = Credential(token: token, origin: host)
-        if read() == credential { return true }
-        guard let data = try? JSONEncoder().encode(credential) else { return false }
+        if read() == credential { return (true, "ok") }
+        guard let data = try? JSONEncoder().encode(credential) else { return (false, "encode-failed") }
         let attrs: [String: Any] = [kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         let status = SecItemUpdate(q as CFDictionary, attrs as CFDictionary)
         if status == errSecItemNotFound {
-            return SecItemAdd(q.merging(attrs) { _, new in new } as CFDictionary, nil) == errSecSuccess
+            let add = SecItemAdd(q.merging(attrs) { _, new in new } as CFDictionary, nil)
+            return add == errSecSuccess ? (true, "ok") : (false, "sec-add-\(add)")
         }
-        return status == errSecSuccess
+        return status == errSecSuccess ? (true, "ok") : (false, "sec-update-\(status)")
     }
 }
