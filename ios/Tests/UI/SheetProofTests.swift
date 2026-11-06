@@ -90,10 +90,13 @@ final class SheetProofAuthedTests: XCTestCase {
         // Seeding runs in .task after first render; a fixed sleep could
         // terminate the app before ShareSession.save lands, so poll the
         // deterministic readiness marker the fixture build raises instead.
-        XCTAssertTrue(
-            main.staticTexts["fixture.seeded"].waitForExistence(timeout: 20),
-            "fixture seed marker never appeared; ShareSession.save may not have completed"
-        )
+        if !main.staticTexts["fixture.seeded"].waitForExistence(timeout: 20) {
+            let failed = main.staticTexts["fixture.seedfailed"]
+            XCTFail(failed.exists
+                ? "fixture seed failed at stage: " + failed.label
+                : "fixture seed marker never appeared and no failure stage was reported; ShareSession.save may not have completed")
+            return
+        }
         main.terminate()
 
         let app = XCUIApplication()

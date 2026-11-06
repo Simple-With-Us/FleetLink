@@ -17,6 +17,7 @@ struct FleetLinkApp: App {
     // Set only in the DEBUG+FLEETLINK_SHARE_FIXTURE seed path, where the
     // qualification UI test polls for the marker before terminating the app.
     @State private var fixtureSeeded = false
+    @State private var fixtureSeedFailure = ""
 
     var body: some Scene {
         WindowGroup {
@@ -117,7 +118,9 @@ struct FleetLinkApp: App {
                     // landed: save reports keychain failure with its Bool, and
                     // a false readiness marker would surface as the misleading
                     // "preview never resolved" failure minutes later.
-                    fixtureSeeded = ShareSession.save("nonsecret-extension-qualification-fixture", origin: host)
+                    let seed = ShareSession.saveDiagnosed("nonsecret-extension-qualification-fixture", origin: host)
+                    fixtureSeeded = seed.0
+                    fixtureSeedFailure = seed.0 ? "" : seed.1
                 }
                 #else
                 await session.refreshSession()
@@ -132,6 +135,13 @@ struct FleetLinkApp: App {
                         .font(.system(size: 1))
                         .opacity(0.01)
                         .accessibilityIdentifier("fixture.seeded")
+                } else if !fixtureSeedFailure.isEmpty {
+                    // The lane reads this stage name when the readiness
+                    // marker never arrives, so a red run says why.
+                    Text(fixtureSeedFailure)
+                        .font(.system(size: 1))
+                        .opacity(0.01)
+                        .accessibilityIdentifier("fixture.seedfailed")
                 }
             }
             #endif
