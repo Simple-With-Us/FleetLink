@@ -330,8 +330,15 @@ export function finishWorkerTrace(request, env, ctx, status, fetchImpl = fetch) 
 // ---- stack frames ---------------------------------------------------------------
 
 const REPO_ANCHOR = /(?:^|\/)worker\/.+$/;
-const PRIVATE_HOME = /(?:^|\/)(?:users|home)\/[^/]+(\/|$)/i;
+// A following segment is required: a repo directory literally named
+// "home" or "users" keeps its files ("app/routes/home/index.mjs").
+const PRIVATE_HOME = /(?:^|\/)(?:users|home)\/[^/]+(\/)(?=[^/])/i;
+// A path that ends at the account directory still leaks the name; the
+// account segment has no extension, so a real filename never matches.
+const TRAILING_HOME = /(?:^|\/)(?:users|home)\/[^/.]+$/i;
 const FRAME_LOCATION = /^(.*?):(\d+)(?::(\d+))?$/;
+// Only an absolute path, Windows drive or URL can carry a builder home.
+const BUILDER_PATH = /^(?:[a-z][a-z0-9+.-]*:\/\/|\/|[A-Za-z]:[\\/])/i;
 
 /**
  * A source path safe to put in an event: repo-relative, never absolute.
@@ -359,6 +366,7 @@ export function repoRelativePath(raw) {
   // Not anchored: a home segment nested inside a longer path still carries
   // the account name, so strip it wherever it occurs before the fallback.
   while (PRIVATE_HOME.test(rest)) rest = rest.replace(PRIVATE_HOME, "$1");
+  rest = rest.replace(TRAILING_HOME, "");
   const segments = rest.split("/").filter(Boolean);
   if (!segments.length) return "";
   return segments.slice(-2).join("/");
@@ -421,7 +429,10 @@ export function scrubStackText(stack) {
     const match = location.match(FRAME_LOCATION);
     if (!match) {
       // A location without line/column numbers can still carry an absolute
-      // builder path; scrub it rather than returning the raw line.
+      // builder path; scrub only those.  Bare runtime locations such as
+      // node:internal/... carry no directory and keep their prefix, which
+      // marks the frame non-in-app.
+      if (!BUILDER_PATH.test(location)) return line;
       const scrubbed = repoRelativePath(location);
       return scrubbed ? `${head}${scrubbed}${wrapped ? ")" : ""}` : line;
     }

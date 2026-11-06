@@ -145,6 +145,12 @@ test("stack paths are repo-relative so builder home directories do not leak", ()
   assert.equal(repoRelativePath("file:///C:/Users/bob/x.mjs"), "x.mjs");
   // A home segment nested deeper than the anchor still names the account.
   assert.equal(repoRelativePath("/var/lib/users/bob/x.mjs"), "lib/x.mjs");
+  // Repo directories literally named "home" or "users" keep their files:
+  // only a segment followed by more path is treated as an account name.
+  assert.equal(repoRelativePath("app/routes/home/index.mjs"), "home/index.mjs");
+  assert.equal(repoRelativePath("pages/users/index.mjs"), "users/index.mjs");
+  // A path that ends at the account directory still strips the name.
+  assert.equal(repoRelativePath("/builds/home/jay"), "builds");
 });
 
 test("eventFromError sends the top frame and a scrubbed stack", () => {
@@ -169,6 +175,12 @@ test("scrubStackText rewrites locations that carry no line numbers", () => {
   const scrubbed = scrubStackText("Error: boom\n    at handle (/Users/builder/FleetLink/worker/lib/x.mjs)");
   assert.ok(!scrubbed.includes("/Users/builder"));
   assert.ok(scrubbed.includes("at handle (worker/lib/x.mjs)"));
+});
+
+test("scrubStackText leaves bare runtime locations untouched", () => {
+  const scrubbed = scrubStackText("Error: boom\n    at node:internal/modules/cjs/loader\n    at native");
+  assert.ok(scrubbed.includes("at node:internal/modules/cjs/loader"));
+  assert.ok(scrubbed.includes("at native"));
 });
 
 test("node runtime frames are not application code", () => {
