@@ -14,6 +14,9 @@ struct FleetLinkApp: App {
     @State private var inputURLString = "https://fleetlink.online"
     @State private var selectedTab = 0
     @State private var creationID = UUID()
+    // Set only in the DEBUG+FLEETLINK_SHARE_FIXTURE seed path, where the
+    // qualification UI test polls for the marker before terminating the app.
+    @State private var fixtureSeeded = false
 
     var body: some Scene {
         WindowGroup {
@@ -111,11 +114,24 @@ struct FleetLinkApp: App {
                 if ProcessInfo.processInfo.arguments.contains("--seed-share-fixture") {
                     let host = ProcessInfo.processInfo.environment["FLEETLINK_FIXTURE_HOST"] ?? "https://fleetlink.online"
                     ShareSession.save("nonsecret-extension-qualification-fixture", origin: host)
+                    fixtureSeeded = true
                 }
                 #else
                 await session.refreshSession()
                 #endif
             }
+            #if DEBUG && FLEETLINK_SHARE_FIXTURE
+            // Readiness marker for the qualification lane: near-invisible but
+            // present in the accessibility tree so XCUI can poll for it.
+            .overlay(alignment: .top) {
+                if fixtureSeeded {
+                    Text("fixture-seeded")
+                        .font(.system(size: 1))
+                        .opacity(0.01)
+                        .accessibilityIdentifier("fixture.seeded")
+                }
+            }
+            #endif
             .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { userActivity in
                 guard let incomingURL = userActivity.webpageURL else { return }
                 inputURLString = incomingURL.absoluteString

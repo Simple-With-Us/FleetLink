@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 // Drives the harness's real UIActivityViewController and asserts the FleetLink
 // share extension is selectable in the actual system sheet and that its
@@ -86,7 +87,13 @@ final class SheetProofAuthedTests: XCTestCase {
             main.wait(for: .runningForeground, timeout: 15),
             "Fixture seeding requires the FleetLink app and extension built and installed in Debug with -DFLEETLINK_SHARE_FIXTURE; the FleetLinkQualification scheme installs only FleetLinkHarness, so install the app before running this class."
         )
-        sleep(3)
+        // Seeding runs in .task after first render; a fixed sleep could
+        // terminate the app before ShareSession.save lands, so poll the
+        // deterministic readiness marker the fixture build raises instead.
+        XCTAssertTrue(
+            main.staticTexts["fixture.seeded"].waitForExistence(timeout: 20),
+            "fixture seed marker never appeared; ShareSession.save may not have completed"
+        )
         main.terminate()
 
         let app = XCUIApplication()
@@ -137,8 +144,24 @@ final class SheetProofAuthedTests: XCTestCase {
         XCTAssertTrue(copyLink.waitForExistence(timeout: 20), "no Copy link UI: \(preview.label)")
         XCTAssertTrue(preview.label.contains("example.invalid"), "result not the fixture link: \(preview.label)")
         shoot("fixture-create-result-copy-ui")
+        // Exercise the extension's copy branch itself: tapping Copy link must
+        // confirm and put the fixture link on the pasteboard.
+        copyLink.tap()
+        XCTAssertTrue(app.buttons["Copied"].waitForExistence(timeout: 5), "copy branch did not confirm: \(preview.label)")
+        XCTAssertTrue(UIPasteboard.general.string?.contains("example.invalid") ?? false,
+                      "pasteboard holds \(UIPasteboard.general.string ?? "nil"), not the fixture link")
         let cancel = app.buttons["Cancel"]
         if cancel.waitForExistence(timeout: 3) { cancel.tap() }
         app.terminate()
+
+        // The fixture seed overwrote the single shared keychain credential.
+        // Relaunch the app without the seed flag so SessionManager.init() ->
+        // syncShareSession() restores the app's own credential (or clears the
+        // fixture one when signed out) before any later real share sends it.
+        let restore = XCUIApplication(bundleIdentifier: "online.fleetlink.ios")
+        restore.launch()
+        XCTAssertTrue(restore.wait(for: .runningForeground, timeout: 15),
+                      "app relaunch for credential restore failed")
+        restore.terminate()
     }
 }

@@ -212,6 +212,10 @@ targets:
     sources: [Tests/UI]
     dependencies:
       - target: FleetLinkHarness
+      # Installs the real app (which embeds FleetLinkShare.appex), so the
+      # FleetLink activity registers in the sheet and the fixture-seed class
+      # can launch online.fleetlink.ios.
+      - target: FleetLink
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: online.fleetlink.ios.UITests
@@ -237,6 +241,7 @@ schemes:
     build:
       targets:
         FleetLinkHarness: all
+        FleetLink: all
     test:
       config: Debug
       targets:
