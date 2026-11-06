@@ -18,7 +18,8 @@ export const APP_JS = String.raw`
     var still = FLStill(intro.dataset.still, video.getAttribute("aria-label"));
     var swapped = false;
     function swapToStill() {
-      if (swapped || !still.complete || !still.naturalWidth) return;
+      // The preloaded still warms the cache only; the hero swaps once the intro ended.
+      if (swapped || !video.ended || !still.complete || !still.naturalWidth) return;
       swapped = true;
       picture.replaceChildren(still);
       video.hidden = true;
