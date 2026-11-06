@@ -316,6 +316,22 @@ td .rowmenu { position: relative; }
 .dash-head .usage { min-width: 260px; flex: 0 1 360px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 0.8rem 1rem; box-shadow: var(--shadow); }
 .dash-head .usage p { margin: 0; }
 
+/* Wider desktop dashboard: traffic metrics and controls sit in the head row. */
+.dash-page .wrap { max-width: 1440px; }
+.dash-page .top .bar { max-width: 1440px; }
+.dash-head .head-metrics { display: flex; gap: .75rem; flex-wrap: wrap; flex: 1 1 auto; }
+.dash-head .head-metrics .card { padding: .55rem .9rem; min-width: 132px; flex: 1 1 0; }
+.dash-head .head-metrics .metric { font-size: 1.25rem; }
+.dash-head .head-controls { flex: 0 0 auto; align-items: flex-end; flex-wrap: wrap; }
+
+/* Shares table: selection column, bulk bar, numeric traffic columns. */
+.select-col { width: 2rem; text-align: center; }
+td.select-col, th.select-col { text-align: center; }
+.share-select { min-height: 0; width: auto; }
+#share-select-all { min-height: 0; width: auto; }
+.bulk-bar { margin: .5rem 0; padding: .5rem .75rem; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); align-items: center; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
 @media (max-width: 900px) {
   .flow, .steps, .two-col { grid-template-columns: 1fr; }
   .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

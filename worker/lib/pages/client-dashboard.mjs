@@ -3,7 +3,7 @@ export const DASHBOARD_JS = String.raw`
 (function () {
   "use strict";
   var FL = window.FL, h = FL.h;
-  var state = { me: null, teams: [], next: null, allShares: [], sortKey: null, sortDir: "asc", filterChip: "all", liveSearch: "" };
+  var state = { me: null, teams: [], next: null, allShares: [], sortKey: null, sortDir: "asc", filterChip: "all", liveSearch: "", selected: new Set(), traffic: new Map() };
   var root = document.getElementById("dashboard");
   if (!root) return;
   var isAdmin = root.dataset.admin === "1";
@@ -73,7 +73,7 @@ export const DASHBOARD_JS = String.raw`
   }
 
   function shareRow(share) {
-    var expires = share.expires_at ? h("span", { title: FL.when(share.expires_at) }, FL.relative(share.expires_at)) : h("span", { class: "pill green", text: "Never" });
+    var expires = share.expires_at ? h("span", { title: FL.when(share.expires_at) }, FL.compact(share.expires_at)) : h("span", { class: "pill green", text: "Never" });
     var kind = share.kind === "link" ? h("span", { class: "pill", text: "Link" }) : h("span", { class: "pill gray", text: share.file_count + " file" + (share.file_count === 1 ? "" : "s") + " · " + FL.bytes(share.total_bytes) });
     var tags = [kind];
     if (share.has_password) tags.push(h("span", { class: "pill amber", text: "Password" }));
@@ -81,23 +81,33 @@ export const DASHBOARD_JS = String.raw`
     else {
       tags.push(h("span", { class: "pill gray", text: "Personal" }));
       if (state.me && (state.me.bots?.fleet_owner || (state.me.bots?.count > 0 && share.owner && share.owner.id === state.me.user.id))) {
-        tags.push(h("span", { class: "pill blue", title: "Editable by your fleet agents", text: "Agent-editable" }));
+        tags.push(h("span", { class: "pill blue", title: "Editable by your fleet agents", text: "Agent-Editable" }));
       }
     }
     var actions = h("div", { class: "actions" },
       h("button", { type: "button", class: "small secondary", text: "Copy", onclick: function () { FL.copy(share.url); FL.toast("Copied " + share.slug + " link to clipboard."); } }),
       h("a", { class: "button small secondary", href: share.url, target: "_blank", rel: "noopener", text: "Open" }));
     if (share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Rename", title: "Rename link name (slug)", onclick: function () { quickRename(share); } }));
-    if (share.can_edit || share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Extend", title: "Extend expiration", onclick: function () { quickExtend(share); } }));
+    if (share.can_edit || share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Modify", title: "Modify expiration", onclick: function () { quickExtend(share); } }));
     var sharing = sharingControl(share);
     if (sharing) actions.append(sharing);
     if (share.can_edit || share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Edit", onclick: function () { openEditor(share, row); } }));
     actions.append(h("button", { type: "button", class: "small secondary", text: "Stats", onclick: function () { openStats(share, row); } }));
     if (share.can_manage) actions.append(h("button", { type: "button", class: "small danger", text: "Delete", title: "Delete share early", onclick: function () { remove(share); } }));
+    var selectable = Boolean(share.can_edit || share.can_manage);
+    var box = h("input", { type: "checkbox", class: "share-select", "aria-label": "Select " + share.slug, "data-slug": share.slug, disabled: !selectable, checked: state.selected.has(share.slug), onchange: function () {
+      if (box.checked) state.selected.add(share.slug); else state.selected.delete(share.slug);
+      renderBulkBar();
+      syncSelectAll();
+    } });
+    var traffic = state.traffic.get(share.slug);
     var row = h("tr", null,
+      h("td", { class: "select-col" }, box),
       h("td", null, h("a", { href: share.url, target: "_blank", rel: "noopener", class: "mono slug-a", text: share.slug }, FL.openIcon()), share.title ? h("div", { class: "small muted", text: share.title }) : null, share.kind === "link" ? h("div", { class: "small muted", text: "→ " + share.target_url }) : null),
       h("td", null, tags),
       h("td", { class: "hide-sm" }, share.owner && share.owner.display_name ? share.owner.display_name : ""),
+      h("td", { class: "small num", title: "Views in the last 30 days", text: traffic ? String(traffic.views) : "" }),
+      h("td", { class: "small num", title: "Downloads in the last 30 days", text: traffic ? String(traffic.downloads) : "" }),
       h("td", null, expires),
       h("td", { class: "row-actions" }, rowMenu(actions)));
     return row;
@@ -163,7 +173,7 @@ export const DASHBOARD_JS = String.raw`
       card.append(h("h3", { class: "mt", text: "Files" }), filesBox);
       filesEditor(share, filesBox);
     }
-    var editorRow = h("tr", { class: "editor-row" }, h("td", { colspan: "5" }, card));
+    var editorRow = h("tr", { class: "editor-row" }, h("td", { colspan: "8" }, card));
     row.after(editorRow);
   }
 
@@ -309,7 +319,7 @@ export const DASHBOARD_JS = String.raw`
     var next = row.nextElementSibling;
     if (next && next.classList.contains("stats-row") && next.dataset.slug === share.slug) { next.remove(); return; }
     closeTransient();
-    var cell = h("td", { colspan: "5" }, h("p", { class: "small muted", text: "Loading traffic…" }));
+    var cell = h("td", { colspan: "8" }, h("p", { class: "small muted", text: "Loading traffic…" }));
     var statsRow = h("tr", { class: "stats-row", "data-slug": share.slug }, cell);
     row.after(statsRow);
     FL.api("GET", "/api/shares/" + encodeURIComponent(share.slug) + "/analytics?days=30").then(function (data) {
@@ -334,6 +344,92 @@ export const DASHBOARD_JS = String.raw`
     });
   }
 
+  function syncSelectAll() {
+    var all = document.getElementById("share-select-all");
+    if (!all) return;
+    var boxes = Array.prototype.slice.call(document.querySelectorAll("#share-rows .share-select:not(:disabled)"));
+    var picked = boxes.filter(function (b) { return b.checked; }).length;
+    all.checked = boxes.length > 0 && picked === boxes.length;
+    all.indeterminate = picked > 0 && picked < boxes.length;
+  }
+
+  function selectedShares() {
+    return state.allShares.filter(function (s) { return state.selected.has(s.slug); });
+  }
+
+  function renderBulkBar() {
+    var bar = document.getElementById("share-bulk");
+    if (!bar) return;
+    var shares = selectedShares();
+    if (!shares.length) { bar.hidden = true; bar.replaceChildren(); return; }
+    var modify = h("button", { type: "button", class: "small secondary", text: "Modify Expiration", onclick: bulkModify });
+    var sharing = null;
+    if (state.teams.length) {
+      sharing = h("select", { class: "small", "aria-label": "Change sharing for the selected shares", onchange: function () { if (sharing.value !== "") bulkShare(sharing.value); sharing.value = ""; } },
+        h("option", { value: "", text: "Change Sharing…", selected: true }));
+      sharing.append(h("option", { value: "personal", text: "Personal (remove team access)" }));
+      state.teams.forEach(function (t) {
+        sharing.append(h("option", { value: t.id + "|edit", text: t.name + " · can edit" }));
+        sharing.append(h("option", { value: t.id + "|view", text: t.name + " · view only" }));
+      });
+    }
+    var del = h("button", { type: "button", class: "small danger", text: "Delete", onclick: bulkDelete });
+    var clear = h("button", { type: "button", class: "small secondary", text: "Clear", onclick: function () { state.selected.clear(); renderShares(); } });
+    var kids = [h("span", { class: "small", text: shares.length + " selected" }), modify];
+    if (sharing) kids.push(sharing);
+    kids.push(del, clear);
+    bar.replaceChildren(...kids);
+    bar.hidden = false;
+  }
+
+  async function bulkModify() {
+    var shares = selectedShares().filter(function (s) { return s.can_edit || s.can_manage; });
+    var skipped = state.selected.size - shares.length;
+    if (!shares.length) { FL.toast("None of the selected shares can be modified.", "error"); return; }
+    var choice = window.prompt("Modify expiration by how many days?\u00a0 Enter a number (e.g. 3, 7, 30, 90, 180" + (isAdmin ? ", or forever" : "") + "):", "7");
+    if (choice == null) return;
+    choice = choice.trim();
+    if (!choice) return;
+    var ok = 0, failed = 0;
+    for (var i = 0; i < shares.length; i++) {
+      try { await FL.api("POST", "/api/shares/" + encodeURIComponent(shares[i].slug) + "/renew", { days: choice }); ok++; }
+      catch (err) { failed++; }
+    }
+    state.selected.clear();
+    FL.toast("Modified expiration on " + ok + " share" + (ok === 1 ? "" : "s") + "." + (failed ? "  " + failed + " failed." : "") + (skipped ? "  " + skipped + " skipped (not yours to edit)." : ""), failed ? "error" : undefined);
+    loadShares(false).catch(FL.fail);
+  }
+
+  async function bulkShare(value) {
+    var parts = value === "personal" ? [""] : value.split("|");
+    var body = parts[0] ? { team_id: parts[0], team_access: parts[1] } : { team_id: null };
+    var shares = selectedShares();
+    var ok = 0, failed = 0, firstError = null;
+    for (var i = 0; i < shares.length; i++) {
+      try { await FL.api("PATCH", "/api/shares/" + encodeURIComponent(shares[i].slug), body); ok++; }
+      catch (err) { failed++; firstError = firstError || err; }
+    }
+    state.selected.clear();
+    FL.toast((parts[0] ? "Shared " : "Made personal: ") + ok + " share" + (ok === 1 ? "" : "s") + "." + (failed ? "  " + failed + " failed" + (firstError ? " (" + firstError.message + ")" : "") + "." : ""), failed ? "error" : undefined);
+    loadShares(false).catch(FL.fail);
+  }
+
+  async function bulkDelete() {
+    var shares = selectedShares().filter(function (s) { return s.can_manage; });
+    var skipped = state.selected.size - shares.length;
+    if (!shares.length) { FL.toast("None of the selected shares can be deleted.", "error"); return; }
+    if (!FL.confirm("Delete " + shares.length + " share" + (shares.length === 1 ? "" : "s") + " early and remove all files?\u00a0 The links stop working immediately." + (skipped ? "\u00a0 " + skipped + " selected share" + (skipped === 1 ? "" : "s") + " will be skipped." : ""))) return;
+    var ok = 0, failed = 0;
+    for (var i = 0; i < shares.length; i++) {
+      try { await FL.api("DELETE", "/api/shares/" + encodeURIComponent(shares[i].slug)); ok++; }
+      catch (err) { failed++; }
+    }
+    state.selected.clear();
+    FL.toast("Deleted " + ok + " share" + (ok === 1 ? "" : "s") + " early." + (failed ? "  " + failed + " failed." : "") + (skipped ? "  " + skipped + " skipped (not yours to delete)." : ""), failed ? "error" : undefined);
+    loadShares(false).catch(FL.fail);
+    loadMe().catch(FL.fail);
+  }
+
   function renderShares() {
     var list = state.allShares.slice();
     if (state.filterChip === "files") list = list.filter(function (s) { return s.kind !== "link"; });
@@ -354,6 +450,11 @@ export const DASHBOARD_JS = String.raw`
       });
     }
 
+    // Bulk actions only ever act on what is on screen: drop selections the
+    // active chip or search filter has hidden, before the bar counts them.
+    var visible = new Set(list.map(function (s) { return s.slug; }));
+    Array.from(state.selected).forEach(function (slug) { if (!visible.has(slug)) state.selected.delete(slug); });
+
     if (state.sortKey) {
       list.sort(function (a, b) {
         var res = 0;
@@ -369,6 +470,9 @@ export const DASHBOARD_JS = String.raw`
           var ownA = ((a.owner && a.owner.display_name) || "").toLowerCase();
           var ownB = ((b.owner && b.owner.display_name) || "").toLowerCase();
           res = ownA.localeCompare(ownB);
+        } else if (state.sortKey === "views" || state.sortKey === "downloads") {
+          var statA = state.traffic.get(a.slug), statB = state.traffic.get(b.slug);
+          res = ((statA && statA[state.sortKey]) || 0) - ((statB && statB[state.sortKey]) || 0);
         } else if (state.sortKey === "expires") {
           var expA = a.expires_at === null ? (state.sortDir === "asc" ? Infinity : -Infinity) : a.expires_at;
           var expB = b.expires_at === null ? (state.sortDir === "asc" ? Infinity : -Infinity) : b.expires_at;
@@ -396,6 +500,8 @@ export const DASHBOARD_JS = String.raw`
     body.replaceChildren();
     list.forEach(function (s) { body.append(shareRow(s)); });
     document.getElementById("share-empty").hidden = list.length > 0;
+    syncSelectAll();
+    renderBulkBar();
   }
 
   // Who sees a share.  The owner moves it between the personal side and a
@@ -450,6 +556,34 @@ export const DASHBOARD_JS = String.raw`
     else state.allShares = state.allShares.concat(data.shares);
     state.next = data.next;
     document.getElementById("share-more").hidden = !data.next;
+    var live = new Set(state.allShares.map(function (s) { return s.slug; }));
+    Array.from(state.selected).forEach(function (slug) { if (!live.has(slug)) state.selected.delete(slug); });
+    loadTraffic(scope).catch(function () {});
+    renderShares();
+  }
+
+  // One short-lived analytics response feeds both the head metrics and the
+  // per-slug traffic map, so a dashboard open or a bulk action does not run
+  // the full share_stats aggregation twice.  Each caller also carries a
+  // request sequence, so an older response can never overwrite a newer one.
+  var analyticsCache = { key: null, at: 0, data: null };
+  async function fetchAnalytics(days, scope) {
+    var key = days + "|" + scope;
+    if (analyticsCache.key === key && Date.now() - analyticsCache.at < 5000) return analyticsCache.data;
+    var data = await FL.api("GET", "/api/analytics?days=" + encodeURIComponent(days) + "&scope=" + encodeURIComponent(scope));
+    analyticsCache = { key: key, at: Date.now(), data: data };
+    return data;
+  }
+
+  // Per-slug views/downloads for the table, from the same 30-day analytics the
+  // Traffic section shows.  Cells stay blank for shares outside the window.
+  var trafficSeq = 0;
+  async function loadTraffic(shareScope) {
+    var seq = ++trafficSeq;
+    var analyticsScope = shareScope === "all" ? "all" : shareScope === "bots" ? "bots" : shareScope === "mine" ? "mine" : "teams";
+    var data = await fetchAnalytics("30", analyticsScope);
+    if (seq !== trafficSeq) return;
+    state.traffic = new Map((data.shares || []).map(function (s) { return [s.slug, s]; }));
     renderShares();
   }
 
@@ -466,13 +600,13 @@ export const DASHBOARD_JS = String.raw`
   }
 
   async function quickExtend(share) {
-    var choice = window.prompt("Extend " + share.slug + " by how many days?\u00a0 Enter a number (e.g. 3, 7, 30, 90, 180" + (isAdmin ? ", or forever" : "") + "):", "7");
+    var choice = window.prompt("Modify " + share.slug + " expiration by how many days?\u00a0 Enter a number (e.g. 3, 7, 30, 90, 180" + (isAdmin ? ", or forever" : "") + "):", "7");
     if (choice == null) return;
     choice = choice.trim();
     if (!choice) return;
     try {
       var res = await FL.api("POST", "/api/shares/" + encodeURIComponent(share.slug) + "/renew", { days: choice });
-      FL.toast("Extended " + share.slug + " until " + FL.when(res.share.expires_at) + ".");
+      FL.toast("Modified " + share.slug + " expiration until " + FL.when(res.share.expires_at) + ".");
       loadShares(false).catch(FL.fail);
     } catch (err) { FL.fail(err); }
   }
@@ -493,12 +627,15 @@ export const DASHBOARD_JS = String.raw`
     return el ? el.value : "";
   }
 
+  var analyticsSeq = 0;
   async function loadAnalytics() {
+    var seq = ++analyticsSeq;
     var summary = document.getElementById("analytics-summary");
     if (!summary) return;
     var days = analyticsValue("analytics-days") || "30";
     var scope = analyticsValue("analytics-scope") || "mine";
-    var data = await FL.api("GET", "/api/analytics?days=" + encodeURIComponent(days) + "&scope=" + encodeURIComponent(scope));
+    var data = await fetchAnalytics(days, scope);
+    if (seq !== analyticsSeq) return;
     summary.replaceChildren(
       metric("Views", data.totals.views),
       metric("Downloads", data.totals.downloads),
@@ -1168,6 +1305,19 @@ export const DASHBOARD_JS = String.raw`
       renderShares();
     });
   });
+
+  var selectAll = document.getElementById("share-select-all");
+  if (selectAll) {
+    selectAll.addEventListener("change", function () {
+      document.querySelectorAll("#share-rows .share-select:not(:disabled)").forEach(function (box) {
+        box.checked = selectAll.checked;
+        var slug = box.dataset.slug;
+        if (selectAll.checked) state.selected.add(slug); else state.selected.delete(slug);
+      });
+      selectAll.indeterminate = false;
+      renderBulkBar();
+    });
+  }
 
   var chips = document.querySelectorAll("#share-chips .chip");
   chips.forEach(function (btn) {

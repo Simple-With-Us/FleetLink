@@ -146,6 +146,12 @@ function scopeClause(principal, scope) {
       args: [principal.user.id]
     };
   }
+  if (scope === "bots") {
+    return {
+      clause: "s.owner_id IN (SELECT id FROM users WHERE manager_id = ?)",
+      args: [principal.user.id]
+    };
+  }
   return { clause: "s.owner_id = ?", args: [principal.user.id] };
 }
 
@@ -183,6 +189,7 @@ export async function scopedStats(env, principal, { days = 30, scope = "mine" } 
     since,
     totals: { ...totalsOf(series), shares: shares.length },
     series,
+    shares,
     top: shares.slice(0, 12)
   };
 }
