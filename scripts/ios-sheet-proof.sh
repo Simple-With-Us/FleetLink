@@ -36,12 +36,17 @@ xcrun simctl boot "$udid"
 xcrun simctl bootstatus "$udid" -b
 # The fixture build makes the extension fail-closed to synthetic responses and
 # lets the app seed the synthetic credential; see SheetProofAuthedTests.
-# AppIdentifierPrefix normally comes from signing, which is disabled here; pin
-# a synthetic prefix so FleetLinkSharedKeychainGroup is a real group string
-# instead of a literal "$(...)", which ShareSession.save refuses (the seed
-# then silently fails and the fixture.seeded marker never appears - the red
-# lane on dee923b0). Simulator keychain does not enforce group entitlements,
-# so a synthetic prefix still lets app and extension share inside this
+# Sign ad-hoc (CODE_SIGN_IDENTITY=-): the simulator keychain enforces
+# keychain-access-groups against the binary's embedded entitlements, and a
+# CODE_SIGNING_ALLOWED=NO build embeds none, so the group-qualified
+# ShareSession write died with errSecMissingEntitlement (run 42191165177,
+# seed stage sec-update--34018). Ad-hoc signing embeds the entitlements with
+# no identity, profile or runner keychain access, and production signing is
+# untouched.
+# AppIdentifierPrefix normally comes from the provisioning profile; pin a
+# synthetic prefix so the entitlement and FleetLinkSharedKeychainGroup expand
+# to the same disposable group string. The simulator does not validate the
+# prefix against a real team, so app and extension share inside this
 # disposable simulator.
-xcodebuild -project FleetLink.xcodeproj -scheme FleetLinkQualification -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$out/build" -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=- 'AppIdentifierPrefix=CI0SHEETPROOF.' 'OTHER_SWIFT_FLAGS=$(inherited) -DFLEETLINK_SHARE_FIXTURE' -resultBundlePath "$out/result.xcresult" test > "$out/test.log" 2>&1 || { tail -100 "$out/test.log"; exit 1; }
+xcodebuild -project FleetLink.xcodeproj -scheme FleetLinkQualification -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$out/build" -configuration Debug CODE_SIGN_IDENTITY=- 'AppIdentifierPrefix=CI0SHEETPROOF.' 'OTHER_SWIFT_FLAGS=$(inherited) -DFLEETLINK_SHARE_FIXTURE' -resultBundlePath "$out/result.xcresult" test > "$out/test.log" 2>&1 || { tail -100 "$out/test.log"; exit 1; }
 tail -40 "$out/test.log"
