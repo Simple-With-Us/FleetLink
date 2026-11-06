@@ -82,10 +82,17 @@ function dashboard(ctx, principal) {
     principal,
     active: "dashboard",
     scripts: SCRIPTS("dashboard.js"),
+    bodyClass: "dash-page",
     body: `<div id="dashboard" data-admin="${principal.isAdmin ? "1" : "0"}">
       <div class="dash-head">
         <div><p class="eyebrow">Your dashboard</p><h1 id="hello">Dashboard</h1></div>
         <div id="usage" class="usage"><p class="small muted">Loading…</p></div>
+        <div id="analytics-summary" class="grid head-metrics"><div class="card"><p class="small muted">Loading…</p></div></div>
+        <div class="actions head-controls">
+          <div><label for="analytics-scope">Show</label><select id="analytics-scope"><option value="mine">My shares</option><option value="teams">My teams</option>${principal.isAdmin ? '<option value="all">Everyone (admin)</option>' : ""}</select></div>
+          <div><label for="analytics-days">Last</label><select id="analytics-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select></div>
+          <button type="button" id="analytics-refresh" class="secondary" title="Refresh traffic">↻ Refresh</button>
+        </div>
       </div>
       <div class="tabs" role="tablist" aria-label="Dashboard sections">
         <button type="button" role="tab" data-tab="shares">Shares</button>
@@ -112,21 +119,13 @@ function dashboard(ctx, principal) {
           <button type="button" class="chip" data-filter="password">Password</button>
         </div>
         <div id="share-summary" class="share-summary"></div>
-        ${table("share-rows", [["Slug", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Expires", "sortable", "expires"], ["", ""]])}
+        <div id="share-bulk" class="actions bulk-bar" hidden></div>
+        ${table("share-rows", [['<input type="checkbox" id="share-select-all" aria-label="Select all shares">', "select-col"], ["Slug", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Views", "sortable", "views"], ["Downloads", "sortable", "downloads"], ["Expires", "sortable", "expires"], ["", ""]])}
         <p id="share-empty" class="empty" hidden>Nothing here yet.&#160; Use New Share to make a link.</p>
         <p><button type="button" id="share-more" class="secondary" hidden>Load More</button></p>
 
       <div id="panel-analytics" class="analytics">
-        <div class="dash-head">
-          <div><p class="eyebrow">Traffic</p><h2>Views And Downloads</h2></div>
-          <div class="actions">
-            <div><label for="analytics-scope">Show</label><select id="analytics-scope"><option value="mine">My shares</option><option value="teams">My teams</option>${principal.isAdmin ? '<option value="all">Everyone (admin)</option>' : ""}</select></div>
-            <div><label for="analytics-days">Last</label><select id="analytics-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select></div>
-            <button type="button" id="analytics-refresh" class="secondary" title="Refresh traffic">↻ Refresh</button>
-          </div>
-        </div>
         <p class="small muted">FleetLink counts each public view and download it serves, by day (UTC).&#160; Password unlocks, folder listings, short-link opens, and file bytes are included.&#160; A view can take up to a few seconds to appear.</p>
-        <div id="analytics-summary" class="grid"><div class="card"><p class="small muted">Loading…</p></div></div>
         <h3>Busiest Shares</h3>
         <div class="table-wrap"><table><thead><tr><th>Share</th><th>Views</th><th>Downloads</th><th>Bytes</th></tr></thead><tbody id="analytics-top"></tbody></table></div>
         <p id="analytics-top-empty" class="empty" hidden>No traffic in this window.</p>

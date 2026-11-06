@@ -158,6 +158,15 @@ export const APP_JS = String.raw`
     return diff >= 0 ? "in " + label : label + " ago";
   };
 
+  // Compact relative form for dense table cells: "30d", "5h", "10m".
+  FL.compact = function (iso) {
+    if (!iso) return "never";
+    var diff = (new Date(iso).getTime() - Date.now()) / 1000;
+    var abs = Math.abs(diff);
+    var label = abs < 3600 ? Math.round(abs / 60) + "m" : abs < 86400 ? Math.round(abs / 3600) + "h" : Math.round(abs / 86400) + "d";
+    return diff >= 0 ? label : label + " ago";
+  };
+
   FL.copy = async function (value, label) {
     try {
       await navigator.clipboard.writeText(value);

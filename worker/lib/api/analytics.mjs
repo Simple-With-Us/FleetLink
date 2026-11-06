@@ -5,7 +5,7 @@ import { loadShareFor } from "../shares.mjs";
 import { clampDays, flushShareStats, scopedStats, shareStats } from "../stats.mjs";
 
 function scopeOf(value) {
-  return value === "teams" || value === "all" ? value : "mine";
+  return value === "teams" || value === "all" || value === "bots" ? value : "mine";
 }
 
 export function analyticsRoutes(router) {

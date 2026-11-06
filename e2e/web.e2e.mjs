@@ -139,11 +139,25 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     await page.waitForSelector("#new-link-result a.mono");
     await page.screenshot({ path: join(shots, "02-new-share.png"), fullPage: true });
 
-    // Both appear in the list.
+    // Both appear in the list, with per-slug traffic columns and compact expiry.
     await page.click("[data-tab=shares]");
     await page.waitForSelector("#share-rows tr >> text=ada-link");
     assert.equal(await page.locator("#share-rows tr").count(), 2);
+    assert.deepEqual(await page.locator("table:has(> #share-rows) th").allTextContents().then((t) => t.map((x) => x.trim())), ["", "Slug", "Contents", "Owner", "Views", "Downloads", "Expires", ""]);
+    assert.match(await page.locator("#share-rows tr", { hasText: "ada-link" }).locator("td").nth(6).textContent(), /^\d+d$/);
     await page.screenshot({ path: join(shots, "03-shares.png"), fullPage: true });
+
+    // Bulk selection: the bar counts the picked rows and drives one shared action.
+    await page.locator("#share-select-all").check();
+    assert.equal(await page.locator("#share-rows .share-select:checked").count(), 2);
+    await page.waitForSelector("#share-bulk:not([hidden]) >> text=2 selected");
+    page.on("dialog", (d) => d.accept("5"));
+    await page.click("#share-bulk >> text=Modify Expiration");
+    await page.waitForSelector("#toast >> text=Modified expiration on 2 shares.");
+    await page.locator("#share-rows tr", { hasText: "ada-link" }).locator(".share-select").check();
+    await page.click("#share-bulk >> text=Delete");
+    await page.waitForSelector("#toast >> text=Deleted 1 share early.");
+    assert.equal(await page.locator("#share-rows tr").count(), 1);
 
     // API token.
     await page.click("[data-tab=tokens]");
