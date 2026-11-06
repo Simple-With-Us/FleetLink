@@ -450,6 +450,11 @@ export const DASHBOARD_JS = String.raw`
       });
     }
 
+    // Bulk actions only ever act on what is on screen: drop selections the
+    // active chip or search filter has hidden, before the bar counts them.
+    var visible = new Set(list.map(function (s) { return s.slug; }));
+    Array.from(state.selected).forEach(function (slug) { if (!visible.has(slug)) state.selected.delete(slug); });
+
     if (state.sortKey) {
       list.sort(function (a, b) {
         var res = 0;
@@ -557,11 +562,27 @@ export const DASHBOARD_JS = String.raw`
     renderShares();
   }
 
+  // One short-lived analytics response feeds both the head metrics and the
+  // per-slug traffic map, so a dashboard open or a bulk action does not run
+  // the full share_stats aggregation twice.  Each caller also carries a
+  // request sequence, so an older response can never overwrite a newer one.
+  var analyticsCache = { key: null, at: 0, data: null };
+  async function fetchAnalytics(days, scope) {
+    var key = days + "|" + scope;
+    if (analyticsCache.key === key && Date.now() - analyticsCache.at < 5000) return analyticsCache.data;
+    var data = await FL.api("GET", "/api/analytics?days=" + encodeURIComponent(days) + "&scope=" + encodeURIComponent(scope));
+    analyticsCache = { key: key, at: Date.now(), data: data };
+    return data;
+  }
+
   // Per-slug views/downloads for the table, from the same 30-day analytics the
   // Traffic section shows.  Cells stay blank for shares outside the window.
+  var trafficSeq = 0;
   async function loadTraffic(shareScope) {
+    var seq = ++trafficSeq;
     var analyticsScope = shareScope === "all" ? "all" : shareScope === "bots" ? "bots" : shareScope === "mine" ? "mine" : "teams";
-    var data = await FL.api("GET", "/api/analytics?days=30&scope=" + analyticsScope);
+    var data = await fetchAnalytics("30", analyticsScope);
+    if (seq !== trafficSeq) return;
     state.traffic = new Map((data.shares || []).map(function (s) { return [s.slug, s]; }));
     renderShares();
   }
@@ -606,12 +627,15 @@ export const DASHBOARD_JS = String.raw`
     return el ? el.value : "";
   }
 
+  var analyticsSeq = 0;
   async function loadAnalytics() {
+    var seq = ++analyticsSeq;
     var summary = document.getElementById("analytics-summary");
     if (!summary) return;
     var days = analyticsValue("analytics-days") || "30";
     var scope = analyticsValue("analytics-scope") || "mine";
-    var data = await FL.api("GET", "/api/analytics?days=" + encodeURIComponent(days) + "&scope=" + encodeURIComponent(scope));
+    var data = await fetchAnalytics(days, scope);
+    if (seq !== analyticsSeq) return;
     summary.replaceChildren(
       metric("Views", data.totals.views),
       metric("Downloads", data.totals.downloads),

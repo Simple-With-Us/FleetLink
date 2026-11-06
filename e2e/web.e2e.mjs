@@ -164,6 +164,15 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     await page.waitForSelector("#toast >> text=Deleted 1 share early.");
     assert.equal(await page.locator("#share-rows tr").count(), 1);
 
+    // A filter prunes the selections it hides: the bar only counts visible shares.
+    await page.locator("#share-rows tr", { hasText: "ada-notes" }).locator(".share-select").check();
+    await page.waitForSelector("#share-bulk:not([hidden]) >> text=1 selected");
+    await page.click("#share-chips .chip[data-filter=link]");
+    await page.waitForSelector("#share-bulk", { state: "hidden" });
+    await page.click("#share-chips .chip[data-filter=all]");
+    await page.waitForSelector("#share-rows tr >> text=ada-notes");
+    assert.equal(await page.locator("#share-rows .share-select:checked").count(), 0);
+
     // API token.
     await page.click("[data-tab=tokens]");
     await page.fill("#tk-name", "build agent");
