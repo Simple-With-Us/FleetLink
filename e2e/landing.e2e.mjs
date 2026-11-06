@@ -68,6 +68,25 @@ test('landing branding, playback and safe policy fallbacks on signed-in/out mobi
   await missing.waitForFunction(()=>document.querySelector('.hero-intro video').hidden);
   assert.equal(await missing.locator('.hero-intro picture').isVisible(),true);
   await missing.close();
+  const ended=await browser.newPage();
+  await ended.goto(server.url);
+  await ended.waitForFunction(()=>{const v=document.querySelector('.hero-intro video');return !v.paused&&v.currentTime>0.1;});
+  await ended.evaluate(()=>{const v=document.querySelector('.hero-intro video');v.currentTime=v.duration-0.05;});
+  await ended.waitForFunction(()=>document.querySelector('.hero-intro video').hidden);
+  assert.equal(await ended.locator('.hero-intro picture').isVisible(),true,'ended intro swaps to the still');
+  assert.match(await ended.locator('.hero-intro picture img').getAttribute('src'),/\.jpg$/,'end state holds the plain wordmark still');
+  await ended.waitForFunction(()=>{const i=document.querySelector('.hero-intro picture img');return i&&i.complete&&i.naturalWidth>0;});
+  await ended.close();
+  // A still that fails to load must never blank the hero: the video stays.
+  const broken=await browser.newPage();
+  await broken.route('**/assets/media/*.jpg',(r)=>r.abort());
+  await broken.goto(server.url);
+  await broken.waitForFunction(()=>{const v=document.querySelector('.hero-intro video');return !v.paused&&v.currentTime>0.1;});
+  await broken.evaluate(()=>{const v=document.querySelector('.hero-intro video');v.currentTime=v.duration-0.05;});
+  await broken.waitForTimeout(600);
+  assert.equal(await broken.locator('.hero-intro video').isVisible(),true,'broken still leaves the video on screen');
+  assert.equal(await broken.locator('.hero-intro picture').isVisible(),false,'broken still never shows an empty picture');
+  await broken.close();
  } finally {await browser.close();await server.close();}
 });
 
