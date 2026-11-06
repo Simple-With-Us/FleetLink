@@ -151,9 +151,14 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     await page.locator("#share-select-all").check();
     assert.equal(await page.locator("#share-rows .share-select:checked").count(), 2);
     await page.waitForSelector("#share-bulk:not([hidden]) >> text=2 selected");
-    page.on("dialog", (d) => d.accept("5"));
+    // With no teams the account has nothing to share to, so the bulk bar offers no sharing select.
+    assert.equal(await page.locator("#share-bulk select").count(), 0);
+    const dialogs = [];
+    page.on("dialog", (d) => { dialogs.push(d.type() + ": " + d.message()); d.accept("5"); });
     await page.click("#share-bulk >> text=Modify Expiration");
     await page.waitForSelector("#toast >> text=Modified expiration on 2 shares.");
+    // The bulk modify prompt asks for the day count with the wording the user asked for.
+    assert.ok(dialogs.includes("prompt: Modify expiration by how many days?  Enter a number (e.g. 3, 7, 30, 90, 180):"), dialogs.join(" | "));
     await page.locator("#share-rows tr", { hasText: "ada-link" }).locator(".share-select").check();
     await page.click("#share-bulk >> text=Delete");
     await page.waitForSelector("#toast >> text=Deleted 1 share early.");
@@ -174,6 +179,14 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     await page.click("#team-form button[type=submit]");
     await page.waitForSelector("#team-list h3:has-text('Docs')");
     await page.screenshot({ path: join(shots, "05-teams.png"), fullPage: true });
+
+    // With a team, the bulk bar gains the sharing select: personal, or the team as editor/viewer.
+    await page.click("[data-tab=shares]");
+    await page.locator("#share-rows tr", { hasText: "ada-notes" }).locator(".share-select").check();
+    await page.waitForSelector("#share-bulk:not([hidden]) >> text=1 selected");
+    assert.deepEqual(await page.locator("#share-bulk select option").allTextContents(), ["Change Sharing…", "Personal (remove team access)", "Docs · can edit", "Docs · view only"]);
+    await page.click("#share-bulk >> text=Clear");
+    await page.waitForSelector("#share-bulk", { state: "hidden" });
 
     // Account.
     await page.click("[data-tab=account]");
