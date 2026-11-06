@@ -342,6 +342,13 @@ const TRAILING_HOME = /(?:^|\/)(?:users|home)\/[^/.]+\/?$/i;
 // drive or from a URL - the shapes that can carry a builder home at all -
 // loses its final account segment whatever it looks like.
 const TRAILING_BUILDER_HOME = /(?:^|\/)(?:users|home)\/[^/]+\/?$/i;
+// ...unless that final segment still names a real file: an absolute repo
+// path can end in a file inside a directory literally named "home"
+// ("/Users/builder/code/FleetLink/app/home/index.mjs"), and stripping there
+// loses the filename and points the frame at its parent directory.  A
+// segment carrying a source-file extension is the file, not the account
+// directory; a dotted account name like "jay.smith" carries none of these.
+const SOURCE_FILE_TAIL = /\.(?:[cm]?[jt]sx?|json|map|wasm|yml|yaml|toml|txt|md)$/i;
 const FRAME_LOCATION = /^(.*?):(\d+)(?::(\d+))?$/;
 // Only an absolute path, Windows drive or URL can carry a builder home.
 const BUILDER_PATH = /^(?:[a-z][a-z0-9+.-]*:\/\/|\/|[A-Za-z]:[\\/])/i;
@@ -374,7 +381,7 @@ export function repoRelativePath(raw) {
   // the account name, so strip it wherever it occurs before the fallback.
   while (PRIVATE_HOME.test(rest)) rest = rest.replace(PRIVATE_HOME, "$1");
   rest = rest.replace(TRAILING_HOME, "");
-  if (builderPrefixed) rest = rest.replace(TRAILING_BUILDER_HOME, "");
+  if (builderPrefixed && !SOURCE_FILE_TAIL.test(rest)) rest = rest.replace(TRAILING_BUILDER_HOME, "");
   const segments = rest.split("/").filter(Boolean);
   if (!segments.length) return "";
   return segments.slice(-2).join("/");

@@ -159,6 +159,11 @@ test("stack paths are repo-relative so builder home directories do not leak", ()
   // A relative repo path keeps a dotted file under a "home" directory:  it
   // cannot be a builder's home, so the file name stays.
   assert.equal(repoRelativePath("app/home/notes.txt"), "home/notes.txt");
+  // An absolute repo path ending in a real file under a directory named
+  // "home" keeps the filename: the trailing segment is the file, not the
+  // account directory (Kody review on dc71670).
+  assert.equal(repoRelativePath("/Users/builder/code/FleetLink/app/home/index.mjs"), "home/index.mjs");
+  assert.equal(repoRelativePath("/Users/builder/code/FleetLink/app/routes/home/index.mjs"), "home/index.mjs");
 });
 
 test("eventFromError sends the top frame and a scrubbed stack", () => {
