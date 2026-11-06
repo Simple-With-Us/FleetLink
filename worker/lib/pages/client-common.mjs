@@ -28,6 +28,14 @@ export const APP_JS = String.raw`
     function fallback() { video.hidden = true; picture.hidden = false; }
     video.querySelectorAll("source").forEach(function (source) { source.addEventListener("error", fallback); });
     video.addEventListener("error", fallback);
+    // Once the intro has run, hold the wordmark on the plain still image.
+    // WebKit drops an ended video's last frame (blank hero), so the ended
+    // video cannot be the thing that keeps the brand on screen.
+    video.addEventListener("ended", function () {
+      picture.replaceChildren(FLStill(intro.dataset.still, video.getAttribute("aria-label")));
+      video.hidden = true;
+      picture.hidden = false;
+    });
     var play = video.play();
     if (play && play.catch) play.catch(fallback);
   });
