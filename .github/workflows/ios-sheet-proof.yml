@@ -19,5 +19,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ios-sheet-proof-log
-          path: /tmp/fleetlink-sheet-proof/test.log
+          name: ios-sheet-proof-results
+          # test.log alone loses the XCTAttachments: keepAlways screenshots
+          # live in the result bundle, so upload both.
+          path: |
+            /tmp/fleetlink-sheet-proof/test.log
+            /tmp/fleetlink-sheet-proof/result.xcresult
