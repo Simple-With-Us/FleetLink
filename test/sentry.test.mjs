@@ -151,6 +151,14 @@ test("stack paths are repo-relative so builder home directories do not leak", ()
   assert.equal(repoRelativePath("pages/users/index.mjs"), "users/index.mjs");
   // A path that ends at the account directory still strips the name.
   assert.equal(repoRelativePath("/builds/home/jay"), "builds");
+  // A trailing slash still ends at the account directory.
+  assert.equal(repoRelativePath("/Users/bob/"), "");
+  // A dotted Windows-style account name at the end of an absolute path is
+  // still an account name.
+  assert.equal(repoRelativePath("/builds/home/jay.smith"), "builds");
+  // A relative repo path keeps a dotted file under a "home" directory:  it
+  // cannot be a builder's home, so the file name stays.
+  assert.equal(repoRelativePath("app/home/notes.txt"), "home/notes.txt");
 });
 
 test("eventFromError sends the top frame and a scrubbed stack", () => {

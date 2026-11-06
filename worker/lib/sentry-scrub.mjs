@@ -333,9 +333,15 @@ const REPO_ANCHOR = /(?:^|\/)worker\/.+$/;
 // A following segment is required: a repo directory literally named
 // "home" or "users" keeps its files ("app/routes/home/index.mjs").
 const PRIVATE_HOME = /(?:^|\/)(?:users|home)\/[^/]+(\/)(?=[^/])/i;
-// A path that ends at the account directory still leaks the name; the
-// account segment has no extension, so a real filename never matches.
-const TRAILING_HOME = /(?:^|\/)(?:users|home)\/[^/.]+$/i;
+// A path that ends at the account directory still leaks the name.  The
+// account segment here has no extension and may carry one trailing slash,
+// so a real filename never matches.
+const TRAILING_HOME = /(?:^|\/)(?:users|home)\/[^/.]+\/?$/i;
+// A dotted final segment ("jay.smith", a Windows-style account name) is
+// ambiguous with a real file, so only a path that arrived absolute, from a
+// drive or from a URL - the shapes that can carry a builder home at all -
+// loses its final account segment whatever it looks like.
+const TRAILING_BUILDER_HOME = /(?:^|\/)(?:users|home)\/[^/]+\/?$/i;
 const FRAME_LOCATION = /^(.*?):(\d+)(?::(\d+))?$/;
 // Only an absolute path, Windows drive or URL can carry a builder home.
 const BUILDER_PATH = /^(?:[a-z][a-z0-9+.-]*:\/\/|\/|[A-Za-z]:[\\/])/i;
@@ -352,6 +358,7 @@ const BUILDER_PATH = /^(?:[a-z][a-z0-9+.-]*:\/\/|\/|[A-Za-z]:[\\/])/i;
 export function repoRelativePath(raw) {
   let path = String(raw ?? "").trim();
   if (!path) return "";
+  const builderPrefixed = BUILDER_PATH.test(path);
   path = path.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
   path = path.replace(/[?#].*$/, "");
   path = path.replace(/\\/g, "/");
@@ -367,6 +374,7 @@ export function repoRelativePath(raw) {
   // the account name, so strip it wherever it occurs before the fallback.
   while (PRIVATE_HOME.test(rest)) rest = rest.replace(PRIVATE_HOME, "$1");
   rest = rest.replace(TRAILING_HOME, "");
+  if (builderPrefixed) rest = rest.replace(TRAILING_BUILDER_HOME, "");
   const segments = rest.split("/").filter(Boolean);
   if (!segments.length) return "";
   return segments.slice(-2).join("/");
