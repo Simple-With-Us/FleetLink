@@ -113,8 +113,11 @@ struct FleetLinkApp: App {
                 // Run after StateObject initialization/migration, not App.init.
                 if ProcessInfo.processInfo.arguments.contains("--seed-share-fixture") {
                     let host = ProcessInfo.processInfo.environment["FLEETLINK_FIXTURE_HOST"] ?? "https://fleetlink.online"
-                    ShareSession.save("nonsecret-extension-qualification-fixture", origin: host)
-                    fixtureSeeded = true
+                    // The marker must mean the fixture credential actually
+                    // landed: save reports keychain failure with its Bool, and
+                    // a false readiness marker would surface as the misleading
+                    // "preview never resolved" failure minutes later.
+                    fixtureSeeded = ShareSession.save("nonsecret-extension-qualification-fixture", origin: host)
                 }
                 #else
                 await session.refreshSession()
