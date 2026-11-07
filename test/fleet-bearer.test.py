@@ -27,6 +27,51 @@ class FleetTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+
+
+    def test_gateway_refusal_uses_worker_machine_code_without_echoing_reason(self):
+        import json
+        marker = "internal valve state bucket 7 detail"
+        result = {"jsonrpc": "2.0", "id": 1, "result": {
+            "isError": True,
+            "structuredContent": {"code": "invalid_arguments"},
+            "content": [{"type": "text", "text": "days: invalid; detail " + marker + " \u001b[31mred"}]}}
+        response = io.BytesIO(json.dumps(result).encode())
+        response.headers = {"Content-Type": "application/json"}
+        with patch.object(F, "gateway_transport") as opener:
+            opener.return_value.open.return_value = response
+            with self.assertRaises(F.FleetError) as ctx:
+                F.Client(self.path).rpc("tools/call", {}, True)
+        self.assertEqual(ctx.exception.code, "invalid_arguments")
+        self.assertNotIn(marker, str(ctx.exception))
+        self.assertNotIn("\x1b", str(ctx.exception))
+
+    def test_gateway_refusal_without_code_falls_back_without_echoing_reason(self):
+        import json
+        result = {"jsonrpc": "2.0", "id": 1, "result": {
+            "isError": True,
+            "content": [{"type": "text", "text": "some internal detail"}]}}
+        response = io.BytesIO(json.dumps(result).encode())
+        response.headers = {"Content-Type": "application/json"}
+        with patch.object(F, "gateway_transport") as opener:
+            opener.return_value.open.return_value = response
+            with self.assertRaises(F.FleetError) as ctx:
+                F.Client(self.path).rpc("tools/call", {}, True)
+        self.assertEqual(ctx.exception.code, "upstream_error")
+        self.assertNotIn("some internal detail", str(ctx.exception))
+
+    def test_malformed_error_content_fails_closed_without_crash(self):
+        import json
+        for content in (["not-a-dict"], [{"type": "text"}], "text", 5, None):
+            result = {"jsonrpc": "2.0", "id": 1, "result": {"isError": True, "content": content}}
+            response = io.BytesIO(json.dumps(result).encode())
+            response.headers = {"Content-Type": "application/json"}
+            with patch.object(F, "gateway_transport") as opener:
+                opener.return_value.open.return_value = response
+                with self.assertRaises(F.FleetError) as ctx:
+                    F.Client(self.path).rpc("tools/call", {}, True)
+            self.assertIn(ctx.exception.code, ("upstream_error", "outcome_unknown"))
+
     def test_prefix_or_verb_position_never_loses_bearer_mode(self):
         for argv in (["--fleet-bearer-file", str(self.path), "whoami"], ["whoami", "--fleet-bearer-file", str(self.path)]):
             args = F.build_parser().parse_args(argv)
