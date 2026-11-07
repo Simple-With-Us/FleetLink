@@ -392,9 +392,27 @@ function requestOrigin(ctx) {
   }
 }
 
-function toolResult(payload, isError = false) {
+// Machine codes for tool refusals, so gateway clients can classify a refusal
+// instead of guessing from a human sentence.  Codes stay [a-z_], matching the
+// CLI's accepted code shape.
+function httpErrorCode(status) {
+  if (status === 400) return "invalid_request";
+  if (status === 401 || status === 403) return "not_authorized";
+  if (status === 404) return "not_found";
+  if (status === 409) return "conflict";
+  if (status === 410) return "gone";
+  if (status === 413) return "too_large";
+  if (status === 429) return "rate_limited";
+  if (status === 503) return "unavailable";
+  return status >= 400 && status < 500 ? "invalid_request" : "internal_error";
+}
+
+function toolResult(payload, isError = false, code) {
   const result = { content: [{ type: "text", text: isError ? String(payload) : JSON.stringify(payload, null, 2) }] };
-  if (isError) result.isError = true;
+  if (isError) {
+    result.isError = true;
+    result.structuredContent = { code: typeof code === "string" ? code : "internal_error" };
+  }
   return result;
 }
 
@@ -482,20 +500,20 @@ async function toolReadFile(data, ctx) {
   const { share } = await loadShareFor(ctx.env, ctx.principal, data.slug, "view");
   const path = cleanPath(data.path);
   const row = (await shareFiles(ctx.env, share.id)).find((f) => f.path === path);
-  if (!row) return toolResult("File not found.", true);
+  if (!row) return toolResult("File not found.", true, "not_found");
   const textual = TEXTUAL.test(row.content_type || "");
   const cap = textual ? READ_TEXT_MAX : READ_BINARY_MAX;
   if (row.size > cap) {
-    return toolResult(`That file is ${row.size} bytes, over the ${cap}-byte read limit.  Fetch it from its link instead: ${ctx.origin}/${share.slug}/${path.split("/").map(encodeURIComponent).join("/")}`, true);
+    return toolResult(`That file is ${row.size} bytes, over the ${cap}-byte read limit.  Fetch it from its link instead: ${ctx.origin}/${share.slug}/${path.split("/").map(encodeURIComponent).join("/")}`, true, "too_large");
   }
   try {
     await assertValveOpen(ctx.env, "download", ctx.settings);
   } catch (err) {
-    if (err instanceof HttpError && err.status === 503) return toolResult(err.message, true);
+    if (err instanceof HttpError && err.status === 503) return toolResult(err.message, true, "unavailable");
     throw err;
   }
   const object = await getObject(ctx.env, row.r2_key);
-  if (!object) return toolResult("File not found.", true);
+  if (!object) return toolResult("File not found.", true, "not_found");
   const bytes = new Uint8Array(await object.arrayBuffer());
   recordUsage(ctx.env, ctx.exec, { bytes: bytes.byteLength, requests: 0 });
   const meta = { slug: share.slug, path, size: bytes.byteLength, content_type: row.content_type };
@@ -608,14 +626,14 @@ function issueMessage(error) {
 
 async function dispatchTool(name, args, ctx) {
   const tool = TOOLS.find((item) => item.name === name);
-  if (!tool) return toolResult("Unknown tool.", true);
+  if (!tool) return toolResult("Unknown tool.", true, "unknown_tool");
   const parsed = tool.schema.safeParse(args ?? {});
-  if (!parsed.success) return toolResult(issueMessage(parsed.error), true);
+  if (!parsed.success) return toolResult(issueMessage(parsed.error), true, "invalid_arguments");
   try {
     return await tool.run(parsed.data, ctx);
   } catch (err) {
-    if (err instanceof HttpError) return toolResult(err.message, true);
-    return toolResult("The request could not be completed.", true);
+    if (err instanceof HttpError) return toolResult(err.message, true, httpErrorCode(err.status));
+    return toolResult("The request could not be completed.", true, "internal_error");
   }
 }
 
