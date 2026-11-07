@@ -8,6 +8,31 @@ async function tool(env, auth, name, args) {
   return { error: result?.isError === true, data: result?.isError ? result.content[0].text : JSON.parse(result.content[0].text) };
 }
 
+
+test('tool refusals carry a machine code and keep the human reason', async () => {
+  const env = await makeEnv();
+  const ada = await signUp(env, 'Ada');
+  const call = async (name, args) => (await callJson(env, 'POST', '/mcp', { auth: ada, json: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } } })).data.result;
+
+  const unknownTool = await call('fleetlink_nope', {});
+  assert.equal(unknownTool.isError, true);
+  assert.equal(unknownTool.structuredContent.code, 'unknown_tool');
+  assert.match(unknownTool.content[0].text, /Unknown tool/);
+
+  const invalid = await call('fleetlink_create_share', { slug: 'bad', reuse: true, markdown: 'hi' });
+  assert.equal(invalid.isError, true);
+  assert.equal(invalid.structuredContent.code, 'invalid_arguments');
+  assert.match(invalid.content[0].text, /reuse requires empty/);
+
+  const missing = await call('fleetlink_get_share', { slug: 'missing' });
+  assert.equal(missing.isError, true);
+  assert.equal(missing.structuredContent.code, 'not_found');
+
+  const created = await call('fleetlink_create_share', { slug: 'ok-codes', empty: true, personal: true });
+  assert.equal(created.isError, undefined);
+  assert.equal(created.structuredContent, undefined);
+});
+
 test('empty file share and reuse preserve ownership/edit policy, personal and password', async () => {
   const env = await makeEnv();
   const ada = await signUp(env, 'Ada');
