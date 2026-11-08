@@ -43,7 +43,7 @@ test("admins manage people: role, status, quotas, and deletion, with sign-out an
   assert.equal(row.usage.shares, 1);
   assert.equal(row.usage.bytes, 3);
   assert.equal(row.token_count, 1);
-  assert.equal(users.data.users[0].id, "usr_operator");
+  assert.ok(users.data.users.some((user) => user.id === "usr_operator"), "the protected operator account is listed");
   const search = await callJson(env, "GET", "/api/admin/users?q=ada%40", { auth: ada });
   assert.deepEqual(search.data.users.map((u) => u.display_name), ["Ada"]);
 
@@ -76,6 +76,23 @@ test("admins manage people: role, status, quotas, and deletion, with sign-out an
 
   const stats = await callJson(env, "GET", "/api/admin/stats", { auth: ada });
   assert.equal(stats.data.settings.signup_mode, "open");
+});
+
+test("admin user listing keeps system accounts ahead of people without assuming operator is newest", async () => {
+  const env = await makeEnv();
+  const ada = await signUp(env, "Ada");
+  await makeAdmin(env, ada);
+  const operator = await env.DB.prepare("SELECT created_at FROM users WHERE id = ?").bind("usr_operator").first();
+  // Simulate the harness owner being seeded in a later second. Both are system
+  // accounts, and the API orders within that group by descending creation time.
+  await env.DB.prepare("UPDATE users SET created_at = ? WHERE id = ?").bind(operator.created_at + 2, "usr_test_owner").run();
+  const listed = await callJson(env, "GET", "/api/admin/users", { auth: ada });
+  assert.equal(listed.status, 200);
+  const ids = listed.data.users.map((user) => user.id);
+  assert.equal(ids[0], "usr_test_owner");
+  assert.ok(ids.indexOf("usr_operator") > ids.indexOf("usr_test_owner"));
+  assert.ok(ids.indexOf("usr_operator") < ids.indexOf(ada.user.id));
+  assert.equal((await callJson(env, "DELETE", "/api/admin/users/usr_operator", { auth: ada })).status, 400);
 });
 
 test("settings are validated and take effect", async () => {
