@@ -286,6 +286,8 @@ test("MCP own expired metadata is bounded, private and does not restore file acc
   for (const row of [...first.data.shares, ...second.data.shares]) {
     assert.match(row.slug, /^history-own-/);
     assert.equal(row.files, undefined);
+    assert.equal(row.can_edit, false);
+    assert.equal(row.can_manage, false);
   }
   for (const scope of ["all", "team", "teams", "bots"]) {
     assert.equal((await tool(env, auth, "fleetlink_list_shares", { include_expired: true, scope })).error, "Expired metadata is limited to your own shares.");
@@ -293,6 +295,15 @@ test("MCP own expired metadata is bounded, private and does not restore file acc
   assert.equal((await tool(env, auth, "fleetlink_get_share", { slug: "history-own-a" })).error, "This share has expired.");
   assert.equal((await tool(env, { token: bobToken }, "fleetlink_get_share", { slug: "history-own-a" })).error, "Share not found.");
   assert.ok((await tool(env, auth, "fleetlink_list_shares", { include_expired: true, before: "bad cursor" })).error);
+  const rest = await callJson(env, "GET", "/api/shares?include_expired=true&limit=1", { auth });
+  assert.equal(rest.status, 200);
+  assert.equal(rest.data.shares.length, 1);
+  assert.equal(rest.data.shares[0].can_edit, false);
+  assert.equal(rest.data.shares[0].can_manage, false);
+  assert.ok(rest.data.next);
+  assert.equal((await callJson(env, "GET", "/api/shares?include_expired=true&scope=all", { auth })).status, 403);
+  assert.equal((await callJson(env, "GET", "/api/shares?include_expired=yes", { auth })).status, 400);
+  assert.equal((await callJson(env, "GET", "/api/shares?include_expired=false", { auth })).data.shares.length, 0);
   const missing = await rpc(env, auth, "tools/call", { name: "fleetlink_get_share", arguments: { slug: "history-missing" } });
   assert.equal(missing.data.result.structuredContent.code, "not_found");
   const expired = await rpc(env, auth, "tools/call", { name: "fleetlink_get_share", arguments: { slug: "history-own-a" } });

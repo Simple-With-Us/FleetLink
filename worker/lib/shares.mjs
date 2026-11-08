@@ -732,7 +732,10 @@ export async function listShares(env, principal, { scope = "mine", team_id: team
   const editable = (row) => manageable(row) || (row.team_access === "edit" && roles?.has(row.team_id)) || Boolean(ownerId && row.owner_id === ownerId);
   const last = page[page.length - 1];
   return {
-    rows: page.map((row) => ({ row, canManage: manageable(row), canEdit: editable(row) })),
+    rows: page.map((row) => {
+      const expired = row.expires_at != null && row.expires_at <= ts;
+      return { row, canManage: !expired && manageable(row), canEdit: !expired && editable(row) };
+    }),
     next: more && last ? `${last.created_at}:${last.id}` : null
   };
 }
