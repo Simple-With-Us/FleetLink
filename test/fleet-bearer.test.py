@@ -18,7 +18,7 @@ loader.exec_module(F)
 class FleetTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.path = Path(self.tmp.name) / "token"
+        self.path = Path(self.tmp.name).resolve() / "token"
         self.path.write_text("sbt_codex_" + "x" * 43)
         self.path.chmod(0o600)
         self.args = SimpleNamespace(fleet_bearer_file=str(self.path), token=None, operator=False, domain=None)
