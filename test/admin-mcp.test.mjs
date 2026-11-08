@@ -301,6 +301,15 @@ test("MCP own expired metadata is bounded, private and does not restore file acc
   assert.equal(rest.data.shares[0].can_edit, false);
   assert.equal(rest.data.shares[0].can_manage, false);
   assert.ok(rest.data.next);
+  const restNext = await callJson(env, "GET", `/api/shares?include_expired=true&limit=1&before=${encodeURIComponent(rest.data.next)}`, { auth });
+  assert.equal(restNext.status, 200);
+  assert.equal(restNext.data.shares.length, 1);
+  assert.notEqual(restNext.data.shares[0].slug, rest.data.shares[0].slug);
+  assert.equal(restNext.data.next, null);
+  for (const cursor of ["bad cursor", "", "1", "1:shr_", "1:shr_a:extra", "1:shr_a\n", "12345678901234567:shr_a", `1:shr_${"a".repeat(65)}`]) {
+    const invalid = await callJson(env, "GET", `/api/shares?include_expired=true&before=${encodeURIComponent(cursor)}`, { auth });
+    assert.equal(invalid.status, 400, cursor);
+  }
   assert.equal((await callJson(env, "GET", "/api/shares?include_expired=true&scope=all", { auth })).status, 403);
   assert.equal((await callJson(env, "GET", "/api/shares?include_expired=yes", { auth })).status, 400);
   assert.equal((await callJson(env, "GET", "/api/shares?include_expired=false", { auth })).data.shares.length, 0);
