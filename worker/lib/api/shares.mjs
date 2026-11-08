@@ -132,12 +132,17 @@ export function shareRoutes(router) {
   router.on("GET", "/api/shares", async (ctx) => {
     const principal = await ctx.auth();
     const p = ctx.url.searchParams;
+    const before = p.get("before");
+    if (before !== null && !/^\d{1,16}:shr_[A-Za-z0-9]{1,64}(?![\s\S])/.test(before)) throw badRequest("Invalid before cursor.");
+    const expiredFlag = p.get("include_expired");
+    if (expiredFlag !== null && expiredFlag !== "true" && expiredFlag !== "false") throw badRequest("include_expired must be true or false.");
     const { rows, next } = await listShares(ctx.env, principal, {
       scope: p.get("scope") || (p.get("team_id") ? "team" : "mine"),
       team_id: p.get("team_id"),
       q: p.get("q"),
       limit: p.get("limit"),
-      before: p.get("before")
+      before,
+      include_expired: expiredFlag === "true"
     });
     const origin = await ctx.shareOrigin();
     return json({ shares: rows.map(({ row, canManage, canEdit }) => publicShare(row, origin, { canManage, canEdit })), next });

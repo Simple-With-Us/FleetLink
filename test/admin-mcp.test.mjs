@@ -261,3 +261,60 @@ test("admin limits, user default limits, and guest limits are modifiable and dyn
   assert.equal((await callJson(env, "POST", "/api/shares/bob-share/renew", { auth: bob, json: {} })).status, 200);
   assert.equal((await callJson(env, "POST", "/api/shares/bob-share/renew", { auth: bob, json: {} })).status, 403);
 });
+
+
+test("MCP own expired metadata is bounded, private and does not restore file access", async () => {
+  const env = await makeEnv();
+  const ada = await signUp(env, "HistoryAda");
+  const bob = await signUp(env, "HistoryBob");
+  const adaToken = await createToken(env, ada);
+  const bobToken = await createToken(env, bob);
+  const auth = { token: adaToken };
+  for (const slug of ["history-own-a", "history-own-b"]) {
+    await tool(env, auth, "fleetlink_create_share", { text: "original", slug, title: "Own history" });
+  }
+  await tool(env, { token: bobToken }, "fleetlink_create_share", { text: "private", slug: "history-bob" });
+  await env.DB.prepare("UPDATE shares SET expires_at = 1 WHERE slug LIKE 'history-%'").run();
+  assert.equal((await tool(env, auth, "fleetlink_list_shares", {})).data.shares.length, 0);
+  const first = await tool(env, auth, "fleetlink_list_shares", { include_expired: true, limit: 1 });
+  assert.equal(first.data.shares.length, 1);
+  assert.ok(first.data.next);
+  const second = await tool(env, auth, "fleetlink_list_shares", { include_expired: true, limit: 1, before: first.data.next });
+  assert.equal(second.data.shares.length, 1);
+  assert.notEqual(first.data.shares[0].slug, second.data.shares[0].slug);
+  assert.equal(second.data.next, null);
+  for (const row of [...first.data.shares, ...second.data.shares]) {
+    assert.match(row.slug, /^history-own-/);
+    assert.equal(row.files, undefined);
+    assert.equal(row.can_edit, false);
+    assert.equal(row.can_manage, false);
+  }
+  for (const scope of ["all", "team", "teams", "bots"]) {
+    assert.equal((await tool(env, auth, "fleetlink_list_shares", { include_expired: true, scope })).error, "Expired metadata is limited to your own shares.");
+  }
+  assert.equal((await tool(env, auth, "fleetlink_get_share", { slug: "history-own-a" })).error, "This share has expired.");
+  assert.equal((await tool(env, { token: bobToken }, "fleetlink_get_share", { slug: "history-own-a" })).error, "Share not found.");
+  assert.ok((await tool(env, auth, "fleetlink_list_shares", { include_expired: true, before: "bad cursor" })).error);
+  const rest = await callJson(env, "GET", "/api/shares?include_expired=true&limit=1", { auth });
+  assert.equal(rest.status, 200);
+  assert.equal(rest.data.shares.length, 1);
+  assert.equal(rest.data.shares[0].can_edit, false);
+  assert.equal(rest.data.shares[0].can_manage, false);
+  assert.ok(rest.data.next);
+  const restNext = await callJson(env, "GET", `/api/shares?include_expired=true&limit=1&before=${encodeURIComponent(rest.data.next)}`, { auth });
+  assert.equal(restNext.status, 200);
+  assert.equal(restNext.data.shares.length, 1);
+  assert.notEqual(restNext.data.shares[0].slug, rest.data.shares[0].slug);
+  assert.equal(restNext.data.next, null);
+  for (const cursor of ["bad cursor", "", "1", "1:shr_", "1:shr_a:extra", "1:shr_a\n", "12345678901234567:shr_a", `1:shr_${"a".repeat(65)}`]) {
+    const invalid = await callJson(env, "GET", `/api/shares?include_expired=true&before=${encodeURIComponent(cursor)}`, { auth });
+    assert.equal(invalid.status, 400, cursor);
+  }
+  assert.equal((await callJson(env, "GET", "/api/shares?include_expired=true&scope=all", { auth })).status, 403);
+  assert.equal((await callJson(env, "GET", "/api/shares?include_expired=yes", { auth })).status, 400);
+  assert.equal((await callJson(env, "GET", "/api/shares?include_expired=false", { auth })).data.shares.length, 0);
+  const missing = await rpc(env, auth, "tools/call", { name: "fleetlink_get_share", arguments: { slug: "history-missing" } });
+  assert.equal(missing.data.result.structuredContent.code, "not_found");
+  const expired = await rpc(env, auth, "tools/call", { name: "fleetlink_get_share", arguments: { slug: "history-own-a" } });
+  assert.equal(expired.data.result.structuredContent.code, "gone");
+});

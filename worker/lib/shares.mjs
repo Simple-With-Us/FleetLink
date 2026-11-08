@@ -674,10 +674,11 @@ export async function shareFiles(env, shareId) {
  *   scope "bots": shares owned by bots they manage
  *   scope "all": every share (admins only)
  */
-export async function listShares(env, principal, { scope = "mine", team_id: teamId = null, q = "", limit = 50, before = null } = {}) {
+export async function listShares(env, principal, { scope = "mine", team_id: teamId = null, q = "", limit = 50, before = null, include_expired = false } = {}) {
   const ts = now();
-  const clauses = ["(s.expires_at IS NULL OR s.expires_at > ?)"];
-  const args = [ts];
+  if (include_expired && scope !== "mine") throw forbidden("Expired metadata is limited to your own shares.");
+  const clauses = include_expired ? [] : ["(s.expires_at IS NULL OR s.expires_at > ?)"];
+  const args = include_expired ? [] : [ts];
   if (scope === "all") {
     if (!principal.isAdmin) throw forbidden("Admins only.");
   } else if (scope === "team") {
@@ -731,7 +732,10 @@ export async function listShares(env, principal, { scope = "mine", team_id: team
   const editable = (row) => manageable(row) || (row.team_access === "edit" && roles?.has(row.team_id)) || Boolean(ownerId && row.owner_id === ownerId);
   const last = page[page.length - 1];
   return {
-    rows: page.map((row) => ({ row, canManage: manageable(row), canEdit: editable(row) })),
+    rows: page.map((row) => {
+      const expired = row.expires_at != null && row.expires_at <= ts;
+      return { row, canManage: !expired && manageable(row), canEdit: !expired && editable(row) };
+    }),
     next: more && last ? `${last.created_at}:${last.id}` : null
   };
 }
