@@ -261,3 +261,40 @@ test("admin limits, user default limits, and guest limits are modifiable and dyn
   assert.equal((await callJson(env, "POST", "/api/shares/bob-share/renew", { auth: bob, json: {} })).status, 200);
   assert.equal((await callJson(env, "POST", "/api/shares/bob-share/renew", { auth: bob, json: {} })).status, 403);
 });
+
+
+test("MCP own expired metadata is bounded, private and does not restore file access", async () => {
+  const env = await makeEnv();
+  const ada = await signUp(env, "HistoryAda");
+  const bob = await signUp(env, "HistoryBob");
+  const adaToken = await createToken(env, ada);
+  const bobToken = await createToken(env, bob);
+  const auth = { token: adaToken };
+  for (const slug of ["history-own-a", "history-own-b"]) {
+    await tool(env, auth, "fleetlink_create_share", { text: "original", slug, title: "Own history" });
+  }
+  await tool(env, { token: bobToken }, "fleetlink_create_share", { text: "private", slug: "history-bob" });
+  await env.DB.prepare("UPDATE shares SET expires_at = 1 WHERE slug LIKE 'history-%'").run();
+  assert.equal((await tool(env, auth, "fleetlink_list_shares", {})).data.shares.length, 0);
+  const first = await tool(env, auth, "fleetlink_list_shares", { include_expired: true, limit: 1 });
+  assert.equal(first.data.shares.length, 1);
+  assert.ok(first.data.next);
+  const second = await tool(env, auth, "fleetlink_list_shares", { include_expired: true, limit: 1, before: first.data.next });
+  assert.equal(second.data.shares.length, 1);
+  assert.notEqual(first.data.shares[0].slug, second.data.shares[0].slug);
+  assert.equal(second.data.next, null);
+  for (const row of [...first.data.shares, ...second.data.shares]) {
+    assert.match(row.slug, /^history-own-/);
+    assert.equal(row.files, undefined);
+  }
+  for (const scope of ["all", "team", "teams", "bots"]) {
+    assert.equal((await tool(env, auth, "fleetlink_list_shares", { include_expired: true, scope })).error, "Expired metadata is limited to your own shares.");
+  }
+  assert.equal((await tool(env, auth, "fleetlink_get_share", { slug: "history-own-a" })).error, "This share has expired.");
+  assert.equal((await tool(env, { token: bobToken }, "fleetlink_get_share", { slug: "history-own-a" })).error, "Share not found.");
+  assert.ok((await tool(env, auth, "fleetlink_list_shares", { include_expired: true, before: "bad cursor" })).error);
+  const missing = await rpc(env, auth, "tools/call", { name: "fleetlink_get_share", arguments: { slug: "history-missing" } });
+  assert.equal(missing.data.result.structuredContent.code, "not_found");
+  const expired = await rpc(env, auth, "tools/call", { name: "fleetlink_get_share", arguments: { slug: "history-own-a" } });
+  assert.equal(expired.data.result.structuredContent.code, "gone");
+});

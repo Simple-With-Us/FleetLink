@@ -674,10 +674,11 @@ export async function shareFiles(env, shareId) {
  *   scope "bots": shares owned by bots they manage
  *   scope "all": every share (admins only)
  */
-export async function listShares(env, principal, { scope = "mine", team_id: teamId = null, q = "", limit = 50, before = null } = {}) {
+export async function listShares(env, principal, { scope = "mine", team_id: teamId = null, q = "", limit = 50, before = null, include_expired = false } = {}) {
   const ts = now();
-  const clauses = ["(s.expires_at IS NULL OR s.expires_at > ?)"];
-  const args = [ts];
+  if (include_expired && scope !== "mine") throw forbidden("Expired metadata is limited to your own shares.");
+  const clauses = include_expired ? [] : ["(s.expires_at IS NULL OR s.expires_at > ?)"];
+  const args = include_expired ? [] : [ts];
   if (scope === "all") {
     if (!principal.isAdmin) throw forbidden("Admins only.");
   } else if (scope === "team") {
