@@ -79,7 +79,9 @@ const ListSchema = z.object({
   scope: z.enum(["mine", "bots", "team", "teams", "all"]).optional(),
   team_id: z.string().max(64).optional(),
   q: z.string().max(100).optional(),
-  limit: z.number().int().min(1).max(200).optional()
+  limit: z.number().int().min(1).max(200).optional(),
+  before: z.string().regex(/^\d{1,16}:shr_[A-Za-z0-9]{1,64}$/).optional(),
+  include_expired: z.boolean().optional()
 }).strict();
 const EmptySchema = z.object({}).strict();
 const slugRequired = z.string().trim().min(1).max(80);
@@ -192,7 +194,7 @@ const TOOLS = [
   {
     name: "fleetlink_list_shares",
     title: "List shares",
-    description: "List live shares you can see.  scope is mine (default), team (with team_id), teams (every team you are in), or all (admins).",
+    description: "List shares you can see. Expired metadata is opt-in and limited to your own shares, never expired file access or deleted-row history.",
     schema: ListSchema,
     inputSchema: {
       type: "object",
@@ -201,7 +203,9 @@ const TOOLS = [
         scope: { type: "string", enum: ["mine", "bots", "team", "teams", "all"], description: "mine (default), bots (shares of bots you manage), team with team_id, teams, or all (admins)." },
         team_id: { type: "string" },
         q: { type: "string", description: "Match the name or title." },
-        limit: { type: "integer", minimum: 1, maximum: 200 }
+        limit: { type: "integer", minimum: 1, maximum: 200 },
+        before: { type: "string", pattern: "^\\d{1,16}:shr_[A-Za-z0-9]{1,64}$", description: "The previous page next cursor." },
+        include_expired: { type: "boolean", description: "Include expired own-share metadata only. Does not restore content or prove purged/deleted history." }
       }
     },
     run: toolListShares
@@ -444,7 +448,7 @@ async function toolCreateLink(data, ctx) {
 }
 
 async function toolListShares(data, ctx) {
-  const { rows, next } = await listShares(ctx.env, ctx.principal, { scope: data.scope || (data.team_id ? "team" : "mine"), team_id: data.team_id, q: data.q, limit: data.limit });
+  const { rows, next } = await listShares(ctx.env, ctx.principal, { scope: data.scope || (data.team_id ? "team" : "mine"), team_id: data.team_id, q: data.q, limit: data.limit, before: data.before, include_expired: data.include_expired });
   return toolResult({ shares: rows.map(({ row, canManage, canEdit }) => publicShare(row, ctx.origin, { canManage, canEdit })), next });
 }
 
