@@ -1530,25 +1530,22 @@ ensure_tf_ready() {
     log "TestFlight internal testers can install this build"
     return 0
   fi
+  # rc=5 / rc=6 are NOT compliance failures: asc-api.mjs returns them only after
+  # the build reached IN_BETA_TESTING, countInternalTesters ran, and the
+  # compliance PATCH already landed (see asc-api.mjs exit-code table).
   if [[ $rc -eq 5 ]]; then
-    # Apple finished processing the build, but it is assigned to no external
-    # group with testers or a public link, so nobody can install it.  This is
-    # not a failed upload (the build is in App Store Connect), so do not fail
-    # the job; make it impossible to miss instead.  A new bundle ID starts with
-    # no groups, and 14 green ships once reached nobody this way (GH #1018).
-    log "warning: build ${BUILD_NUM} is processed but ${BUNDLE_ID} has no external TestFlight group with testers or a public link; nobody can install it yet"
-    log "warning: the Sync standing TestFlight testers step assigns the external group; otherwise enable the public link under TestFlight > External Testing"
+    log "warning: build ${BUILD_NUM} is compliant and in beta testing, but NO internal tester has access to all builds for ${BUNDLE_ID}"
+    log "warning: the Sync standing TestFlight testers step seeds the internal group; otherwise add an internal tester in App Store Connect"
     if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-      echo "::warning title=TestFlight has no reachable external tester::${BUNDLE_ID} build ${BUILD_NUM} is processed but no external tester can install it.  Check the Sync standing TestFlight testers step."
+      echo "::warning title=TestFlight has no internal tester::${BUNDLE_ID} build ${BUILD_NUM} is ready but no internal tester can install it.  Check the Sync standing TestFlight testers step."
     fi
     return 0
   fi
   if [[ $rc -eq 6 ]]; then
-    # Processed, but the external installability could not be read, so we
-    # cannot say anyone can install it.  Say so instead of printing the success line.
-    log "warning: build ${BUILD_NUM} is processed but the external TestFlight installability could not be read for ${BUNDLE_ID}; installability is unverified"
+    log "warning: build ${BUILD_NUM} is compliant and in beta testing, but the internal tester count could not be read for ${BUNDLE_ID}"
+    log "warning: installability is unverified -- check internal TestFlight groups by hand in App Store Connect"
     if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-      echo "::warning title=TestFlight installability unverified::${BUNDLE_ID} build ${BUILD_NUM} is processed but the external installability could not be read.  Check TestFlight."
+      echo "::warning title=TestFlight internal tester state unreadable::${BUNDLE_ID} build ${BUILD_NUM} is ready but the internal tester state could not be read.  Check TestFlight."
     fi
     return 0
   fi

@@ -23,9 +23,9 @@ export function tfReadyOutcomeLine(rc, { bundleId, buildNum }) {
     case 4:
       return `After tester sync: ASC never surfaced build ${buildNum} for ${bundleId}; export compliance not declared (ensure-tf-ready rc=4).`;
     case 5:
-      return `After tester sync: build ${buildNum} is processed but no external tester can install it yet for ${bundleId} (ensure-tf-ready rc=5).`;
+      return `After tester sync: build ${buildNum} is ready but no internal tester can install it for ${bundleId} (ensure-tf-ready rc=5).`;
     case 6:
-      return `After tester sync: build ${buildNum} is processed but external TestFlight installability is unverified for ${bundleId} (ensure-tf-ready rc=6).`;
+      return `After tester sync: build ${buildNum} is ready but the internal tester state is unreadable for ${bundleId} (ensure-tf-ready rc=6).`;
     default:
       return `After tester sync: ensure-tf-ready failed (rc=${rc}) for ${bundleId} build ${buildNum}; export compliance not declared.`;
   }
@@ -37,9 +37,9 @@ export function tfReadyGithubAnnotation(rc, { bundleId, buildNum }) {
     case 4:
       return `::warning::ensure-tf-ready could not find uploaded build ${buildNum} for ${bundleId}; export compliance not declared`;
     case 5:
-      return `::warning title=TestFlight has no reachable external tester::${bundleId} build ${buildNum} is processed but no external tester can install it.  Check the Sync standing TestFlight testers step.`;
+      return `::warning title=TestFlight has no internal tester::${bundleId} build ${buildNum} is ready but no internal tester can install it.  Check the Sync standing TestFlight testers step.`;
     case 6:
-      return `::warning title=TestFlight installability unverified::${bundleId} build ${buildNum} is processed but the external installability could not be read.  Check TestFlight.`;
+      return `::warning title=TestFlight internal tester state unreadable::${bundleId} build ${buildNum} is ready but the internal tester state could not be read.  Check TestFlight.`;
     case 2:
     default:
       if (rc === 3 || rc === 0) return null;

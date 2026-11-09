@@ -31,8 +31,8 @@ test("rc=5 and rc=6 are handled before the export-compliance catch-all", () => {
   assert.ok(five < six && six < three && three < catchAll);
   assert.doesNotMatch(fn.slice(five, six), /export compliance not declared/);
   assert.doesNotMatch(fn.slice(six, three), /export compliance not declared/);
-  assert.match(fn, /::warning title=TestFlight has no reachable external tester::/);
-  assert.match(fn, /::warning title=TestFlight installability unverified::/);
+  assert.match(fn, /::warning title=TestFlight has no internal tester::/);
+  assert.match(fn, /::warning title=TestFlight internal tester state unreadable::/);
 });
 
 test("ensure_tf_ready maps each failure rc to a distinct log or annotation", () => {
@@ -40,8 +40,8 @@ test("ensure_tf_ready maps each failure rc to a distinct log or annotation", () 
     2: "build may be stuck on export compliance",
     3: "has not reached IN_BETA_TESTING yet",
     4: "ASC never surfaced build",
-    5: "no external TestFlight group with testers or a public link",
-    6: "installability is unverified",
+    5: "NO internal tester has access to all builds",
+    6: "internal tester count could not be read",
   };
   const fn = ensureFn();
   const lines = Object.values(markers);
@@ -60,7 +60,8 @@ test("ensure_tf_ready maps each failure rc to a distinct log or annotation", () 
 test("post-sync summary lines stay distinct per rc", () => {
   const lines = [2, 3, 4, 5, 6].map((rc) => tfReadyOutcomeLine(rc, ctx));
   assert.equal(new Set(lines).size, lines.length);
-  assert.match(lines[4], /external TestFlight installability is unverified/);
+  assert.match(lines[4], /internal tester state is unreadable/);
+  assert.match(lines[3], /no internal tester can install/);
   assert.doesNotMatch(lines[3], /export compliance not declared/);
 });
 
@@ -99,8 +100,8 @@ ensure_tf_ready
 
 test("workflow annotations for post-sync match rc=4, 5, and 6", () => {
   process.env.GITHUB_ACTIONS = "true";
-  assert.match(tfReadyGithubAnnotation(5, ctx) ?? "", /no external tester can install/);
-  assert.match(tfReadyGithubAnnotation(6, ctx) ?? "", /installability unverified/);
+  assert.match(tfReadyGithubAnnotation(5, ctx) ?? "", /no internal tester can install/);
+  assert.match(tfReadyGithubAnnotation(6, ctx) ?? "", /internal tester state could not be read/);
   assert.match(tfReadyGithubAnnotation(4, ctx) ?? "", /export compliance not declared/);
   assert.equal(tfReadyGithubAnnotation(3, ctx), null);
   delete process.env.GITHUB_ACTIONS;
