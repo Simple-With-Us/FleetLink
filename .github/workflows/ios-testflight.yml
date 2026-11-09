@@ -332,6 +332,17 @@ jobs:
             echo "::warning title=TestFlight standing testers::tester sync exited ${rc}; see the standing-testers lines above.  An upload was recorded; processing and tester access are not confirmed."
           fi
 
+      # The in-ship ensure-tf-ready pass runs before standing-tester sync, so
+      # it can falsely warn that nobody can install the build.  This read-only
+      # pass is what the job summary reports.
+      - name: Re-verify TestFlight readiness after tester sync
+        if: success() && steps.ship.outputs.uploaded == 'true' && github.ref == 'refs/heads/main' && inputs.export_only != true
+        continue-on-error: true
+        env:
+          PLAN_BUILD: ${{ needs.plan-build.outputs.build }}
+          IOS_TF_READY_TIMEOUT_SEC: "300"
+        run: node scripts/ios-report-post-sync-tf-ready.mjs
+
       # Saved even when the ship step failed, but only on ticks that tried to
       # ship (a no-op tick changes no state).  A run that only exported the IPA
       # records nothing a later gate would read.
