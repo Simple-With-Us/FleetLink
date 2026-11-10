@@ -5,12 +5,29 @@ import { appendFileSync, realpathSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { z } from "zod";
 
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL("..", import.meta.url));
 
+const AppsFleetlinkSchema = z.object({
+  bundleId: z.string().min(1),
+  fixedMarketingVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+  appleId: z.number().int().positive(),
+});
+
 function appsFleetlink() {
-  return require("./ios-fleet/apps.json").apps.fleetlink;
+  const parsed = AppsFleetlinkSchema.safeParse(
+    require("./ios-fleet/apps.json")?.apps?.fleetlink,
+  );
+  if (!parsed.success) {
+    console.error(
+      "scripts/ios-fleet/apps.json apps.fleetlink is missing or malformed:",
+      parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+    );
+    process.exit(2);
+  }
+  return parsed.data;
 }
 
 /** Distinct summary / annotation lines per asc-api ensure-tf-ready exit code. */
@@ -74,11 +91,23 @@ function main() {
     writeFileSync(err, result.stderr);
     process.stderr.write(result.stderr);
   }
-  const rc = result.status ?? 1;
   const ctx = { bundleId, buildNum };
-  const line = tfReadyOutcomeLine(rc, ctx);
+  let line;
+  let annotation;
+  if (result.error || result.status === null) {
+    // The check never ran; do not dress that up as a readiness verdict.
+    const why = result.error?.message ?? `killed by ${result.signal}`;
+    line = `After tester sync: the readiness check could not run for ${bundleId} build ${buildNum} (${why}); readiness unknown.`;
+    annotation =
+      process.env.GITHUB_ACTIONS === "true"
+        ? `::warning title=TestFlight readiness check could not run::${why}.  Readiness for ${bundleId} build ${buildNum} is unknown.`
+        : null;
+  } else {
+    const rc = result.status;
+    line = tfReadyOutcomeLine(rc, ctx);
+    annotation = tfReadyGithubAnnotation(rc, ctx);
+  }
   console.log(line);
-  const annotation = tfReadyGithubAnnotation(rc, ctx);
   if (annotation) console.log(annotation);
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);

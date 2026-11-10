@@ -27,7 +27,7 @@ for (const mode of ['rate-skip', 'same-head-skip', 'export-only', 'upload', 'fai
       const result = spawnSync(process.execPath, [script, process.execPath, '-e', code], { cwd: dir, encoding: 'utf8', env: { ...process.env, IOS_FLEET_STATE_DIR: dir, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary, ...(mode === 'transient-read' ? { NODE_OPTIONS: `--require=${preload}` } : {}) } });
       assert.equal(result.status, mode === 'failed-upload' ? 7 : 0, result.stderr);
       assert.equal(readFileSync(output, 'utf8'), `uploaded=${['upload', 'first-upload'].includes(mode)}\n`);
-      assert.match(readFileSync(summary, 'utf8'), ['upload', 'first-upload'].includes(mode) ? /Installability after standing-tester sync/ : /No TestFlight upload confirmed/);
+      assert.match(readFileSync(summary, 'utf8'), ['upload', 'first-upload'].includes(mode) ? /later step re-verifies TestFlight readiness after standing-tester sync/ : /No TestFlight upload confirmed/);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }

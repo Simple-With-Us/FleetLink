@@ -26,7 +26,7 @@ const uploaded = result.status === 0 && !result.error && head.status === 0 && !b
   record?.[2] === head.stdout.trim() && after.identity !== before?.identity;
 if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `uploaded=${Boolean(uploaded)}\n`);
 const message = uploaded
-  ? 'TestFlight upload recorded for this commit. Installability after standing-tester sync is reported in the next step.'
+  ? 'TestFlight upload recorded for this commit.  On a main-branch non-export-only run, a later step re-verifies TestFlight readiness after standing-tester sync and reports it in the job summary.'
   : 'No TestFlight upload confirmed by this step. A successful exit may be a rate/same-commit skip or export-only run.';
 console.log(message);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${message}\n`);
