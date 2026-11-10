@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const BUNDLE_ID_RE = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+// Matches the former AppsFleetlinkSchema zod regex.
 const MARKETING_RE = /^\d+\.\d+\.\d+$/;
 
 function failConfig(message) {
@@ -28,11 +28,9 @@ export function parseFleetlinkApp(fleetlink) {
     return { ok: false, detail: "apps.fleetlink must be an object" };
   }
   const { bundleId, fixedMarketingVersion, appleId } = fleetlink;
-  if (typeof bundleId !== "string" || !bundleId.trim()) {
+  // Former schema: z.string().min(1)
+  if (typeof bundleId !== "string" || bundleId.length < 1) {
     return { ok: false, detail: "apps.fleetlink.bundleId must be a non-empty string" };
-  }
-  if (!BUNDLE_ID_RE.test(bundleId)) {
-    return { ok: false, detail: "apps.fleetlink.bundleId must look like a bundle identifier" };
   }
   if (typeof fixedMarketingVersion !== "string" || !MARKETING_RE.test(fixedMarketingVersion)) {
     return { ok: false, detail: "apps.fleetlink.fixedMarketingVersion must match M.m.p" };

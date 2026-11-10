@@ -119,6 +119,18 @@ test("parseFleetlinkApp rejects drifted config with distinct messages", () => {
   assert.notEqual(parseFleetlinkApp(null).detail, parseFleetlinkApp({ bundleId: "" }).detail);
 });
 
+test("parseFleetlinkApp accepts bundleIds the former zod schema allowed", () => {
+  for (const bundleId of ["myapp", "com_example_app", "online.fleetlink.ios"]) {
+    const result = parseFleetlinkApp({
+      bundleId,
+      fixedMarketingVersion: "0.1.0",
+      appleId: 1,
+    });
+    assert.equal(result.ok, true, bundleId);
+    assert.equal(result.data.bundleId, bundleId);
+  }
+});
+
 test("post-sync reporter runs under plain node without node_modules", () => {
   const repo = fileURLToPath(new URL("..", import.meta.url));
   const script = join(repo, "scripts/ios-report-post-sync-tf-ready.mjs");
