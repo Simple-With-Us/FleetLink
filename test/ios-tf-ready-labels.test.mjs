@@ -5,7 +5,9 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  parseFleetlinkApp,
   tfReadyGithubAnnotation,
   tfReadyOutcomeLine,
 } from "../scripts/ios-report-post-sync-tf-ready.mjs";
@@ -105,4 +107,48 @@ test("workflow annotations for post-sync match rc=4, 5, and 6", () => {
   assert.match(tfReadyGithubAnnotation(4, ctx) ?? "", /export compliance not declared/);
   assert.equal(tfReadyGithubAnnotation(3, ctx), null);
   delete process.env.GITHUB_ACTIONS;
+});
+
+test("parseFleetlinkApp rejects drifted config with distinct messages", () => {
+  const good = parseFleetlinkApp({
+    bundleId: "online.fleetlink.ios",
+    fixedMarketingVersion: "0.1.0",
+    appleId: 6818901017,
+  });
+  assert.equal(good.ok, true);
+  assert.notEqual(parseFleetlinkApp(null).detail, parseFleetlinkApp({ bundleId: "" }).detail);
+});
+
+test("post-sync reporter runs under plain node without node_modules", () => {
+  const repo = fileURLToPath(new URL("..", import.meta.url));
+  const script = join(repo, "scripts/ios-report-post-sync-tf-ready.mjs");
+  const href = pathToFileURL(script).href;
+  const importResult = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", `await import(${JSON.stringify(href)});`],
+    {
+      cwd: repo,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME ?? "/tmp",
+        NODE_PATH: "/nonexistent",
+      },
+    },
+  );
+  assert.equal(importResult.status, 0, importResult.stderr);
+  assert.doesNotMatch(importResult.stderr, /Cannot find package ['"]zod['"]/);
+  assert.doesNotMatch(readFileSync(script, "utf8"), /from ["']zod["']/);
+
+  const runResult = spawnSync(process.execPath, [script], {
+    cwd: repo,
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME ?? "/tmp",
+      NODE_PATH: "/nonexistent",
+    },
+  });
+  assert.equal(runResult.status, 2);
+  assert.match(runResult.stderr, /::error::PLAN_BUILD must be a 12-digit merge-timestamp build/);
 });

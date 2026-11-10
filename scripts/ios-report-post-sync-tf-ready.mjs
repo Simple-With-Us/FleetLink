@@ -1,33 +1,65 @@
 // After standing-tester sync, re-run ensure-tf-ready and record the outcome on
 // the job summary.  The in-ship check runs before sync, so only this pass can
 // see testers and groups the sync step just created.
-import { appendFileSync, realpathSync, writeFileSync } from "node:fs";
+//
+// Dependency-free: the hosted ios-ship job runs this with plain `node` before
+// `npm ci`, so no package imports (same constraint as asc-api.mjs).
+import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
+import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { z } from "zod";
 
-const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL("..", import.meta.url));
+const BUNDLE_ID_RE = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+const MARKETING_RE = /^\d+\.\d+\.\d+$/;
 
-const AppsFleetlinkSchema = z.object({
-  bundleId: z.string().min(1),
-  fixedMarketingVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
-  appleId: z.number().int().positive(),
-});
+function failConfig(message) {
+  console.error(`::error::${message}`);
+  process.exit(2);
+}
 
-function appsFleetlink() {
-  const parsed = AppsFleetlinkSchema.safeParse(
-    require("./ios-fleet/apps.json")?.apps?.fleetlink,
-  );
-  if (!parsed.success) {
-    console.error(
-      "scripts/ios-fleet/apps.json apps.fleetlink is missing or malformed:",
-      parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
-    );
-    process.exit(2);
+/**
+ * Hand-written shape check for apps.json → apps.fleetlink (same fields the
+ * former zod schema enforced).
+ * @returns {{ ok: true, data: { bundleId: string, fixedMarketingVersion: string, appleId: number } } | { ok: false, detail: string }}
+ */
+export function parseFleetlinkApp(fleetlink) {
+  if (typeof fleetlink !== "object" || fleetlink === null || Array.isArray(fleetlink)) {
+    return { ok: false, detail: "apps.fleetlink must be an object" };
   }
-  return parsed.data;
+  const { bundleId, fixedMarketingVersion, appleId } = fleetlink;
+  if (typeof bundleId !== "string" || !bundleId.trim()) {
+    return { ok: false, detail: "apps.fleetlink.bundleId must be a non-empty string" };
+  }
+  if (!BUNDLE_ID_RE.test(bundleId)) {
+    return { ok: false, detail: "apps.fleetlink.bundleId must look like a bundle identifier" };
+  }
+  if (typeof fixedMarketingVersion !== "string" || !MARKETING_RE.test(fixedMarketingVersion)) {
+    return { ok: false, detail: "apps.fleetlink.fixedMarketingVersion must match M.m.p" };
+  }
+  if (typeof appleId !== "number" || !Number.isInteger(appleId) || appleId <= 0) {
+    return { ok: false, detail: "apps.fleetlink.appleId must be a positive integer" };
+  }
+  return {
+    ok: true,
+    data: { bundleId, fixedMarketingVersion, appleId },
+  };
+}
+
+function loadFleetlinkConfig() {
+  const mapPath = join(root, "scripts/ios-fleet/apps.json");
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(mapPath, "utf8"));
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    failConfig(`scripts/ios-fleet/apps.json is not readable or valid JSON (${msg})`);
+  }
+  const result = parseFleetlinkApp(parsed?.apps?.fleetlink);
+  if (!result.ok) {
+    failConfig(`scripts/ios-fleet/apps.json ${result.detail}`);
+  }
+  return result.data;
 }
 
 /** Distinct summary / annotation lines per asc-api ensure-tf-ready exit code. */
@@ -67,17 +99,16 @@ export function tfReadyGithubAnnotation(rc, { bundleId, buildNum }) {
 function main() {
   const buildNum = process.env.PLAN_BUILD || process.argv[2];
   if (!buildNum || !/^[1-9]\d{11}$/.test(buildNum)) {
-    console.error("PLAN_BUILD must be a 12-digit merge-timestamp build");
-    process.exit(2);
+    failConfig("PLAN_BUILD must be a 12-digit merge-timestamp build");
   }
-  const { bundleId, fixedMarketingVersion: marketing, appleId } = appsFleetlink();
+  const { bundleId, fixedMarketingVersion: marketing, appleId } = loadFleetlinkConfig();
   const logDir = process.env.RUNNER_TEMP || "/tmp";
   const out = `${logDir}/ensure-tf-ready-post-sync.json`;
   const err = `${logDir}/ensure-tf-ready-post-sync.err`;
   const result = spawnSync(
     process.execPath,
     [
-      `${root}/scripts/ios-fleet/asc-api.mjs`,
+      join(root, "scripts/ios-fleet/asc-api.mjs"),
       "ensure-tf-ready",
       bundleId,
       buildNum,
@@ -95,7 +126,6 @@ function main() {
   let line;
   let annotation;
   if (result.error || result.status === null) {
-    // The check never ran; do not dress that up as a readiness verdict.
     const why = result.error?.message ?? `killed by ${result.signal}`;
     line = `After tester sync: the readiness check could not run for ${bundleId} build ${buildNum} (${why}); readiness unknown.`;
     annotation =
@@ -112,7 +142,6 @@ function main() {
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);
   }
-  // Loud warnings only; the upload already succeeded.
   process.exit(0);
 }
 
