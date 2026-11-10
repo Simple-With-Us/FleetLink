@@ -177,3 +177,12 @@ test("export-only qualification does not sync testers or upload Sentry source ar
   const ship = readFileSync(new URL('../scripts/ios-fleet/ship-testflight.sh', import.meta.url), 'utf8');
   assert.match(ship, /if \[\[ "\$EXPORT_ONLY" -eq 0 \]\]; then\s+upload_sentry_artifacts/);
 });
+
+test("standing-tester sync is followed by a post-sync ensure-tf-ready summary step", () => {
+  const syncAt = active.indexOf("name: Sync standing TestFlight testers");
+  const postAt = active.indexOf("name: Re-verify TestFlight readiness after tester sync");
+  assert.ok(syncAt > -1 && postAt > syncAt, "post-sync readiness follows tester sync");
+  const postStep = active.slice(postAt).split(/\n\s+- name:/)[0];
+  assert.match(postStep, /ios-report-post-sync-tf-ready\.mjs/);
+  assert.match(postStep, /steps\.ship\.outputs\.uploaded == 'true'/);
+});

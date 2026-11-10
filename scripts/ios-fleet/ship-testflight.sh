@@ -1530,6 +1530,25 @@ ensure_tf_ready() {
     log "TestFlight internal testers can install this build"
     return 0
   fi
+  # rc=5 / rc=6 are NOT compliance failures: asc-api.mjs returns them only after
+  # the build reached IN_BETA_TESTING, countInternalTesters ran, and the
+  # compliance PATCH already landed (see asc-api.mjs exit-code table).
+  if [[ $rc -eq 5 ]]; then
+    log "warning: build ${BUILD_NUM} is compliant and in beta testing, but NO internal tester has access to all builds for ${BUNDLE_ID}"
+    log "warning: the Sync standing TestFlight testers step seeds the internal group; otherwise add an internal tester in App Store Connect"
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+      echo "::warning title=TestFlight has no internal tester::${BUNDLE_ID} build ${BUILD_NUM} is ready but no internal tester can install it.  Check the Sync standing TestFlight testers step."
+    fi
+    return 0
+  fi
+  if [[ $rc -eq 6 ]]; then
+    log "warning: build ${BUILD_NUM} is compliant and in beta testing, but the internal tester count could not be read for ${BUNDLE_ID}"
+    log "warning: installability is unverified -- check internal TestFlight groups by hand in App Store Connect"
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+      echo "::warning title=TestFlight internal tester state unreadable::${BUNDLE_ID} build ${BUILD_NUM} is ready but the internal tester state could not be read.  Check TestFlight."
+    fi
+    return 0
+  fi
   if [[ $rc -eq 3 ]]; then
     log "warning: upload succeeded but ASC has not reached IN_BETA_TESTING yet; watch TestFlight"
     return 0
