@@ -1405,8 +1405,8 @@ async function main() {
       process.exit(2);
     }
     if (!emails.length) {
-      console.error(`${prefix}: ASC_STANDING_TESTERS is empty; set the repo secret to the standing tester emails`);
-      process.exit(2);
+      console.error(`${prefix}: ASC_STANDING_TESTERS is empty; standing tester sync skipped (set the repo secret when you want invites)`);
+      process.exit(0);
     }
     const bad = emails.filter((e) => !EMAIL_RE.test(e));
     if (bad.length) {

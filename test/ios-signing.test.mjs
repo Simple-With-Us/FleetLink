@@ -38,6 +38,9 @@ test("iOS account and passkey URLs use fleetlink.online", () => {
   assert.match(passkey, /"fleetlink\.online"/);
   assert.doesNotMatch(passkey, /fleetlink\.app/);
   assert.match(entitlements, /webcredentials:fleetlink\.online/);
+  assert.match(entitlements, /com\.apple\.developer\.associated-appclip-app-identifiers/);
+  assert.match(entitlements, /\$\(AppIdentifierPrefix\)online\.fleetlink\.ios\.Clip/);
+  assert.match(project, /online\.fleetlink\.ios\.Clip/);
 });
 
 test("loadSigning masks Infisical values and fails closed without the distribution identity", async () => {
@@ -164,6 +167,7 @@ test("ASC jwt and profile selection stay on the FleetLink App Store profiles", a
     <key>application-identifier</key><string>TEAM.online.fleetlink.ios</string>
     <key>get-task-allow</key><false/>
     <key>com.apple.developer.associated-domains</key><array><string>webcredentials:fleetlink.online</string></array>
+    <key>com.apple.developer.associated-appclip-app-identifiers</key><array><string>TEAM.online.fleetlink.ios.Clip</string></array>
   </dict></plist>`;
   assert.doesNotThrow(() => assertProfileBundle(xml, "online.fleetlink.ios"));
   assert.throws(() => assertProfileBundle(xml, "online.fleetlink.ios.Clip"), /application-identifier/);

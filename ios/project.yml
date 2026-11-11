@@ -95,6 +95,8 @@ targets:
       properties:
         keychain-access-groups:
           - $(AppIdentifierPrefix)online.fleetlink.ios
+        com.apple.developer.associated-appclip-app-identifiers:
+          - $(AppIdentifierPrefix)online.fleetlink.ios.Clip
         com.apple.developer.associated-domains:
           - applinks:fleetlink.online
           - applinks:fleetlink.app
