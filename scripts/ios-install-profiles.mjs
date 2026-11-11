@@ -81,6 +81,13 @@ export function assertProfileBundle(xml, bundleId) {
     }
   } else if (!xml.includes("com.apple.developer.associated-domains")) {
     throw new Error(`Profile for ${bundleId} is missing the associated-domains entitlement.`);
+  } else if (bundleId === "online.fleetlink.ios") {
+    if (!xml.includes("com.apple.developer.associated-appclip-app-identifiers")) {
+      throw new Error(`Profile for ${bundleId} is missing the associated-appclip-app-identifiers entitlement.`);
+    }
+    if (!xml.includes("online.fleetlink.ios.Clip")) {
+      throw new Error(`Profile for ${bundleId} must list the App Clip application identifier (online.fleetlink.ios.Clip).`);
+    }
   }
 }
 
