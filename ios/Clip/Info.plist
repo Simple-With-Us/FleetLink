@@ -29,6 +29,8 @@
 		<key>NSAppClipRequestLocationConfirmation</key>
 		<false/>
 	</dict>
+	<key>SentryDSN</key>
+	<string>$(SENTRY_DSN)</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

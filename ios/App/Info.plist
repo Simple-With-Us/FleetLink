@@ -26,6 +26,8 @@
 	<string>$(AppIdentifierPrefix)online.fleetlink.ios</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>SentryDSN</key>
+	<string>$(SENTRY_DSN)</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
