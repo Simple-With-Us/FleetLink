@@ -4,6 +4,14 @@ on:
   push:
   pull_request:
 
+# Same event-scoped shape as Clutch ci.yml (C-123 / #262).  A pull_request run
+# keys on head_ref so a newer push to that branch cancels the older one.  Every
+# other event shares main, and cancel-in-progress stays off there, so a pull
+# request cannot cancel a run already on main.
+concurrency:
+  group: ci-fleetlink-${{ github.event_name == 'pull_request' && github.head_ref || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   ios-build:
     runs-on: macos-latest
@@ -59,6 +67,7 @@ jobs:
         run: bash scripts/ios-fleet/test-fixed-version.sh
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
