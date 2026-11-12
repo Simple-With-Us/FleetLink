@@ -124,7 +124,7 @@ test("the vendored fleet script declares export compliance, notes and the rate g
   // The client runs directly, with the key in the child's environment as
   // ASC_KEY_P8:  there is no reader and no exec wrapper, because a path on
   // disk is not an approved credential source (AFC-459, Kody rule 42).
-  assert.match(ship, /node "\$\{FLEET_DIR\}\/asc-api\.mjs" "\$@"/);
+  assert.match(ship, /"\$ASC_NODE" "\$\{FLEET_DIR\}\/asc-api\.mjs" "\$@"/);
   assert.doesNotMatch(ship, /asc-key\.mjs" (exec|read)/,
     "the client must not be handed a key through a file reader");
   const asc = read("scripts/ios-fleet/asc-api.mjs");

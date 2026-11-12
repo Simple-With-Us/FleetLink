@@ -372,7 +372,7 @@ env -u ASC_KEY_ID -u ASC_ISSUER_ID -u ASC_KEY_PATH -u ASC_KEY_P8 \
 if grep -nE 'asc-key\.mjs" (exec|read)' "$script" >/dev/null; then
   fail "the ship script still runs the client through a key reader"
 fi
-grep -q 'node "\${FLEET_DIR}/asc-api.mjs" "\$@"' "$script" \
+grep -q '"\$ASC_NODE" "\${FLEET_DIR}/asc-api.mjs" "\$@"' "$script" \
   || fail "the ship script does not run the client directly"
 
 # 3. The credential never travels in a command argument.  The secret reaches

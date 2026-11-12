@@ -19,8 +19,9 @@ NEXT1="$(python3 -c 'import sys; print(int(sys.argv[1]) + 1)' "$STAMP")"
 BELOW="$(python3 -c 'import sys; print(int(sys.argv[1]) - 10000)' "$STAMP")"
 BELOW2="$(python3 -c 'import sys; print(int(sys.argv[1]) - 20000)' "$STAMP")"
 # Every stub call is recorded: a run that reaches ASC helpers without touching
-# the stub means the real node shadowed it (the ship script puts the Homebrew
-# paths first on PATH), and the test fails instead of passing on real output.
+# the stub means the real node shadowed it (exported `node` beats PATH; the ship
+# script also honors IOS_FLEET_NODE for offline stubs), and the test fails
+# instead of passing on real output.
 export STUB_MARKER="$WORK/node-calls"
 export EXPECT_STAMP="$STAMP"
 cat >"$STUB/node" <<'NODE'
@@ -40,9 +41,10 @@ case "$1" in
 esac
 NODE
 chmod +x "$STUB/node"
-# An exported function beats any PATH lookup, so the ship script's own PATH
-# export (Homebrew and /usr/local first) cannot put a real node ahead of the stub.
+# An exported function beats any PATH lookup; IOS_FLEET_NODE would route asc-api
+# to the stub even when system paths precede the test bin dir on PATH.
 node() { "$STUB/node" "$@"; }
+export IOS_FLEET_NODE=node
 export -f node
 export STUB
 SHIP_UNDER_TEST="$HERE/ship-testflight.sh"
