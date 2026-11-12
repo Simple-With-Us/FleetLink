@@ -143,7 +143,7 @@ test("people sign up, share, manage tokens and teams, and admins manage people, 
     await page.click("[data-tab=shares]");
     await page.waitForSelector("#share-rows tr >> text=ada-link");
     assert.equal(await page.locator("#share-rows tr").count(), 2);
-    assert.deepEqual(await page.locator("table:has(> #share-rows) th").allTextContents().then((t) => t.map((x) => x.trim())), ["", "Slug", "Contents", "Owner", "Views", "Downloads", "Expires", ""]);
+    assert.deepEqual(await page.locator("table:has(> #share-rows) th").allTextContents().then((t) => t.map((x) => x.trim())), ["", "Name", "Contents", "Owner", "Views", "Downloads", "Expires", ""]);
     assert.match(await page.locator("#share-rows tr", { hasText: "ada-link" }).locator("td").nth(6).textContent(), /^\d+d$/);
     await page.screenshot({ path: join(shots, "03-shares.png"), fullPage: true });
 

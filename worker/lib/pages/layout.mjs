@@ -29,7 +29,7 @@ function navLinks(principal, active, heroBrand = false) {
   if (heroBrand) return `<a href="/dashboard" class="home-dashboard">Dashboard</a><a href="/agents" class="home-extra">Agents</a>${principal ? '<form method="post" action="/logout" class="inline"><button type="submit" class="link">Sign Out</button></form>' : '<a href="/login">Sign In</a>'}<a class="home-extra mail-icon" href="mailto:support@fleetlink.online" aria-label="Email support" title="Email support"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></a>`;
   const link = (href, label, key) => `<a href="${href}"${active === key ? ' aria-current="page"' : ""}>${label}</a>`;
   if (!principal) {
-    return `${link("/#features", "Features", "features")}${link("/agents", "Agents", "agents")}${link("/#guide", "Help", "guide")}<a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a>`;
+    return `<span class="nav-pages">${link("/#features", "Features", "features")}${link("/agents", "Agents", "agents")}${link("/#guide", "Help", "guide")}</span><span class="nav-account"><a class="button secondary" href="/login"${active === "login" ? ' aria-current="page"' : ""}>Sign In</a></span>`;
   }
   const items = [link("/dashboard", "Dashboard", "dashboard")];
   items.push(link("/#features", "Features", "features"));
@@ -59,7 +59,8 @@ export function page(env, { title, body, head = "", principal = null, active = n
 <link rel="icon" type="image/png" href="/assets/favicon-light-512.png?v=${ASSET_VERSION}" media="(prefers-color-scheme: light)">
 <link rel="icon" type="image/png" href="/assets/favicon-dark-512.png?v=${ASSET_VERSION}" media="(prefers-color-scheme: dark)">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=${ASSET_VERSION}">
-<meta name="theme-color" content="#0b1f3a">
+<meta name="theme-color" content="#f4f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c1a2e" media="(prefers-color-scheme: dark)">
 <link rel="stylesheet" href="/assets/app.css?v=${ASSET_VERSION}">
 ${head}
 </head>

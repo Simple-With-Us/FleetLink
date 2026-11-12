@@ -87,7 +87,7 @@ export const DASHBOARD_JS = String.raw`
     var actions = h("div", { class: "actions" },
       h("button", { type: "button", class: "small secondary", text: "Copy", onclick: function () { FL.copy(share.url); FL.toast("Copied " + share.slug + " link to clipboard."); } }),
       h("a", { class: "button small secondary", href: share.url, target: "_blank", rel: "noopener", text: "Open" }));
-    if (share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Rename", title: "Rename link name (slug)", onclick: function () { quickRename(share); } }));
+    if (share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Rename", title: "Rename this link", onclick: function () { quickRename(share); } }));
     if (share.can_edit || share.can_manage) actions.append(h("button", { type: "button", class: "small secondary", text: "Modify", title: "Modify expiration", onclick: function () { quickExtend(share); } }));
     var sharing = sharingControl(share);
     if (sharing) actions.append(sharing);
@@ -100,9 +100,10 @@ export const DASHBOARD_JS = String.raw`
       renderBulkBar();
       syncSelectAll();
     } });
+    var hit = h("label", { class: "select-hit" }, box);
     var traffic = state.traffic.get(share.slug);
     var row = h("tr", null,
-      h("td", { class: "select-col" }, box),
+      h("td", { class: "select-col" }, hit),
       h("td", null, h("a", { href: share.url, target: "_blank", rel: "noopener", class: "mono slug-a", text: share.slug }, FL.openIcon()), share.title ? h("div", { class: "small muted", text: share.title }) : null, share.kind === "link" ? h("div", { class: "small muted", text: "→ " + share.target_url }) : null),
       h("td", null, tags),
       h("td", { class: "hide-sm" }, share.owner && share.owner.display_name ? share.owner.display_name : ""),
@@ -140,7 +141,7 @@ export const DASHBOARD_JS = String.raw`
     var never = null, exact = null;
     var kids = [
       h("div", { class: "row" },
-        field("Name (slug)", h("input", { type: "text", name: "slug", value: share.slug, maxlength: "64", autocomplete: "off", disabled: !manage })),
+        field("Name", h("input", { type: "text", name: "slug", value: share.slug, maxlength: "64", autocomplete: "off", disabled: !manage }), "The name at the end of the link."),
         field("Title", h("input", { type: "text", name: "title", value: share.title || "", maxlength: "200", disabled: !edit })),
         field("Password", h("input", { type: "password", name: "password", autocomplete: "new-password", placeholder: share.has_password ? "Leave blank to keep it" : "Optional", disabled: !manage })),
         field("Extend by", extend, share.expires_at ? "The share will expire this many days from now." : "This share does not expire.")
@@ -236,7 +237,7 @@ export const DASHBOARD_JS = String.raw`
     }
 
     async function removeFile(f) {
-      if (!FL.confirm("Remove " + f.path + " from " + share.slug + "?  Its link stops working.")) return;
+      if (!FL.confirm("Remove " + f.path + " from " + share.slug + "?\u00a0 Its link stops working.")) return;
       try {
         var path = f.path.split("/").map(encodeURIComponent).join("/");
         await FL.api("DELETE", "/api/shares/" + encodeURIComponent(share.slug) + "/files/" + path);

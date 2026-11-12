@@ -92,12 +92,12 @@ public struct PortalView: View {
                                 titleVisibility: .visible, presenting: shareToDelete) { share in
                 deleteActions(share)
             } message: { share in
-                Text("Delete \(share.slug)? This cannot be undone.")
+                Text("Delete \(share.slug)?\u{00A0} This cannot be undone.")
             }
             .alert("Rename Link", isPresented: $showRenameAlert) {
                 renameAlertContent
             } message: {
-                Text("Enter a new link name (slug).\u{00A0} Links using the old name will stop working.")
+                Text("Enter a new link name.\u{00A0} Links that use the old name will stop working.")
             }
             .confirmationDialog("Extend Expiration", isPresented: $showExtendDialog,
                                 titleVisibility: .visible, presenting: shareToExtend) { share in
@@ -253,7 +253,7 @@ public struct PortalView: View {
                             Text(filter.rawValue)
                                 .font(.subheadline.bold())
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
+                                .frame(minHeight: 44)
                                 .background(filterMode == filter ? Color.accentColor : Color(UIColor.secondarySystemFill))
                                 .foregroundColor(filterMode == filter ? .white : .primary)
                                 .cornerRadius(16)

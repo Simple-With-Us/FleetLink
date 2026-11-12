@@ -30,6 +30,7 @@ test("one-file shares serve the file at the root; folders list their files in th
   assert.match(html, /href="\/folder\/docs\/">docs\//);
   const sub = await (await call(env, "GET", "/folder/docs/")).text();
   assert.match(sub, /href="\/folder\/docs\/b\.md">b\.md/);
+  assert.match(sub, />Up One Folder</);
   assert.equal((await call(env, "GET", "/folder/docs")).status, 301);
   assert.equal((await call(env, "GET", "/folder/nope.txt")).status, 404);
   const manifest = await callJson(env, "GET", "/folder", { headers: { accept: "application/json" } });
@@ -73,6 +74,7 @@ test("Markdown renders in a sandbox with a nonce policy, and raw=1 returns the s
   assert.equal(body.includes("</script><script>alert(2)"), false);
   assert.match(body, /\\u003c\/script>\\u003cscript>alert\(2\)/);
   assert.match(body, /purify\.min\.js/);
+  assert.match(body, />View the Original</);
   const raw = await call(env, "GET", "/note-1/readme.md?raw=1");
   assert.equal(await raw.text(), evil);
 });
@@ -254,7 +256,9 @@ test("health, well-known documents, assets, and pages", async () => {
   assert.match(await shortcut.text(), /X-Fleet-Token/);
   const missing = await call(env, "GET", "/no-such-share");
   assert.equal(missing.status, 404);
-  assert.match(await missing.text(), /Link not found/);
+  const missingHtml = await missing.text();
+  assert.match(missingHtml, /Link not found/);
+  assert.match(missingHtml, />Back to Home</);
 });
 
 test("signed-in pages render for people and admins", async () => {
