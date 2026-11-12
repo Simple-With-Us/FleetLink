@@ -100,10 +100,10 @@ main { flex: 1 0 auto; min-width: 0; width: 100%; box-sizing: border-box; }
 
 /* Building blocks */
 .narrow { max-width: 30rem; margin: 2rem auto; }
-main:has(.status-card) { display: flex; align-items: center; justify-content: center; }
-.status-card { margin: 0; }
+main:has(.status-card) { display: flex; align-items: center; justify-content: center; padding-top: 2rem; padding-bottom: 2rem; }
 .status-card h1 { margin-top: 0; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem 1.35rem; box-shadow: var(--shadow); margin-bottom: 1.25rem; min-width: 0; max-width: 100%; }
+.card.status-card { margin: 0; }
 .card > h2:first-child, .card > h3:first-child { margin-top: 0; }
 .grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
 .grid-3 { display: grid; gap: 1.25rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -332,7 +332,7 @@ td .rowmenu { position: relative; }
 /* Shares table: selection column, bulk bar, numeric traffic columns. */
 .select-col { width: 3rem; text-align: center; }
 td.select-col, th.select-col { text-align: center; }
-.select-hit { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; cursor: pointer; }
+.select-hit { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: 0; cursor: pointer; }
 .share-select, #share-select-all { width: 1.15rem; height: 1.15rem; min-height: 0; margin: 0; accent-color: var(--brand); }
 .bulk-bar { margin: .5rem 0; padding: .5rem .75rem; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); align-items: center; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -458,7 +458,9 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
     linear-gradient(180deg, #0c1a2e, #12243f);
   }
   .hero-intro, .auth-intro { mix-blend-mode: normal; }
-  .way .icon, .tile .icon, .link-icon { background: #1e3a66; }
+  .way .icon, .tile .icon, .link-icon { background: #1e3a66; color: #9ec1ff; }
+  th.sortable:hover, th.sortable.sort-asc::after, th.sortable.sort-desc::after,
+  .preview-tabs b, .preview-row .mono, .foot nav a:hover { color: #9ec1ff; }
   .meter { background: #1e334c; }
   .preview-bar { background: #10243f; }
   .preview-bar span { background: var(--panel); }

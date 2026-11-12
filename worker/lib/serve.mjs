@@ -76,7 +76,7 @@ function lockPage(env, share, url, wrong) {
   return html(page(env, {
     title: `Password Required: ${title}`,
     head: ogTags({ title: `Password Required: ${title}`, description: "Enter the password to open this link.", url: url.href.split("?")[0], image: preview }) + appClipMeta(env),
-    body: `<section class="narrow card">
+    body: `<section class="narrow card status-card">
       <h1>Password Required</h1>
       <p>This link is locked.  Enter the password to open it.</p>
       ${wrong ? '<p class="notice error" role="alert">That password did not unlock this link.</p>' : ""}

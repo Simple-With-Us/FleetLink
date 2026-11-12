@@ -345,7 +345,7 @@ function privacy(ctx, principal) {
 }
 
 function forbiddenPage(ctx, principal) {
-  return html(page(ctx.env, { title: "Admins Only", principal, body: '<section class="narrow card"><h1>Admins Only</h1><p>This page is for FleetLink admins.</p><p><a class="button" href="/dashboard">Back To Your Dashboard</a></p></section>' }), 403);
+  return html(page(ctx.env, { title: "Admins Only", principal, body: '<section class="narrow card status-card"><h1>Admins Only</h1><p>This page is for FleetLink admins.</p><p><a class="button" href="/dashboard">Back To Your Dashboard</a></p></section>' }), 403);
 }
 
 export function pageRoutes(router) {
