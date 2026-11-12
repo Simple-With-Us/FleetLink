@@ -120,7 +120,7 @@ function dashboard(ctx, principal) {
         </div>
         <div id="share-summary" class="share-summary"></div>
         <div id="share-bulk" class="actions bulk-bar" hidden></div>
-        ${table("share-rows", [['<input type="checkbox" id="share-select-all" aria-label="Select all shares">', "select-col"], ["Slug", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Views", "sortable", "views"], ["Downloads", "sortable", "downloads"], ["Expires", "sortable", "expires"], ["", ""]])}
+        ${table("share-rows", [['<label class="select-hit"><input type="checkbox" id="share-select-all" aria-label="Select all shares"></label>', "select-col"], ["Name", "sortable", "name"], ["Contents", "sortable", "contents"], ["Owner", "hide-sm sortable", "owner"], ["Views", "sortable", "views"], ["Downloads", "sortable", "downloads"], ["Expires", "sortable", "expires"], ["", ""]])}
         <p id="share-empty" class="empty" hidden>Nothing here yet.&#160; Use New Share to make a link.</p>
         <p><button type="button" id="share-more" class="secondary" hidden>Load More</button></p>
 
@@ -291,7 +291,7 @@ function admin(ctx, principal) {
       </section>
       <section id="panel-shares" role="tabpanel" hidden>
         <form id="share-search" class="row"><div><label for="share-q">Find a share</label><input id="share-q" type="search" placeholder="Name or title"></div><div class="end"><button type="submit" class="secondary">Search</button></div></form>
-        ${table("share-rows", [["Slug"], ["Owner"], ["Contents"], ["Expires"], [""]])}
+        ${table("share-rows", [["Name"], ["Owner"], ["Contents"], ["Expires"], [""]])}
         <p id="share-empty" class="empty" hidden>No live shares.</p>
       </section>
       <section id="panel-settings" role="tabpanel" hidden>

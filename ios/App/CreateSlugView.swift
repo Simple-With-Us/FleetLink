@@ -177,7 +177,7 @@ public struct CreateSlugView: View {
                         } header: {
                             Text("Link slug")
                         } footer: {
-                            Text("The slug is the name after the domain, not the preview title or file name. Leave blank for an automatic slug. Use letters, numbers, dots, dashes or underscores (4-64 characters; account owners may use shorter slugs).")
+                            Text("This name comes after the domain, not the preview title or file name.\u{00A0} Leave it blank and FleetLink picks one.\u{00A0} Use letters, numbers, dots, dashes, or underscores (4 to 64 characters).\u{00A0} Account owners may use a shorter name.")
                         }
 
                         if creationMode == .redirect {
@@ -202,12 +202,12 @@ public struct CreateSlugView: View {
                         } else {
                             Section("Files") {
                                 PhotosPicker(selection: $photoItems, maxSelectionCount: 20, matching: .images) {
-                                    Label("Choose photos", systemImage: "photo.on.rectangle")
+                                    Label("Choose Photos", systemImage: "photo.on.rectangle")
                                 }
                                 Button {
                                     showFileImporter = true
                                 } label: {
-                                    Label("Choose files", systemImage: "folder")
+                                    Label("Choose Files", systemImage: "folder")
                                 }
                                 if pendingFiles.isEmpty {
                                     Text("Add one or more files.\u{00A0} A sign-in code in Settings is required to publish.")
@@ -231,6 +231,7 @@ public struct CreateSlugView: View {
                                                     .foregroundColor(.secondary)
                                             }
                                             .buttonStyle(.plain)
+                                            .frame(minWidth: 44, minHeight: 44)
                                             .accessibilityLabel("Remove \(file.name)")
                                         }
                                     }
@@ -248,7 +249,7 @@ public struct CreateSlugView: View {
                                     Label(previewFile == nil ? "Preview picture (optional)" : "Preview: \(previewFile?.name ?? "image")", systemImage: "photo")
                                 }
                                 if previewFile != nil {
-                                    Button("Remove preview picture", role: .destructive) {
+                                    Button("Remove Preview Picture", role: .destructive) {
                                         previewFile = nil
                                         previewItem = nil
                                     }
@@ -275,7 +276,7 @@ public struct CreateSlugView: View {
                         } header: {
                             Text("Options")
                         } footer: {
-                            Text("Publishing uses the sign-in code in Settings.\u{00A0} A custom name on a file share needs an account-owner sign-in.\u{00A0} Short links can use a custom name with either sign-in.\u{00A0} Until you delete it is kept only for an account owner.")
+                            Text("Publishing uses the sign-in code in Settings.\u{00A0} A custom name on a file share needs the account owner to be signed in.\u{00A0} A short link can use a custom name with either sign-in.\u{00A0} Only an account owner can choose Until you delete it.")
                                 .font(.caption)
                         }
 
