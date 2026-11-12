@@ -32,7 +32,7 @@ export function isSocialCrawler(userAgent) {
 
 function statusPage(env, status, title, message, request) {
   if (request && wantsJson(request)) return json({ error: message, status: title }, status);
-  return html(page(env, { title, body: `<section class="narrow card status-card"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a class="button" href="/">Back To Home</a></p></section>` }), status);
+  return html(page(env, { title, body: `<section class="narrow card status-card"><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><p><a class="button" href="/">Back to Home</a></p></section>` }), status);
 }
 
 export const notFoundPage = (env, request) => statusPage(env, 404, "Link not found", "That link does not match a file or a short link.", request);
@@ -152,7 +152,7 @@ ${ogTags({ title, description: share.description || `A note shared on FleetLink.
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.0/github-markdown-light.min.css" media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.0/github-markdown-dark.min.css" media="(prefers-color-scheme: dark)">
 <style nonce="${nonce}">body{box-sizing:border-box;min-width:200px;max-width:980px;margin:0 auto;padding:45px;background:#fff;color:#1f2328}@media (max-width:767px){body{padding:16px}}.raw{display:flex;flex-wrap:wrap;align-items:center;gap:0.35rem 0.8rem;font:16px system-ui,sans-serif;margin:0 0 1rem}.raw a{color:#1d4ed8;display:inline-flex;align-items:center;min-height:44px;padding:0 0.2rem;font-weight:700;text-decoration:none}.raw a:hover{text-decoration:underline}@media (prefers-color-scheme: dark){body{background:#0d1117;color:#e6edf3}.raw a{color:#9ec1ff}}</style>
-</head><body><p class="raw"><span>Shared on FleetLink</span><a href="?raw=1">View The Original</a></p><main id="content" class="markdown-body"><noscript><pre>${escapeHtml(source)}</pre></noscript></main>
+</head><body><p class="raw"><span>Shared on FleetLink</span><a href="?raw=1">View the Original</a></p><main id="content" class="markdown-body"><noscript><pre>${escapeHtml(source)}</pre></noscript></main>
 <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
 <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
 <script nonce="${nonce}">
@@ -281,7 +281,7 @@ function listingPage(env, share, files, dir, url, origin, setCookie) {
   const rows = [];
   if (dir) {
     const up = dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "";
-    rows.push(`<li><a class="folder-link" href="/${escapeHtml(share.slug)}/${up ? `${escapeHtml(up)}/` : ""}">Up one folder</a></li>`);
+    rows.push(`<li><a class="folder-link" href="/${escapeHtml(share.slug)}/${up ? `${escapeHtml(up)}/` : ""}">Up One Folder</a></li>`);
   }
   for (const folder of folders) {
     const href = `/${share.slug}/${dir ? `${dir}/` : ""}${folder.name}/`.split("/").map(encodeURIComponent).join("/");
