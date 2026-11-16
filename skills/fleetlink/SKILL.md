@@ -22,13 +22,13 @@ FleetLink hosts a file, a folder, or a short link at `https://fleetlink.online/<
 
 Never print, log, or commit a credential.  Name the variable only.
 
-- **API token** (`fla_` + 64 hex).  This is what agents use.  A person creates it on `https://fleetlink.online/dashboard#tokens`, or an admin runs `fleet-share tokens create NAME` with the operator secret.  It acts as that person, can be limited (largest file, longest share, no short links, one team), and can be revoked.  Send it as `Authorization: Bearer fla_…` (or `X-Fleet-Token: fla_…`).  Keep it in `FLEETLINK_TOKEN`.
+- **API token** (`fla_` + 64 hex).  This is what agents use.  A person creates it on `https://fleetlink.online/dashboard#tokens`, or an admin runs `fleet-share tokens create NAME` authenticated with their own admin token.  It acts as that person, can be limited (largest file, longest share, no short links, one team), and can be revoked.  Send it as `Authorization: Bearer fla_…` (or `X-Fleet-Token: fla_…`).  Keep it in `FLEETLINK_TOKEN`.
 - **Passkey session.**  People sign in on the website or the iOS app.  Not for scripts.
-- **Operator secret** (`FLEET_ADMIN_SECRET`).  Break-glass for the owner.  It acts as the built-in `operator` admin account.  Send it as `X-Fleet-Admin`.  Do not use it for routine uploads.
+- **Operator break-glass.**  The fleet owner's own user token.  There is no separate operator credential.
 
-The shared agent secret (`X-Fleet-Agent`, `FLEET_AGENT_SECRET`) is retired and answers `401`.  `X-Fleet-Auth` is rejected.  `GET /api/auth/token` is `410`.
+The shared static secrets are retired and the worker no longer reads them: `X-Fleet-Agent`/`FLEET_AGENT_SECRET` and `X-Fleet-Admin`/`FLEET_ADMIN_SECRET` answer `401`.  `X-Fleet-Auth` is rejected.  `GET /api/auth/token` is `410`.
 
-An API token cannot manage the account: creating tokens, passkeys, sessions, and account deletion need a passkey session or the operator secret.
+An API token cannot manage the account: creating tokens, passkeys, sessions, and account deletion need a passkey session or the fleet owner's token.
 
 ## CLI
 
@@ -61,7 +61,7 @@ fleet-share admin fleet [claim] | teams [join TEAM_ID] | stats | users [--search
 fleet-share skill install|update [--check] [--copy] [--copy-targets-only]
 ```
 
-Credential order: `--token`, then `FLEETLINK_TOKEN`, then `FLEETLINK_AUTH_FILE` (or `./fleet-link-auth.env`) with `FLEETLINK_TOKEN=…`, then the saved login, then `FLEET_ADMIN_SECRET` as the operator.  `--operator` forces the operator secret.  `FLEETLINK_DOMAIN` or `--domain` changes the origin.  `--json` prints the API response.
+Credential order: `--token`, then `FLEETLINK_TOKEN`, then `FLEETLINK_AUTH_FILE` (or `./fleet-link-auth.env`) with `FLEETLINK_TOKEN=…`, then the saved login.  Admin and operator actions use the same token route and succeed when the token belongs to an admin or the fleet owner.  `FLEETLINK_DOMAIN` or `--domain` changes the origin.  `--json` prints the API response.
 
 Upload details: a folder keeps its name, so `fleet-share ./report` stores `report/<relative path>`.  `--slug NAME` names the share; running it again with the same name adds files to the share you already own, and someone else's name fails with "already taken".  Without `--slug` the name is 16 random characters.  `--password`, `--title`, `--team TEAM_ID`, and `--team-access edit|view` apply to a new share.  Files upload one at a time, so large folders work within the per-file cap.
 
