@@ -59,7 +59,6 @@ case "$SECRETS_MODE" in
     source "$WORKDIR/secrets.env"
     set +a
     unset INFISICAL_TOKEN
-    require_secret ADMIN_SECRET
     require_secret SESSION_SECRET
     require_secret SENTRY_DSN
     require_secret WEBAUTHN_RP_ID
@@ -153,9 +152,11 @@ if [[ "$SECRETS_MODE" == "infisical" ]]; then
 import json, os, sys, urllib.request
 api, script = sys.argv[1:]
 token = os.environ["CLOUDFLARE_API_TOKEN"]
+# ADMIN_SECRET and FLEET_ADMIN_SECRET are retired (#166): the worker no
+# longer reads them, so publishing them here only re-creates dead bindings
+# on every deploy.  SESSION_SECRET stays: it peppers stored credential
+# hashes and sign-in fails without it.
 values = {
-    "ADMIN_SECRET": os.environ["ADMIN_SECRET"],
-    "FLEET_ADMIN_SECRET": os.environ.get("FLEET_ADMIN_SECRET") or os.environ["ADMIN_SECRET"],
     "SESSION_SECRET": os.environ["SESSION_SECRET"],
     "SENTRY_DSN": os.environ["SENTRY_DSN"],
 }
