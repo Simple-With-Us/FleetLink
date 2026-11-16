@@ -59,7 +59,6 @@ case "$SECRETS_MODE" in
     source "$WORKDIR/secrets.env"
     set +a
     unset INFISICAL_TOKEN
-    require_secret ADMIN_SECRET
     require_secret SESSION_SECRET
     require_secret SENTRY_DSN
     require_secret WEBAUTHN_RP_ID
@@ -150,12 +149,33 @@ if [[ "$SECRETS_MODE" == "infisical" ]]; then
   # Publish secret bindings from the environment.  Values stay in the process
   # environment and are not passed as arguments, logged, or written to the repo.
   python3 - "$API" "$SCRIPT_NAME" <<'PY'
-import json, os, sys, urllib.request
+import json, os, sys, urllib.error, urllib.request
 api, script = sys.argv[1:]
 token = os.environ["CLOUDFLARE_API_TOKEN"]
+# ADMIN_SECRET and FLEET_ADMIN_SECRET are retired (#166): the worker no
+# longer reads them.  Dropping them from values stops re-publishing, but
+# bindings from earlier deploys survive: the upload's keep_bindings carries
+# over unmentioned secret_text bindings and the PUT below only writes the
+# names it lists, so the retired pair must be deleted explicitly.
+for retired_name in ("ADMIN_SECRET", "FLEET_ADMIN_SECRET"):
+    req = urllib.request.Request(
+        f"{api}/workers/scripts/{script}/secrets/{retired_name}",
+        headers={"Authorization": f"Bearer {token}"},
+        method="DELETE",
+    )
+    try:
+        with urllib.request.urlopen(req) as res:
+            body = json.loads(res.read().decode())
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            continue
+        raise
+    if not body.get("success"):
+        raise SystemExit(f"retired secret binding {retired_name} could not be removed")
+    print(f"Removed retired secret binding {retired_name}")
+# SESSION_SECRET stays: it peppers stored credential hashes and sign-in
+# fails without it.
 values = {
-    "ADMIN_SECRET": os.environ["ADMIN_SECRET"],
-    "FLEET_ADMIN_SECRET": os.environ.get("FLEET_ADMIN_SECRET") or os.environ["ADMIN_SECRET"],
     "SESSION_SECRET": os.environ["SESSION_SECRET"],
     "SENTRY_DSN": os.environ["SENTRY_DSN"],
 }
