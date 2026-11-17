@@ -64,3 +64,24 @@ test("deploy.sh can keep the worker's existing bindings and sets the sweep sched
   assert.match(source, /x-fleet-release: \$\{SENTRY_RELEASE\}/);
   assert.doesNotMatch(source, /AGENT_SECRET/);
 });
+
+test("retired-secret cleanup runs in every secrets mode, before the infisical-only publish", () => {
+  const gate = 'if [[ "$SECRETS_MODE" == "infisical" ]]; then';
+  const gateAt = source.indexOf(gate);
+  assert.notEqual(gateAt, -1, "infisical publish gate not found");
+  const before = source.slice(0, gateAt);
+  const inside = source.slice(gateAt);
+  // The deletion loop lives before the mode gate so keep-mode deploys run it;
+  // gating it on the publish branch let keep-mode carry the retired pair forward.
+  assert.match(before, /for retired_name in \("ADMIN_SECRET", "FLEET_ADMIN_SECRET"\):/);
+  assert.doesNotMatch(inside, /for retired_name/);
+  // 404 means already absent; any other failure aborts the deploy.
+  assert.match(before, /if error\.code == 404:\s*\n\s*continue/);
+  assert.match(before, /retired secret binding \{retired_name\} could not be removed/);
+  assert.match(before, /Removed retired secret binding/);
+  // The cleanup needs only the Cloudflare API token, no Infisical secrets.
+  const loopStart = before.indexOf('for retired_name in');
+  const loopBlock = before.slice(before.lastIndexOf("python3", loopStart), gateAt);
+  assert.match(loopBlock, /os\.environ\["CLOUDFLARE_API_TOKEN"\]/);
+  assert.doesNotMatch(loopBlock, /INFISICAL/);
+});
