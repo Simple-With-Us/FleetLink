@@ -94,10 +94,14 @@ test("retired-secret cleanup runs in every secrets mode, before the infisical-on
       shLines.push(line);
     }
   }
-  // Shell conditionals in this script use [[ / [ test syntax; python -c bodies don't match.
-  const opens = shLines.filter(l => /^if \[\[|^if \[ |^case .+ in$|^\s*\w+\s*\(\)\s*\{/.test(l)).length;
-  const closes = shLines.filter(l => /^fi$|^esac$|^\}$/.test(l)).length;
-  assert.equal(opens, closes, "cleanup must not sit inside an unclosed shell conditional or function");
+  // Stack, not totals: a balanced wrapper (if/case/loop/function) around the
+  // cleanup would leave a construct open at the opener even though counts match.
+  const openStack = [];
+  for (const line of shLines) {
+    if (/^\s*(if \[\[|if \[ |case .+ in$|for |while |until |\w+\s*\(\)\s*\{)/.test(line)) openStack.push(line.trim());
+    else if (/^\s*(fi|esac|done|\})$/.test(line)) openStack.pop();
+  }
+  assert.deepEqual(openStack, [], "cleanup must not sit inside a shell conditional, loop, or function");
   // 404 means already absent; any other failure aborts the deploy.
   assert.match(before, /if error\.code == 404:\s*\n\s*continue/);
   assert.match(before, /retired secret binding \{retired_name\} could not be removed/);
