@@ -103,7 +103,11 @@ test("retired-secret cleanup runs in every secrets mode, before the infisical-on
     // Openers match the comment-stripped raw line so quoted patterns like
     // case "$SECRETS_MODE" in still register; self-close checks use the
     // quote-stripped form so prose/strings can't fake a terminator.
-    const line = rawLine.replace(/(^|\s)#.*$/, "");
+    // One pass: quoted spans are preserved as-is (a # inside quotes is not a
+    // comment); only unquoted trailing comments are removed.
+    const noComments = (s) => s.replace(/"[^"]*"|'[^']*'|^#.*$|\s#.*$/g, (m) =>
+      (m.startsWith('"') || m.startsWith("'")) ? m : "");
+    const line = noComments(rawLine);
     const syn = line.replace(/"[^"]*"|'[^']*'/g, "");
     const opener = line.match(/^\s*(if \[\[|if \[ |case .+ in$|for |while |until |\w+\s*\(\)\s*\{)/);
     if (opener) {
