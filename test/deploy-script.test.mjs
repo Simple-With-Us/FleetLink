@@ -98,8 +98,16 @@ test("retired-secret cleanup runs in every secrets mode, before the infisical-on
   // cleanup would leave a construct open at the opener even though counts match.
   const openStack = [];
   for (const line of shLines) {
-    if (/^\s*(if \[\[|if \[ |case .+ in$|for |while |until |\w+\s*\(\)\s*\{)/.test(line)) openStack.push(line.trim());
-    else if (/^\s*(fi|esac|done|\})$/.test(line)) openStack.pop();
+    const opener = line.match(/^\s*(if \[\[|if \[ |case .+ in|for |while |until |\w+\s*\(\)\s*\{)/);
+    if (opener) {
+      // Single-line constructs (for x in a; do ...; done, f() { ...; }) close themselves.
+      const t = opener[1];
+      const selfClosed = (t.startsWith("if") && /\bfi\b/.test(line))
+        || (t.startsWith("case") && /\besac\b/.test(line))
+        || (/^(for |while |until )/.test(t) && /\bdone\b/.test(line))
+        || (t.endsWith("{") && /\}/.test(line));
+      if (!selfClosed) openStack.push(line.trim());
+    } else if (/^\s*(fi|esac|done|\})$/.test(line)) openStack.pop();
   }
   assert.deepEqual(openStack, [], "cleanup must not sit inside a shell conditional, loop, or function");
   // 404 means already absent; any other failure aborts the deploy.
