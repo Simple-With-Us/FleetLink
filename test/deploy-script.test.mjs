@@ -100,16 +100,20 @@ test("retired-secret cleanup runs in every secrets mode, before the infisical-on
   for (const rawLine of shLines) {
     // Strip quoted strings and trailing comments so keyword matching below
     // only sees shell syntax, never prose containing fi/done/}/esac.
-    const line = rawLine.replace(/"[^"]*"|'[^']*'/g, "").replace(/(^|\s)#.*$/, "");
+    // Openers match the comment-stripped raw line so quoted patterns like
+    // case "$SECRETS_MODE" in still register; self-close checks use the
+    // quote-stripped form so prose/strings can't fake a terminator.
+    const line = rawLine.replace(/(^|\s)#.*$/, "");
+    const syn = line.replace(/"[^"]*"|'[^']*'/g, "");
     const opener = line.match(/^\s*(if \[\[|if \[ |case .+ in$|for |while |until |\w+\s*\(\)\s*\{)/);
     if (opener) {
       // Single-line constructs (for x in a; do ...; done, f() { ...; }) close
       // themselves: the terminator appears as a command token after ; do/then/{.
       const t = opener[1];
-      const selfClosed = (t.startsWith("if") && /[;{]\s*fi\s*;?\s*$/.test(line))
-        || (t.startsWith("case") && /[;{]\s*esac\s*;?\s*$/.test(line))
-        || (/^(for |while |until )/.test(t) && /[;{]\s*done\s*;?\s*$/.test(line))
-        || (t.endsWith("{") && /\}\s*;?\s*$/.test(line));
+      const selfClosed = (t.startsWith("if") && /[;{]\s*fi\s*;?\s*$/.test(syn))
+        || (t.startsWith("case") && /[;{]\s*esac\s*;?\s*$/.test(syn))
+        || (/^(for |while |until )/.test(t) && /[;{]\s*done\s*;?\s*$/.test(syn))
+        || (t.endsWith("{") && /\}\s*;?\s*$/.test(syn));
       if (!selfClosed) openStack.push(line.trim());
     } else if (/^\s*(fi|esac|done|\})$/.test(line)) openStack.pop();
   }
