@@ -75,6 +75,29 @@ test("retired-secret cleanup runs in every secrets mode, before the infisical-on
   // gating it on the publish branch let keep-mode carry the retired pair forward.
   assert.match(before, /for retired_name in \("ADMIN_SECRET", "FLEET_ADMIN_SECRET"\):/);
   assert.doesNotMatch(inside, /for retired_name/);
+  // It is top-level, not hidden in an uncalled function or another mode branch:
+  // its heredoc opener starts at column 0 and every shell conditional/function
+  // opened before it is closed before it.
+  const cleanupLoopAt = before.indexOf('for retired_name in');
+  assert.ok(cleanupLoopAt > 0);
+  const opener = before.slice(0, cleanupLoopAt).match(/^python3 - "\$API" "\$SCRIPT_NAME" <<'PY'$/m);
+  assert.ok(opener, "cleanup heredoc must start at column 0 (top-level)");
+  // Walk shell lines with heredoc bodies skipped: every if/case/function
+  // opened before the cleanup opener must be closed before it.
+  const shLines = [];
+  {
+    let hd = null;
+    for (const line of before.slice(0, opener.index).split("\n")) {
+      if (hd) { if (line === hd) hd = null; continue; }
+      const m = line.match(/<<'?([A-Z]+)'?/);
+      if (m) { hd = m[1]; continue; }
+      shLines.push(line);
+    }
+  }
+  // Shell conditionals in this script use [[ / [ test syntax; python -c bodies don't match.
+  const opens = shLines.filter(l => /^if \[\[|^if \[ |^case .+ in$|^\s*\w+\s*\(\)\s*\{/.test(l)).length;
+  const closes = shLines.filter(l => /^fi$|^esac$|^\}$/.test(l)).length;
+  assert.equal(opens, closes, "cleanup must not sit inside an unclosed shell conditional or function");
   // 404 means already absent; any other failure aborts the deploy.
   assert.match(before, /if error\.code == 404:\s*\n\s*continue/);
   assert.match(before, /retired secret binding \{retired_name\} could not be removed/);
