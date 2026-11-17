@@ -97,15 +97,19 @@ test("retired-secret cleanup runs in every secrets mode, before the infisical-on
   // Stack, not totals: a balanced wrapper (if/case/loop/function) around the
   // cleanup would leave a construct open at the opener even though counts match.
   const openStack = [];
-  for (const line of shLines) {
-    const opener = line.match(/^\s*(if \[\[|if \[ |case .+ in|for |while |until |\w+\s*\(\)\s*\{)/);
+  for (const rawLine of shLines) {
+    // Strip quoted strings and trailing comments so keyword matching below
+    // only sees shell syntax, never prose containing fi/done/}/esac.
+    const line = rawLine.replace(/"[^"]*"|'[^']*'/g, "").replace(/(^|\s)#.*$/, "");
+    const opener = line.match(/^\s*(if \[\[|if \[ |case .+ in$|for |while |until |\w+\s*\(\)\s*\{)/);
     if (opener) {
-      // Single-line constructs (for x in a; do ...; done, f() { ...; }) close themselves.
+      // Single-line constructs (for x in a; do ...; done, f() { ...; }) close
+      // themselves: the terminator appears as a command token after ; do/then/{.
       const t = opener[1];
-      const selfClosed = (t.startsWith("if") && /\bfi\b/.test(line))
-        || (t.startsWith("case") && /\besac\b/.test(line))
-        || (/^(for |while |until )/.test(t) && /\bdone\b/.test(line))
-        || (t.endsWith("{") && /\}/.test(line));
+      const selfClosed = (t.startsWith("if") && /[;{]\s*fi\s*;?\s*$/.test(line))
+        || (t.startsWith("case") && /[;{]\s*esac\s*;?\s*$/.test(line))
+        || (/^(for |while |until )/.test(t) && /[;{]\s*done\s*;?\s*$/.test(line))
+        || (t.endsWith("{") && /\}\s*;?\s*$/.test(line));
       if (!selfClosed) openStack.push(line.trim());
     } else if (/^\s*(fi|esac|done|\})$/.test(line)) openStack.pop();
   }
