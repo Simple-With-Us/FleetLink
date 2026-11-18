@@ -59,7 +59,6 @@ case "$SECRETS_MODE" in
     source "$WORKDIR/secrets.env"
     set +a
     unset INFISICAL_TOKEN
-    require_secret ADMIN_SECRET
     require_secret SESSION_SECRET
     require_secret SENTRY_DSN
     require_secret WEBAUTHN_RP_ID
@@ -146,6 +145,36 @@ else:
     print("Script uploaded")
 ' <<<"$UPLOAD"
 
+# ADMIN_SECRET and FLEET_ADMIN_SECRET are retired (#166): the worker no
+# longer reads them.  keep_bindings carries unmentioned secret_text bindings
+# across every upload, so the retired pair must be deleted explicitly in
+# EVERY secrets mode - gating this on the infisical publish branch let
+# keep-mode deploys skip it and carry the retired pair forward.  This needs
+# only the Cloudflare API token, so it runs before the mode check.  A 404
+# means the binding is already absent; any other failure aborts the deploy
+# rather than silently keeping a retired credential.
+python3 - "$API" "$SCRIPT_NAME" <<'PY'
+import json, os, sys, urllib.error, urllib.request
+api, script = sys.argv[1:]
+token = os.environ["CLOUDFLARE_API_TOKEN"]
+for retired_name in ("ADMIN_SECRET", "FLEET_ADMIN_SECRET"):
+    req = urllib.request.Request(
+        f"{api}/workers/scripts/{script}/secrets/{retired_name}",
+        headers={"Authorization": f"Bearer {token}"},
+        method="DELETE",
+    )
+    try:
+        with urllib.request.urlopen(req) as res:
+            body = json.loads(res.read().decode())
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            continue
+        raise
+    if not body.get("success"):
+        raise SystemExit(f"retired secret binding {retired_name} could not be removed")
+    print(f"Removed retired secret binding {retired_name}")
+PY
+
 if [[ "$SECRETS_MODE" == "infisical" ]]; then
   # Publish secret bindings from the environment.  Values stay in the process
   # environment and are not passed as arguments, logged, or written to the repo.
@@ -153,9 +182,9 @@ if [[ "$SECRETS_MODE" == "infisical" ]]; then
 import json, os, sys, urllib.request
 api, script = sys.argv[1:]
 token = os.environ["CLOUDFLARE_API_TOKEN"]
+# SESSION_SECRET stays: it peppers stored credential hashes and sign-in
+# fails without it.
 values = {
-    "ADMIN_SECRET": os.environ["ADMIN_SECRET"],
-    "FLEET_ADMIN_SECRET": os.environ.get("FLEET_ADMIN_SECRET") or os.environ["ADMIN_SECRET"],
     "SESSION_SECRET": os.environ["SESSION_SECRET"],
     "SENTRY_DSN": os.environ["SENTRY_DSN"],
 }
