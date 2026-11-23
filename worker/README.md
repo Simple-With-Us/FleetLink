@@ -16,7 +16,7 @@
 | Module | Job |
 | --- | --- |
 | `schema.mjs`, `db.mjs` | Migrations and small D1 helpers. |
-| `auth.mjs` | Operator secret, API tokens, and sessions to a principal; `assertSameOrigin`. |
+| `auth.mjs` | API tokens and sessions to a principal; `assertSameOrigin`. |
 | `policy.mjs` | `shareAccess` and `requireShareAccess`: owner, team role, or admin. |
 | `shares.mjs` | Create, upload, rename, renew, delete, list; limits, expiry, and slug rules. |
 | `serve.mjs` | Public links: files, folder listings, Markdown, passwords, short links, sandbox headers. |
