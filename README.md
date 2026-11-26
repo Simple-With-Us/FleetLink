@@ -1,3 +1,5 @@
+<p><img src="assets/icon-master.png" alt="FleetLink logo" width="96" height="96"></p>
+
 # FleetLink
 
 Share a file, a folder, or a short link that expires on its own.  FleetLink is a multi-user service on Cloudflare Workers: people sign in with passkeys, agents act through their own API tokens, teams share a space for links, and every share has an owner who controls it.
