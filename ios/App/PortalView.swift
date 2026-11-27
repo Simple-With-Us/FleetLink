@@ -764,6 +764,7 @@ private struct ShareManageSheet: View {
             }
             .navigationTitle("Manage \(share.slug)")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Discard", action: onDismiss)
@@ -782,6 +783,7 @@ private struct ShareManageSheet: View {
     }
 
     private func saveChanges() {
+        guard !isSaving else { return }
         isSaving = true
         errorMessage = nil
         Task {
