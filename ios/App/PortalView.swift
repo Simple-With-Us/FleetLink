@@ -770,6 +770,7 @@ private struct ShareManageSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Discard") {
                         saveTask?.cancel()
+                        saveTask = nil
                         onDismiss()
                     }
                 }
@@ -807,6 +808,9 @@ private struct ShareManageSheet: View {
                 host: serverHost,
                 token: token
             )
+            // Discard cancels this task and closes the sheet itself;  a cancelled save must not
+            // dismiss again or show a failure for the request it abandoned.
+            guard !Task.isCancelled else { return }
             isSaving = false
             if ok {
                 onDismiss()
