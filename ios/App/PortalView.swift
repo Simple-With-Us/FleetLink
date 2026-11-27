@@ -676,6 +676,7 @@ private struct ShareManageSheet: View {
     @State private var passwordProtected: Bool
     @State private var passwordInput: String = ""
     @State private var isSaving: Bool = false
+    @State private var saveTask: Task<Void, Never>? = nil
     @State private var errorMessage: String? = nil
 
     init(share: PortalShare, portalManager: PortalManager, serverHost: String, token: String, onDismiss: @escaping () -> Void) {
@@ -767,8 +768,10 @@ private struct ShareManageSheet: View {
             .interactiveDismissDisabled(isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Discard", action: onDismiss)
-                        .disabled(isSaving)
+                    Button("Discard") {
+                        saveTask?.cancel()
+                        onDismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if isSaving {
@@ -786,7 +789,7 @@ private struct ShareManageSheet: View {
         guard !isSaving else { return }
         isSaving = true
         errorMessage = nil
-        Task {
+        saveTask = Task {
             let teamId = isTeam ? selectedTeamId : nil
             let clearPassword = share.password_protected && !passwordProtected
             let newPassword = passwordProtected && !passwordInput.isEmpty ? passwordInput : nil
