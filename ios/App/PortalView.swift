@@ -761,27 +761,21 @@ private struct ShareManageSheet: View {
                     TextField("Description", text: $description)
                 }
 
-                Section {
-                    Button(action: saveChanges) {
-                        HStack {
-                            Spacer()
-                            if isSaving {
-                                ProgressView()
-                                    .padding(.trailing, 4)
-                            }
-                            Text("Save Changes")
-                                .bold()
-                            Spacer()
-                        }
-                    }
-                    .disabled(isSaving)
-                }
             }
             .navigationTitle("Manage \(share.slug)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done", action: onDismiss)
+                    Button("Discard", action: onDismiss)
+                        .disabled(isSaving)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Button("Save", action: saveChanges)
+                            .bold()
+                    }
                 }
             }
         }
