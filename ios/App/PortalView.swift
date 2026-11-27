@@ -676,6 +676,7 @@ private struct ShareManageSheet: View {
     @State private var passwordProtected: Bool
     @State private var passwordInput: String = ""
     @State private var isSaving: Bool = false
+    @State private var saveTask: Task<Void, Never>? = nil
     @State private var errorMessage: String? = nil
 
     init(share: PortalShare, portalManager: PortalManager, serverHost: String, token: String, onDismiss: @escaping () -> Void) {
@@ -761,36 +762,35 @@ private struct ShareManageSheet: View {
                     TextField("Description", text: $description)
                 }
 
-                Section {
-                    Button(action: saveChanges) {
-                        HStack {
-                            Spacer()
-                            if isSaving {
-                                ProgressView()
-                                    .padding(.trailing, 4)
-                            }
-                            Text("Save Changes")
-                                .bold()
-                            Spacer()
-                        }
-                    }
-                    .disabled(isSaving)
-                }
             }
             .navigationTitle("Manage \(share.slug)")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done", action: onDismiss)
+                    Button("Discard") {
+                        saveTask?.cancel()
+                        saveTask = nil
+                        onDismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Button("Save", action: saveChanges)
+                            .bold()
+                    }
                 }
             }
         }
     }
 
     private func saveChanges() {
+        guard !isSaving else { return }
         isSaving = true
         errorMessage = nil
-        Task {
+        saveTask = Task {
             let teamId = isTeam ? selectedTeamId : nil
             let clearPassword = share.password_protected && !passwordProtected
             let newPassword = passwordProtected && !passwordInput.isEmpty ? passwordInput : nil
@@ -808,6 +808,9 @@ private struct ShareManageSheet: View {
                 host: serverHost,
                 token: token
             )
+            // Discard cancels this task and closes the sheet itself;  a cancelled save must not
+            // dismiss again or show a failure for the request it abandoned.
+            guard !Task.isCancelled else { return }
             isSaving = false
             if ok {
                 onDismiss()
