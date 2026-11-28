@@ -47,3 +47,7 @@ Recipients stay inside the closing bracket and use the destination's real mentio
 - Sessions, API tokens, and invite codes are stored only as peppered hashes.
 - workers.dev and preview URLs off; Workers Logs observability off (share passwords can travel in URLs).
 - Secrets are Worker secret bindings, never in code.  Never print them.
+
+## No secrets in files
+
+All secrets live only in Infisical. Never put a secret in a `.env`, `.vars`, `.dev.vars`, `.prod.vars` or any similar file, tracked or untracked, in any repo, ever. Read secrets from Infisical at run time through this repo's documented reader. Only `*.example`, `*.sample` and `*.template` files with empty or placeholder values may be committed. `.gitignore` blocks these file names and the `No env files` CI check fails any PR that tracks one. If a secret file is ever committed, delete it from the tree right away, rotate every value in it, and treat a history purge as a separate owner decision.
