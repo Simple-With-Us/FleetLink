@@ -30,6 +30,8 @@ e2e/screenshots/
 *.vars.*
 *.env.*
 .envrc
+*.envrc
+*.envrc.*
 !*.example
 !*.sample
 !*.template
