@@ -23,7 +23,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request_review' &&
-       github.event.review.user.type == 'Bot' &&
+       contains(fromJSON('["bot", "Bot"]'), github.event.review.user.type) &&
        github.event.pull_request.head.repo.full_name == github.repository)
     uses: Simple-With-Us/AI-Fleet-Coordinator/.github/workflows/claude-code-autofix-reusable.yml@a4c48f013a2108be517ee933dccb1b37e9403920
     secrets:
